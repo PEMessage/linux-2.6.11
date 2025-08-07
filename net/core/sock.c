@@ -138,12 +138,27 @@
 #define SK_RMEM_MAX		(_SK_MEM_OVERHEAD * _SK_MEM_PACKETS)
 
 /* Run time adjustable parameters. */
+/**
+ * 传输控制块发送缓冲区大小上限。
+ */
 __u32 sysctl_wmem_max = SK_WMEM_MAX;
+/**
+ * 传输控制块接收缓冲区大小上限。
+ */
 __u32 sysctl_rmem_max = SK_RMEM_MAX;
+/**
+ * 传输控制块发送缓冲区大小默认值。
+ */
 __u32 sysctl_wmem_default = SK_WMEM_MAX;
+/**
+ * 传输控制块接收缓冲区大小默认值。
+ */
 __u32 sysctl_rmem_default = SK_RMEM_MAX;
 
 /* Maximal space eaten by iovec or ancilliary data plus some space */
+/**
+ * 每个传输控制控制块辅助缓冲区上限。通常使用sock_kmalloc分配。
+ */
 int sysctl_optmem_max = sizeof(unsigned long)*(2*UIO_MAXIOV + 512);
 
 static int sock_set_timeout(long *timeo_p, char __user *optval, int optlen)
@@ -617,23 +632,30 @@ static kmem_cache_t *sk_cachep;
  *	private slabcaches have different sizes of the generic struct sock.
  *	1 has been kept as a way to say sizeof(struct sock).
  */
+/**
+ * 分配传输控制块
+ */
 struct sock *sk_alloc(int family, int priority, int zero_it, kmem_cache_t *slab)
 {
 	struct sock *sk = NULL;
 
-	if (!slab)
+	if (!slab)/* 如果传输层没有指定缓存分配区，则默认使用sk_cachep */
 		slab = sk_cachep;
+	/**
+	 * 在指定的分配区中，用指定的分配参数分配传输控制块。
+	 */
 	sk = kmem_cache_alloc(slab, priority);
 	if (sk) {
-		if (zero_it) {
+		if (zero_it) {/* 需要初始化它 */
 			memset(sk, 0,
 			       zero_it == 1 ? sizeof(struct sock) : zero_it);
 			sk->sk_family = family;
 			sock_lock_init(sk);
 		}
+		/* 释放时需要使用 */
 		sk->sk_slab = slab;
 		
-		if (security_sk_alloc(sk, family, priority)) {
+		if (security_sk_alloc(sk, family, priority)) {/* 安全审计，如果失败则释放传输层接口 */
 			kmem_cache_free(slab, sk);
 			sk = NULL;
 		}
@@ -641,29 +663,35 @@ struct sock *sk_alloc(int family, int priority, int zero_it, kmem_cache_t *slab)
 	return sk;
 }
 
+/**
+ * 释放传输层接口
+ */
 void sk_free(struct sock *sk)
 {
 	struct sk_filter *filter;
 	struct module *owner = sk->sk_owner;
 
-	if (sk->sk_destruct)
+	if (sk->sk_destruct)/* 首先调用回调函数，释放相关资源 */
 		sk->sk_destruct(sk);
 
+	/* 如果设置了过滤器，则释放过滤器 */
 	filter = sk->sk_filter;
 	if (filter) {
 		sk_filter_release(sk, filter);
 		sk->sk_filter = NULL;
 	}
 
+	/* 关闭数据包时间戳 */
 	sock_disable_timestamp(sk);
 
+	/* 警告，有内存方面的泄漏 */
 	if (atomic_read(&sk->sk_omem_alloc))
 		printk(KERN_DEBUG "%s: optmem leakage (%d bytes) detected.\n",
 		       __FUNCTION__, atomic_read(&sk->sk_omem_alloc));
 
-	security_sk_free(sk);
-	kmem_cache_free(sk->sk_slab, sk);
-	module_put(owner);
+	security_sk_free(sk);/* 安全审计相关 */
+	kmem_cache_free(sk->sk_slab, sk);/* 将传输层接口释放给内存子系统 */
+	module_put(owner);/* 递减模块引用计数 */
 }
 
 void __init sk_init(void)
@@ -692,25 +720,29 @@ void __init sk_init(void)
 /* 
  * Write buffer destructor automatically called from kfree_skb. 
  */
+/**
+ * TCP发送缓冲skb释放回调钩子。
+ */
 void sock_wfree(struct sk_buff *skb)
 {
 	struct sock *sk = skb->sk;
 
 	/* In case it might be waiting for more memory. */
-	atomic_sub(skb->truesize, &sk->sk_wmem_alloc);
-	if (!sk->sk_use_write_queue)
+	atomic_sub(skb->truesize, &sk->sk_wmem_alloc);/* 递减发送缓冲数量 */
+	if (!sk->sk_use_write_queue)/* 只配等待内存缓冲区的线程 */
 		sk->sk_write_space(sk);
-	sock_put(sk);
+	sock_put(sk);/* 递减套接口引用计数 */
 }
 
 /* 
  * Read buffer destructor automatically called from kfree_skb. 
  */
+/* 当接收到的udp报文被释放时，回调此函数 */
 void sock_rfree(struct sk_buff *skb)
 {
 	struct sock *sk = skb->sk;
 
-	atomic_sub(skb->truesize, &sk->sk_rmem_alloc);
+	atomic_sub(skb->truesize, &sk->sk_rmem_alloc);/* 减少接收缓存数量 */
 }
 
 
@@ -737,12 +769,17 @@ unsigned long sock_i_ino(struct sock *sk)
 /*
  * Allocate a skb from the socket's send buffer.
  */
+/**
+ * 分配片段所用的缓冲区。
+ * 在TCP中，仅仅用于构建SYN+ACK时使用。发送一般的报文使用sk_stream_alloc_pskb函数。
+ */
 struct sk_buff *sock_wmalloc(struct sock *sk, unsigned long size, int force, int priority)
 {
+	/* 如果是强制进行分配，或者发送缓冲区没有达到上限，则分配缓冲区 */
 	if (force || atomic_read(&sk->sk_wmem_alloc) < sk->sk_sndbuf) {
-		struct sk_buff * skb = alloc_skb(size, priority);
+		struct sk_buff * skb = alloc_skb(size, priority);/* 根据指定的参数分配缓冲区 */
 		if (skb) {
-			skb_set_owner_w(skb, sk);
+			skb_set_owner_w(skb, sk);/* 如果分配成功则设置skb的owner为当前套接口 */
 			return skb;
 		}
 	}
@@ -767,19 +804,22 @@ struct sk_buff *sock_rmalloc(struct sock *sk, unsigned long size, int force, int
 /* 
  * Allocate a memory block from the socket's option memory buffer.
  */ 
+/**
+ * 为socket分配选项有关的内存。
+ */
 void *sock_kmalloc(struct sock *sk, int size, int priority)
 {
-	if ((unsigned)size <= sysctl_optmem_max &&
-	    atomic_read(&sk->sk_omem_alloc) + size < sysctl_optmem_max) {
+	if ((unsigned)size <= sysctl_optmem_max && /* 本次分配未超过上限 */
+	    atomic_read(&sk->sk_omem_alloc) + size < sysctl_optmem_max) {/* 总分配空间也没有超过上限，这里进行两次判断是为了避免溢出 */
 		void *mem;
 		/* First do the add, to avoid the race if kmalloc
  		 * might sleep.
 		 */
-		atomic_add(size, &sk->sk_omem_alloc);
-		mem = kmalloc(size, priority);
+		atomic_add(size, &sk->sk_omem_alloc);/* 累计选项分配的内存 */
+		mem = kmalloc(size, priority);/* 分配内存 */
 		if (mem)
 			return mem;
-		atomic_sub(size, &sk->sk_omem_alloc);
+		atomic_sub(size, &sk->sk_omem_alloc);/* 分配失败，恢复计数 */
 	}
 	return NULL;
 }
@@ -787,36 +827,41 @@ void *sock_kmalloc(struct sock *sk, int size, int priority)
 /*
  * Free an option memory block.
  */
+/* 释放由sock_kmalloc分配的内存 */
 void sock_kfree_s(struct sock *sk, void *mem, int size)
 {
-	kfree(mem);
-	atomic_sub(size, &sk->sk_omem_alloc);
+	kfree(mem);/* 释放内存 */
+	atomic_sub(size, &sk->sk_omem_alloc);/* 递减分配计数 */
 }
 
 /* It is almost wait_for_tcp_memory minus release_sock/lock_sock.
    I think, these locks should be removed for datagram sockets.
  */
+/**
+ * 当发送缓存区达到上限时，等待发送缓冲区可用。
+ */
 static long sock_wait_for_wmem(struct sock * sk, long timeo)
 {
 	DEFINE_WAIT(wait);
 
-	clear_bit(SOCK_ASYNC_NOSPACE, &sk->sk_socket->flags);
+	clear_bit(SOCK_ASYNC_NOSPACE, &sk->sk_socket->flags);/* ?? */
 	for (;;) {
-		if (!timeo)
+		if (!timeo)/* 超时时间到，退出 */
 			break;
-		if (signal_pending(current))
+		if (signal_pending(current))/* 被信号唤醒，退出 */
 			break;
 		set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
+		/* 将当前线程挂到等待队列上 */
 		prepare_to_wait(sk->sk_sleep, &wait, TASK_INTERRUPTIBLE);
-		if (atomic_read(&sk->sk_wmem_alloc) < sk->sk_sndbuf)
+		if (atomic_read(&sk->sk_wmem_alloc) < sk->sk_sndbuf)/* 发送缓冲区限额已经可用，退出 */
 			break;
-		if (sk->sk_shutdown & SEND_SHUTDOWN)
+		if (sk->sk_shutdown & SEND_SHUTDOWN)/* 发送端已经关闭，不必再分配内存了 */
 			break;
-		if (sk->sk_err)
+		if (sk->sk_err)/* 发生了致命错误，退出 */
 			break;
-		timeo = schedule_timeout(timeo);
+		timeo = schedule_timeout(timeo);/* 睡眠，等待超时唤醒或者被其他线程唤醒 */
 	}
-	finish_wait(sk->sk_sleep, &wait);
+	finish_wait(sk->sk_sleep, &wait);/* 将当前线程从等待列队中摘除 */
 	return timeo;
 }
 
@@ -835,46 +880,46 @@ static struct sk_buff *sock_alloc_send_pskb(struct sock *sk,
 	long timeo;
 	int err;
 
-	gfp_mask = sk->sk_allocation;
+	gfp_mask = sk->sk_allocation;/* 调整内存分配标志，加__GFP_REPEAT是为了尽可能的分配成功 */
 	if (gfp_mask & __GFP_WAIT)
 		gfp_mask |= __GFP_REPEAT;
 
-	timeo = sock_sndtimeo(sk, noblock);
+	timeo = sock_sndtimeo(sk, noblock);/* 计算超时值 */
 	while (1) {
-		err = sock_error(sk);
+		err = sock_error(sk);/* 如果发生过致命错误，则退出 */
 		if (err != 0)
 			goto failure;
 
 		err = -EPIPE;
-		if (sk->sk_shutdown & SEND_SHUTDOWN)
+		if (sk->sk_shutdown & SEND_SHUTDOWN)/* 如果关闭了发送通道，也退出 */
 			goto failure;
 
-		if (atomic_read(&sk->sk_wmem_alloc) < sk->sk_sndbuf) {
-			skb = alloc_skb(header_len, sk->sk_allocation);
+		if (atomic_read(&sk->sk_wmem_alloc) < sk->sk_sndbuf) {/* 为发送分配的缓冲区还没有超过限制，可以直接分配内存 */
+			skb = alloc_skb(header_len, sk->sk_allocation);/* 分配第一个skb */
 			if (skb) {
 				int npages;
 				int i;
 
 				/* No pages, we're done... */
-				if (!data_len)
+				if (!data_len)/* 如果不需要分配S/G内存，则退出 */
 					break;
 
-				npages = (data_len + (PAGE_SIZE - 1)) >> PAGE_SHIFT;
+				npages = (data_len + (PAGE_SIZE - 1)) >> PAGE_SHIFT;/* 计算要分配的页面数 */
 				skb->truesize += data_len;
 				skb_shinfo(skb)->nr_frags = npages;
-				for (i = 0; i < npages; i++) {
+				for (i = 0; i < npages; i++) {/* 为S/G分配多个页面 */
 					struct page *page;
 					skb_frag_t *frag;
 
 					page = alloc_pages(sk->sk_allocation, 0);
-					if (!page) {
+					if (!page) {/* 单个页面分配失败，释放skb */
 						err = -ENOBUFS;
 						skb_shinfo(skb)->nr_frags = i;
 						kfree_skb(skb);
 						goto failure;
 					}
 
-					frag = &skb_shinfo(skb)->frags[i];
+					frag = &skb_shinfo(skb)->frags[i];/* 页面分配成功，更新S/G */
 					frag->page = page;
 					frag->page_offset = 0;
 					frag->size = (data_len >= PAGE_SIZE ?
@@ -889,16 +934,19 @@ static struct sk_buff *sock_alloc_send_pskb(struct sock *sk,
 			err = -ENOBUFS;
 			goto failure;
 		}
+		/* 运行到这里，说明内存分配达到了上限，暂时不能分配，设置标志表示内存不足 */
 		set_bit(SOCK_ASYNC_NOSPACE, &sk->sk_socket->flags);
 		set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
 		err = -EAGAIN;
-		if (!timeo)
+		if (!timeo)/* 非阻塞方式，退出 */
 			goto failure;
-		if (signal_pending(current))
+		if (signal_pending(current))/* 被信号打断，退出 */
 			goto interrupted;
+		/* 等待其他线程释放内存，唤醒本线程后重试 */
 		timeo = sock_wait_for_wmem(sk, timeo);
 	}
 
+	/* 完全成功，设置skb的owner为本套接口后退出。 */
 	skb_set_owner_w(skb, sk);
 	return skb;
 
@@ -909,6 +957,9 @@ failure:
 	return NULL;
 }
 
+/**
+ * 用于分配单一缓冲区或者一系列片段的第一个片段。主要是用于发送
+ */
 struct sk_buff *sock_alloc_send_skb(struct sock *sk, unsigned long size, 
 				    int noblock, int *errcode)
 {
@@ -931,18 +982,20 @@ static void __lock_sock(struct sock *sk)
 	finish_wait(&sk->sk_lock.wq, &wait);
 }
 
+/* 当释放传输控制块时，处理后备队列中的数据 */
 static void __release_sock(struct sock *sk)
 {
-	struct sk_buff *skb = sk->sk_backlog.head;
+	struct sk_buff *skb = sk->sk_backlog.head;/* 取后备队列中第一个skb */
 
 	do {
-		sk->sk_backlog.head = sk->sk_backlog.tail = NULL;
-		bh_unlock_sock(sk);
+		sk->sk_backlog.head = sk->sk_backlog.tail = NULL;/* 清空后备队列 */
+		bh_unlock_sock(sk);/* 释放自旋锁，后面再开软中断 */
 
 		do {
 			struct sk_buff *next = skb->next;
 
 			skb->next = NULL;
+			/* 调用传输层的接口处理后备队列中的数据，如复制到用户空间 */
 			sk->sk_backlog_rcv(sk, skb);
 
 			/*
@@ -951,12 +1004,12 @@ static void __release_sock(struct sock *sk)
 			 * This is safe to do because we've taken the backlog
 			 * queue private:
 			 */
-			cond_resched_softirq();
+			cond_resched_softirq();/* 开软中断，防止软中断被延迟过久 */
 
 			skb = next;
-		} while (skb != NULL);
+		} while (skb != NULL);/* 遍历后备队列中的所有报文 */
 
-		bh_lock_sock(sk);
+		bh_lock_sock(sk);/* 在处理过程中，可能软中断再次向后备队列中加入报文，获取自旋锁后继续判断 */
 	} while((skb = sk->sk_backlog.head) != NULL);
 }
 
@@ -1085,7 +1138,7 @@ ssize_t sock_no_sendpage(struct socket *sock, struct page *page, int offset, siz
 /*
  *	Default Socket Callbacks
  */
-
+/* 唤醒传输控制块sk_sleep队列上的进程。通常当传输状态发生变化时调用。 */
 static void sock_def_wakeup(struct sock *sk)
 {
 	read_lock(&sk->sk_callback_lock);
@@ -1094,6 +1147,7 @@ static void sock_def_wakeup(struct sock *sk)
 	read_unlock(&sk->sk_callback_lock);
 }
 
+/* 当传输控制块上发生错误时，调用此函数唤醒sk_sleep上的进程。 */
 static void sock_def_error_report(struct sock *sk)
 {
 	read_lock(&sk->sk_callback_lock);
@@ -1103,6 +1157,7 @@ static void sock_def_error_report(struct sock *sk)
 	read_unlock(&sk->sk_callback_lock);
 }
 
+/* 当传输控制块上的数据可用时，调用此函数唤醒sk_sleep和fasync_list队列上的进程。 */
 static void sock_def_readable(struct sock *sk, int len)
 {
 	read_lock(&sk->sk_callback_lock);
@@ -1112,6 +1167,7 @@ static void sock_def_readable(struct sock *sk, int len)
 	read_unlock(&sk->sk_callback_lock);
 }
 
+/* 检测发送缓冲区大小，如果可用则唤醒等待的线程，这是默认的唤醒函数。TCP的函数是sk_stream_write_space */
 static void sock_def_write_space(struct sock *sk)
 {
 	read_lock(&sk->sk_callback_lock);
@@ -1137,6 +1193,7 @@ static void sock_def_destruct(struct sock *sk)
 		kfree(sk->sk_protinfo);
 }
 
+/* 当带外数据到达时，向等待的任务发送信号，唤醒等待的任务 */
 void sk_send_sigurg(struct sock *sk)
 {
 	if (sk->sk_socket && sk->sk_socket->file)
@@ -1213,27 +1270,34 @@ void sock_init_data(struct socket *sock, struct sock *sk)
 	atomic_set(&sk->sk_refcnt, 1);
 }
 
+/* 用于进程上下文，用于锁住传输控制块 */
 void fastcall lock_sock(struct sock *sk)
 {
+	/* 调试信息 */
 	might_sleep();
+	/* 锁住软中断及自旋锁，判断是否能够获得传输控制层的锁 */
 	spin_lock_bh(&(sk->sk_lock.slock));
-	if (sk->sk_lock.owner)
+	if (sk->sk_lock.owner)/* 如果锁已经被其他进程获得，则加入等待队列 */
 		__lock_sock(sk);
+	/* 运行到这里，说明其他进程已经释放锁，设置owner为1，表示锁已经被进程获得 */
 	sk->sk_lock.owner = (void *)1;
+	/* 释放自旋锁并开软中断 */
 	spin_unlock_bh(&(sk->sk_lock.slock));
 }
 
 EXPORT_SYMBOL(lock_sock);
 
+/* 释放传输控制块，用于进程上下文 */
 void fastcall release_sock(struct sock *sk)
 {
+	/* 获取自旋锁并关软中断 */
 	spin_lock_bh(&(sk->sk_lock.slock));
-	if (sk->sk_backlog.tail)
-		__release_sock(sk);
-	sk->sk_lock.owner = NULL;
-        if (waitqueue_active(&(sk->sk_lock.wq)))
-		wake_up(&(sk->sk_lock.wq));
-	spin_unlock_bh(&(sk->sk_lock.slock));
+	if (sk->sk_backlog.tail)/* 后备队列中有数据，在获取锁的过程中由软中断加入 */
+		__release_sock(sk);/* 处理后备队列中的数据 */
+	sk->sk_lock.owner = NULL;/* 此标志表示进程没有获得锁 */
+        if (waitqueue_active(&(sk->sk_lock.wq)))/* 有进程正在等待控制块 */
+		wake_up(&(sk->sk_lock.wq));/* 唤醒等待队列上的锁 */
+	spin_unlock_bh(&(sk->sk_lock.slock));/* 释放自旋锁并开软中断 */
 }
 EXPORT_SYMBOL(release_sock);
 
@@ -1307,7 +1371,7 @@ EXPORT_SYMBOL(sock_common_setsockopt);
 
 void sk_common_release(struct sock *sk)
 {
-	if (sk->sk_prot->destroy)
+	if (sk->sk_prot->destroy)/* 在关闭前进行一些资源清理工作，对UDP来说，回调函数是udp_destroy_sock */
 		sk->sk_prot->destroy(sk);
 
 	/*
@@ -1318,7 +1382,7 @@ void sk_common_release(struct sock *sk)
 	 * A. Remove from hash tables.
 	 */
 
-	sk->sk_prot->unhash(sk);
+	sk->sk_prot->unhash(sk);/* 调用unhash接口将传输控制块从散列表中删除 */
 
 	/*
 	 * In this point socket cannot receive new packets, but it is possible
@@ -1332,16 +1396,16 @@ void sk_common_release(struct sock *sk)
 	 * until the last reference will be released.
 	 */
 
-	sock_orphan(sk);
+	sock_orphan(sk);/* 不再接受报文了 */
 
-	xfrm_sk_free_policy(sk);
+	xfrm_sk_free_policy(sk);/* 防火墙相关，略 */
 
 #ifdef INET_REFCNT_DEBUG
 	if (atomic_read(&sk->sk_refcnt) != 1)
 		printk(KERN_DEBUG "Destruction of the socket %p delayed, c=%d\n",
 		       sk, atomic_read(&sk->sk_refcnt));
 #endif
-	sock_put(sk);
+	sock_put(sk);/* 释放传输控制块 */
 }
 
 EXPORT_SYMBOL(sk_common_release);

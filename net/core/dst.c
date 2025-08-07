@@ -28,12 +28,21 @@
  *    and non-BH context, so local BH disabling is needed.
  * 4) All operations modify state, so a spinlock is used.
  */
+/**
+ * 等待被删除的dst_entry结构组成的链表。
+ * 当dst_gc_timer定时器到期时，执行定时处理钩子函数。
+ * 只有引用计数__refcnt大于0的（不能被直接删除的）表项才被放入该链表内，以避免被直接删除。新表项被插入到链表首部。
+ */
 static struct dst_entry 	*dst_garbage_list;
 #if RT_CACHE_DEBUG >= 2 
 static atomic_t			 dst_total = ATOMIC_INIT(0);
 #endif
 static DEFINE_SPINLOCK(dst_lock);
 
+/**
+ * dst_gc_timer_expires是定时器在到期之前等待的秒数，取值范围在DST_GC_MIN和DST_GC_MAX之间，当定时处理钩子函数dst_run_gc运行而没能清空dst_garbage_list链表时，等待时间增加dst_gc_timer_inc。
+ * 但dst_gc_timer_inc必须在DST_GC_MIN到DST_GC_MAX的范围内。
+ */
 static unsigned long dst_gc_timer_expires;
 static unsigned long dst_gc_timer_inc = DST_GC_MAX;
 static void dst_run_gc(unsigned long);
@@ -42,11 +51,17 @@ static void ___dst_free(struct dst_entry * dst);
 static struct timer_list dst_gc_timer =
 	TIMER_INITIALIZER(dst_run_gc, DST_GC_MIN, 0);
 
+/**
+ * 此垃圾回收定时器周期性地遍历dst_garbage_list链表，利用dst_destroy来删除引用计数为0的表项。
+ */
 static void dst_run_gc(unsigned long dummy)
 {
 	int    delayed = 0;
 	struct dst_entry * dst, **dstp;
 
+	/**
+	 * 锁竞争失败，延后处理。
+	 */
 	if (!spin_trylock(&dst_lock)) {
 		mod_timer(&dst_gc_timer, jiffies + HZ/10);
 		return;
@@ -63,7 +78,13 @@ static void dst_run_gc(unsigned long dummy)
 		}
 		*dstp = dst->next;
 
+		/**
+		 * 引用计数已经变成0，删除它。
+		 */
 		dst = dst_destroy(dst);
+		/**
+		 * 如果child链表中某个节点还被引用，则将节点再次挂入链表，等待下次删除。
+		 */
 		if (dst) {
 			/* NOHASH and still referenced. Unless it is already
 			 * on gc list, invalidate it and add to gc list.
@@ -86,6 +107,9 @@ static void dst_run_gc(unsigned long dummy)
 		dst_gc_timer_inc = DST_GC_MAX;
 		goto out;
 	}
+	/**
+	 * 没有删除所有垃圾DST，重启定时器。
+	 */
 	if ((dst_gc_timer_expires += dst_gc_timer_inc) > DST_GC_MAX)
 		dst_gc_timer_expires = DST_GC_MAX;
 	dst_gc_timer_inc += DST_GC_INC;
@@ -112,17 +136,31 @@ static int dst_discard_out(struct sk_buff *skb)
 	return 0;
 }
 
+/**
+ * 分配一个路由缓存表项。根据所处的环境，可能返回rtable(IPV4)也可能返回rt6_info(IPV6)。
+ */
 void * dst_alloc(struct dst_ops * ops)
 {
 	struct dst_entry * dst;
 
+	/**
+	 * 检查缓存项是否超过限制，如果是，则启动回收过程。
+	 */
 	if (ops->gc && atomic_read(&ops->entries) > ops->gc_thresh) {
 		if (ops->gc())
 			return NULL;
 	}
+	/**
+	 * 为新缓存表项分配空间。
+	 */
 	dst = kmem_cache_alloc(ops->kmem_cachep, SLAB_ATOMIC);
 	if (!dst)
 		return NULL;
+	/**
+	 * 对缓存项的一些字段初始化，尤其重要的是以下字段：
+	 * 		rth->u.dst.input
+	 * 		rth->u.dst.output
+	 */
 	memset(dst, 0, ops->entry_size);
 	atomic_set(&dst->__refcnt, 0);
 	dst->ops = ops;
@@ -230,9 +268,18 @@ static inline void dst_ifdown(struct dst_entry *dst, struct net_device *dev,
 		return;
 
 	if (!unregister) {
+		/**
+		 * 因为设备为down，所以不再能够向该设备发送流量。
+		 * 因而，dst_entry中的input和output程序被分别设置为dst_discard_in和dst_discard_out。
+		 * 这两个程序将送来的任何输入buffer（即它们被要求处理的任意帧）简单丢弃掉。
+		 */
 		dst->input = dst_discard_in;
 		dst->output = dst_discard_out;
 	} else {
+		/**
+		 * 当设备被注销时，对该设备的所有引用都必须被删除。
+		 * dst_ifdown将dst_entry结构和相关的neighbour实例中到该设备的引用都替换为到loopback设备的引用。
+		 */
 		dst->dev = &loopback_dev;
 		dev_hold(&loopback_dev);
 		dev_put(dev);
@@ -244,6 +291,9 @@ static inline void dst_ifdown(struct dst_entry *dst, struct net_device *dev,
 	}
 }
 
+/**
+ * DST子系统处理设备事件的代码。
+ */
 static int dst_dev_event(struct notifier_block *this, unsigned long event, void *ptr)
 {
 	struct net_device *dev = ptr;
@@ -253,6 +303,10 @@ static int dst_dev_event(struct notifier_block *this, unsigned long event, void 
 	case NETDEV_UNREGISTER:
 	case NETDEV_DOWN:
 		spin_lock_bh(&dst_lock);
+		/**
+		 * 遍历由dead dst_entry结构组成的dst_garbage_list链表，对每一项调用dst_ifdown。
+		 * dst_ifdown的最后一个输入参数为要处理的事件。
+		 */
 		for (dst = dst_garbage_list; dst; dst = dst->next) {
 			dst_ifdown(dst, dev, event != NETDEV_DOWN);
 		}
@@ -266,6 +320,9 @@ static struct notifier_block dst_dev_notifier = {
 	.notifier_call	= dst_dev_event,
 };
 
+/**
+ * 初始化DST协议无关路由缓存。由net_dev_init调用。
+ */
 void __init dst_init(void)
 {
 	register_netdevice_notifier(&dst_dev_notifier);

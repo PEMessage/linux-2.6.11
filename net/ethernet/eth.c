@@ -155,7 +155,9 @@ int eth_rebuild_header(struct sk_buff *skb)
  *	assume 802.3 if the type field is short enough to be a length.
  *	This is normal practice and works for any 'now in use' protocol.
  */
- 
+/**
+ * 设置以太网帧类型、协议、长度。
+ */
 unsigned short eth_type_trans(struct sk_buff *skb, struct net_device *dev)
 {
 	struct ethhdr *eth;
@@ -163,15 +165,21 @@ unsigned short eth_type_trans(struct sk_buff *skb, struct net_device *dev)
 	
 	skb->mac.raw=skb->data;
 	skb_pull(skb,ETH_HLEN);
+	/**
+	 * 取得以太网帧头。
+	 */
 	eth = eth_hdr(skb);
 	skb->input_dev = dev;
-	
+
+	/**
+	 * 位0表示是否多播地址。广播地址是特殊的多播地址。当为1时，表示多播，为0时，表示不是多播。
+	 */
 	if(*eth->h_dest&1)
 	{
 		if(memcmp(eth->h_dest,dev->broadcast, ETH_ALEN)==0)
-			skb->pkt_type=PACKET_BROADCAST;
+			skb->pkt_type=PACKET_BROADCAST;/* 广播帧 */
 		else
-			skb->pkt_type=PACKET_MULTICAST;
+			skb->pkt_type=PACKET_MULTICAST;/* 多播帧 */
 	}
 	
 	/*
@@ -184,13 +192,29 @@ unsigned short eth_type_trans(struct sk_buff *skb, struct net_device *dev)
 	 
 	else if(1 /*dev->flags&IFF_PROMISC*/)
 	{
+		/**
+		 * 帧没有发送给当前接收网卡。无论如何，帧不会被立即丢弃，而是被传递给更高一层。
+		 * 可能有嗅探器或者其他爱管闲事的协议需要看一看帧。
+		 */
 		if(memcmp(eth->h_dest,dev->dev_addr, ETH_ALEN))
 			skb->pkt_type=PACKET_OTHERHOST;
 	}
-	
+	/**
+	 * 如果eth_type_trans没有明确的设置skb->pkt_type，它的值最终会是0，即PACKET_HOST。
+	 */
+
+	/**
+	 * 超过1536表示旧协议(一般的协议如ETH_P_IP)
+	 * 大于1536时，值被解释为协议ID，驱动如何找到接收帧的长度呢？
+	 * 不论协议/长度值是小于1500或者大于1536，设备自己保存帧长度到它的寄存器中，驱动可以读它。
+	 * 驱动能够计算每一个帧的长度。
+	 */
 	if (ntohs(eth->h_proto) >= 1536)
 		return eth->h_proto;
-		
+
+	/**
+	 * 接下来处理SNAP(802.3)和LLC(802.2)。
+	 */
 	rawp = skb->data;
 	
 	/*
@@ -266,8 +290,14 @@ static int eth_change_mtu(struct net_device *dev, int new_mtu)
 /*
  * Fill in the fields of the device structure with ethernet-generic values.
  */
+/**
+ * 设备类型初始化:以太网
+ */
 void ether_setup(struct net_device *dev)
 {
+	/**
+	 * 函数仅仅初始化任何以太网卡所共享的字段和函数指针：MTU设为 1500，链路层广播地址设为FF:FF:FF:FF:FF:FF，发送队列长度设为1000个包长度
+	 */
 	dev->change_mtu		= eth_change_mtu;
 	dev->hard_header	= eth_header;
 	dev->rebuild_header 	= eth_rebuild_header;
@@ -301,6 +331,9 @@ EXPORT_SYMBOL(ether_setup);
  * this private data area.
  */
 
+/**
+ * 分配以太网卡设备。
+ */
 struct net_device *alloc_etherdev(int sizeof_priv)
 {
 	return alloc_netdev(sizeof_priv, "eth%d", ether_setup);

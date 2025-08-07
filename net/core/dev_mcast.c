@@ -101,7 +101,9 @@ void dev_mc_upload(struct net_device *dev)
 /*
  *	Delete a device level multicast
  */
- 
+/**
+ * 删除设备的多播地址
+ */
 int dev_mc_delete(struct net_device *dev, void *addr, int alen, int glbl)
 {
 	int err = 0;
@@ -152,7 +154,9 @@ done:
 /*
  *	Add a device level multicast
  */
- 
+/**
+ * 添加设备的多播地址。
+ */
 int dev_mc_add(struct net_device *dev, void *addr, int alen, int glbl)
 {
 	int err = 0;

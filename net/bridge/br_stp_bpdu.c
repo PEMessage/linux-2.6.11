@@ -134,35 +134,48 @@ void br_send_tcn_bpdu(struct net_bridge_port *p)
 static const unsigned char header[6] = {0x42, 0x42, 0x03, 0x00, 0x00, 0x00};
 
 /* NO locks */
+/**
+ * 处理BPDU帧。
+ */
 int br_stp_handle_bpdu(struct sk_buff *skb)
 {
 	struct net_bridge_port *p = skb->dev->br_port;
 	struct net_bridge *br = p->br;
 	unsigned char *buf;
 
-	/* insert into forwarding database after filtering to avoid spoofing */
-	br_fdb_insert(p->br, p, eth_hdr(skb)->h_source, 0);
-
 	/* need at least the 802 and STP headers */
+	/**
+	 * 长度不正确，不是BPDU入帧。
+	 * 或者帧头不是BPDU。
+	 */
 	if (!pskb_may_pull(skb, sizeof(header)+1) ||
 	    memcmp(skb->data, header, sizeof(header)))
 		goto err;
 
+	/**
+	 * 取数据包内容。
+	 */
 	buf = skb_pull(skb, sizeof(header));
 
 	spin_lock_bh(&br->lock);
-	if (p->state == BR_STATE_DISABLED 
-	    || !(br->dev->flags & IFF_UP)
-	    || !br->stp_enabled)
+	if (p->state == BR_STATE_DISABLED  /* 网桥端口被关闭 */
+	    || !(br->dev->flags & IFF_UP)  /* 网桥设备被关闭 */
+	    || !br->stp_enabled)		   /* 没有启用STP */
 		goto out;
 
-	if (buf[0] == BPDU_TYPE_CONFIG) {
+	/**
+	 * LINUX内核仅仅实现了IEEE802.1D STP，它仅仅接收配置BPDU和TCN BPDU。其他BPDU类型将被丢弃。
+	 */
+	if (buf[0] == BPDU_TYPE_CONFIG) {/* 配置BPDU */
 		struct br_config_bpdu bpdu;
 
-		if (!pskb_may_pull(skb, 32))
+		if (!pskb_may_pull(skb, 32))/* 检查配置BPDU长度，不合法则退出。 */
 		    goto out;
 
 		buf = skb->data;
+		/**
+		 * 初始化配置BPDU
+		 */
 		bpdu.topology_change = (buf[1] & 0x01) ? 1 : 0;
 		bpdu.topology_change_ack = (buf[1] & 0x80) ? 1 : 0;
 
@@ -194,10 +207,16 @@ int br_stp_handle_bpdu(struct sk_buff *skb)
 		bpdu.hello_time = br_get_ticks(buf+28);
 		bpdu.forward_delay = br_get_ticks(buf+30);
 
+		/**
+		 * 处理配置BPDU。
+		 */
 		br_received_config_bpdu(p, &bpdu);
 	}
 
-	else if (buf[0] == BPDU_TYPE_TCN) {
+	else if (buf[0] == BPDU_TYPE_TCN) {/* TCN BPDU */
+		/**
+		 * 处理TCP BPDU。
+		 */
 		br_received_tcn_bpdu(p);
 	}
  out:

@@ -47,14 +47,21 @@
 #include <net/udp.h>
 #include <net/ipip.h>
 #include <linux/igmp.h>
-
+/**
+ * 所有和内核注册的L4协议的inet_protocol结构都会插入到一张名为inet_protos的表内
+ */
 struct net_protocol *inet_protos[MAX_INET_PROTOS];
+/**
+ * 读写存取inet_protos表（如inet_add_protocol和inet_del_protocol）是用inet_proto_lock片旋锁来串行化处理。
+ */
 static DEFINE_SPINLOCK(inet_proto_lock);
 
 /*
  *	Add a protocol handler to the hash tables
  */
-
+/**
+ * IPV4基础上的L4协议注册。
+ */
 int inet_add_protocol(struct net_protocol *prot, unsigned char protocol)
 {
 	int hash, ret;

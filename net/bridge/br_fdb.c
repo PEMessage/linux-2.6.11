@@ -26,8 +26,14 @@ static kmem_cache_t *br_fdb_cache;
 static int fdb_insert(struct net_bridge *br, struct net_bridge_port *source,
 		      const unsigned char *addr, int is_local);
 
+/**
+ * 初始化网桥转发数据库
+ */
 void __init br_fdb_init(void)
 {
+	/**
+	 * 简单的创建一个net_bridge_fdb_entry高速缓存。
+	 */
 	br_fdb_cache = kmem_cache_create("bridge_fdb_cache",
 					 sizeof(struct net_bridge_fdb_entry),
 					 0,
@@ -120,6 +126,10 @@ void br_fdb_changeaddr(struct net_bridge_port *p, const unsigned char *newaddr)
 	spin_unlock_bh(&br->hash_lock);
 }
 
+/**
+ * 删除转发数据库中的过期条目。
+ * 由老化时钟调用。
+ */
 void br_fdb_cleanup(unsigned long _data)
 {
 	struct net_bridge *br = (struct net_bridge *)_data;
@@ -149,6 +159,9 @@ void br_fdb_cleanup(unsigned long _data)
 	spin_unlock_bh(&br->hash_lock);
 }
 
+/**
+ * 删除转发数据库中的条目。
+ */
 void br_fdb_delete_by_port(struct net_bridge *br, struct net_bridge_port *p)
 {
 	int i;
@@ -206,6 +219,9 @@ struct net_bridge_fdb_entry *__br_fdb_get(struct net_bridge *br,
 }
 
 /* Interface used by ATM hook that keeps a ref count */
+/**
+ * 搜索与指定地址匹配的转发数据库条目。
+ */
 struct net_bridge_fdb_entry *br_fdb_get(struct net_bridge *br, 
 					unsigned char *addr)
 {
@@ -213,6 +229,10 @@ struct net_bridge_fdb_entry *br_fdb_get(struct net_bridge *br,
 
 	rcu_read_lock();
 	fdb = __br_fdb_get(br, addr);
+	/**
+	 * 当搜索成功时，增加转发条目的引用计数。
+	 * 这是因为外部系统通常会缓存搜索结果，并且不知道外部系统何时结束对条目的引用，因此必须增加引用计数。
+	 */
 	if (fdb) 
 		atomic_inc(&fdb->use_count);
 	rcu_read_unlock();
@@ -227,6 +247,9 @@ static void fdb_rcu_free(struct rcu_head *head)
 }
 
 /* Set entry up for deletion with RCU  */
+/**
+ * 递减转发条目的引用计数。
+ */
 void br_fdb_put(struct net_bridge_fdb_entry *ent)
 {
 	if (atomic_dec_and_test(&ent->use_count))

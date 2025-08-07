@@ -1137,6 +1137,9 @@ svc_sock_update_bufs(struct svc_serv *serv)
 /*
  * Receive the next request on any socket.
  */
+/**
+ * 这个函数的主要作用是在套接字上接受已经到达的请求，并把它放在svc_rqst结构中
+ */
 int
 svc_recv(struct svc_serv *serv, struct svc_rqst *rqstp, long timeout)
 {

@@ -29,26 +29,47 @@
 
 int (*br_should_route_hook) (struct sk_buff **pskb) = NULL;
 
+/**
+ * 网桥初始化代码
+ */
 static int __init br_init(void)
 {
+	/**
+	 * 通过创建一个SLAB缓存来初始化转发数据库。
+	 * 这个缓存用来分配net_bridge_fdb_entry数据结构。
+	 */
 	br_fdb_init();
 
 #ifdef CONFIG_BRIDGE_NETFILTER
 	if (br_netfilter_init())
 		return 1;
 #endif
+
+	/**
+	 * 始化函数指针br_ioctl_hook，因为处理ioctl命令的函数需要它。
+ 	 */
 	brioctl_set(br_ioctl_deviceless_stub);
+	/**
+	 * 初始化函数指针br_handle_frame_hook，这个函数处理入帧BPDU
+	 */
 	br_handle_frame_hook = br_handle_frame;
 
 #if defined(CONFIG_ATM_LANE) || defined(CONFIG_ATM_LANE_MODULE)
 	br_fdb_get_hook = br_fdb_get;
 	br_fdb_put_hook = br_fdb_put;
 #endif
+	/**
+ 	 * 过netdev_chain通知链注册一个回调函数。
+ 	 * 主要是为了监控与网桥绑定的设备事件。
+ 	 */
 	register_netdevice_notifier(&br_device_notifier);
 
 	return 0;
 }
 
+/**
+ * 网桥反初始化代码。
+ */
 static void __exit br_deinit(void)
 {
 #ifdef CONFIG_BRIDGE_NETFILTER

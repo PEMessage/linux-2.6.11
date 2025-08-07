@@ -43,12 +43,14 @@
 #include <linux/smp_lock.h>
 
 /* People can turn this off for buggy TCP's found in printers etc. */
+/* 重传时，把数据包增大一些，来避免某些协议栈的BUG */
 int sysctl_tcp_retrans_collapse = 1;
 
 /* This limits the percentage of the congestion window which we
  * will allow a single TSO frame to consume.  Building TSO frames
  * which are too large can cause TCP streams to be bursty.
  */
+/* 单个TSO段可消耗拥塞窗口比例 */
 int sysctl_tcp_tso_win_divisor = 8;
 
 static inline void update_send_head(struct sock *sk, struct tcp_sock *tp,
@@ -124,19 +126,25 @@ static void tcp_cwnd_restart(struct tcp_sock *tp, struct dst_entry *dst)
 	tp->snd_cwnd_used = 0;
 }
 
+/**
+ * 当发送的TCP段有负载时，则检测拥塞窗口闲置是否超时。
+ * 如果超时，则使拥塞窗口失效并重新计算拥塞窗口。
+ */
 static inline void tcp_event_data_sent(struct tcp_sock *tp,
 				       struct sk_buff *skb, struct sock *sk)
 {
 	u32 now = tcp_time_stamp;
 
+	/* 拥塞窗口闲置时间超过了RTO */
 	if (!tp->packets_out && (s32)(now - tp->lsndtime) > tp->rto)
-		tcp_cwnd_restart(tp, __sk_dst_get(sk));
+		tcp_cwnd_restart(tp, __sk_dst_get(sk));/* 使拥塞窗口失效并重新计算拥塞窗口 */
 
-	tp->lsndtime = now;
+	tp->lsndtime = now;/* 记录TCP发送时间 */
 
 	/* If it is a reply for ato after last received
 	 * packet, enter pingpong mode.
 	 */
+	/* 根据最近接收段的时间，来确认是否进入pingpong模式 */
 	if ((u32)(now - tp->ack.lrcvtime) < tp->ack.ato)
 		tp->ack.pingpong = 1;
 }
@@ -263,6 +271,9 @@ static __inline__ u16 tcp_select_window(struct sock *sk)
  * We are working here with either a clone of the original
  * SKB, or a fresh unique copy made by the retransmit engine.
  */
+/**
+ * 发送一个TCP报文
+ */
 static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb)
 {
 	if (skb != NULL) {
@@ -280,26 +291,30 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb)
 #define SYSCTL_FLAG_WSCALE	0x2
 #define SYSCTL_FLAG_SACK	0x4
 
-		sysctl_flags = 0;
-		if (tcb->flags & TCPCB_FLAG_SYN) {
+		sysctl_flags = 0;/* 标识TCP选项 */
+		/* 根据TCP选项调整TCP首部长度 */
+		if (tcb->flags & TCPCB_FLAG_SYN) {/* 如果当前段是SYN段，需要特殊处理一下 */
+			/* SYN段必须通告MSS，因此报头加上MSS通告选项的长度 */
 			tcp_header_size = sizeof(struct tcphdr) + TCPOLEN_MSS;
-			if(sysctl_tcp_timestamps) {
+			if(sysctl_tcp_timestamps) {/* 启用了时间戳 */
+				/* 报头加上时间戳标志 */
 				tcp_header_size += TCPOLEN_TSTAMP_ALIGNED;
 				sysctl_flags |= SYSCTL_FLAG_TSTAMPS;
 			}
-			if(sysctl_tcp_window_scaling) {
+			if(sysctl_tcp_window_scaling) {/* 处理窗口扩大因子选项 */
 				tcp_header_size += TCPOLEN_WSCALE_ALIGNED;
 				sysctl_flags |= SYSCTL_FLAG_WSCALE;
 			}
-			if(sysctl_tcp_sack) {
+			if(sysctl_tcp_sack) {/* 处理SACK选项 */
 				sysctl_flags |= SYSCTL_FLAG_SACK;
 				if(!(sysctl_flags & SYSCTL_FLAG_TSTAMPS))
 					tcp_header_size += TCPOLEN_SACKPERM_ALIGNED;
 			}
-		} else if (tp->rx_opt.eff_sacks) {
+		} else if (tp->rx_opt.eff_sacks) {/* 非SYN段，但是有SACK块 */
 			/* A SACK is 2 pad bytes, a 2 byte header, plus
 			 * 2 32-bit sequence numbers for each SACK block.
 			 */
+			/* 根据SACK块数调整TCP首部长度 */
 			tcp_header_size += (TCPOLEN_SACK_BASE_ALIGNED +
 					    (tp->rx_opt.eff_sacks * TCPOLEN_SACK_PERBLOCK));
 		}
@@ -316,34 +331,44 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb)
 		if (tcp_is_vegas(tp) && tcp_packets_in_flight(tp) == 0)
 			tcp_vegas_enable(tp);
 
+		/* 在报文首部中加入TCP首部 */
 		th = (struct tcphdr *) skb_push(skb, tcp_header_size);
+		/* 更新TCP首部指针 */
 		skb->h.th = th;
+		/* 设置报文的传输控制块 */
 		skb_set_owner_w(skb, sk);
 
 		/* Build TCP header and checksum it. */
+		/* 填充TCP首部中的数据 */
 		th->source		= inet->sport;
 		th->dest		= inet->dport;
 		th->seq			= htonl(tcb->seq);
 		th->ack_seq		= htonl(tp->rcv_nxt);
 		*(((__u16 *)th) + 6)	= htons(((tcp_header_size >> 2) << 12) | tcb->flags);
+		/* 设置TCP首部的接收窗口 */
 		if (tcb->flags & TCPCB_FLAG_SYN) {
 			/* RFC1323: The window in SYN & SYN/ACK segments
 			 * is never scaled.
 			 */
-			th->window	= htons(tp->rcv_wnd);
+			th->window	= htons(tp->rcv_wnd);/* 对SYN段来说，接收窗口初始值为rcv_wnd */
 		} else {
+			/* 对其他段来说，调用tcp_select_window计算当前接收窗口的大小 */
 			th->window	= htons(tcp_select_window(sk));
 		}
+		/* 初始化校验码和带外数据指针 */
 		th->check		= 0;
 		th->urg_ptr		= 0;
 
-		if (tp->urg_mode &&
-		    between(tp->snd_up, tcb->seq+1, tcb->seq+0xFFFF)) {
+		if (tp->urg_mode &&/* 发送时设置了紧急方式 */
+		    between(tp->snd_up, tcb->seq+1, tcb->seq+0xFFFF)) {/* 紧急指针在报文序号开始的65535范围内 */
+			/* 设置紧急指针和带外数据标志位 */
 			th->urg_ptr		= htons(tp->snd_up-tcb->seq);
 			th->urg			= 1;
 		}
 
+		/* 开始构建TCP首部选项 */
 		if (tcb->flags & TCPCB_FLAG_SYN) {
+			/* 调用tcp_syn_build_options构建SYN段的首部 */
 			tcp_syn_build_options((__u32 *)(th + 1),
 					      tcp_advertise_mss(sk),
 					      (sysctl_flags & SYSCTL_FLAG_TSTAMPS),
@@ -353,25 +378,30 @@ static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb)
 					      tcb->when,
 		      			      tp->rx_opt.ts_recent);
 		} else {
+			/* 构建普通段的首部 */
 			tcp_build_and_update_options((__u32 *)(th + 1),
 						     tp, tcb->when);
 
 			TCP_ECN_send(sk, tp, skb, tcp_header_size);
 		}
+		/* 计算传输层的校验和 */
 		tp->af_specific->send_check(sk, th, skb->len, skb);
 
+		/* 如果发送的段有ACK标志，则通知延时确认模块，递减快速发送ACK段的数量，同时停止延时确认定时器 */
 		if (tcb->flags & TCPCB_FLAG_ACK)
 			tcp_event_ack_sent(sk);
 
-		if (skb->len != tcp_header_size)
+		if (skb->len != tcp_header_size)/* 发送的段有负载，则检测拥塞窗口闲置是否超时 */
 			tcp_event_data_sent(tp, skb, sk);
 
 		TCP_INC_STATS(TCP_MIB_OUTSEGS);
 
+		/* 调用IP层的发送函数发送报文 */
 		err = tp->af_specific->queue_xmit(skb, 0);
 		if (err <= 0)
 			return err;
 
+		/* 如果发送失败，则类似于接收到显式拥塞通知的处理 */
 		tcp_enter_cwr(tp);
 
 		/* NET_XMIT_CN is special. It does not guarantee,
@@ -421,16 +451,20 @@ static inline void tcp_tso_set_push(struct sk_buff *skb)
 /* Send _single_ skb sitting at the send head. This function requires
  * true push pending frames to setup probe timer etc.
  */
+/* 输出发送队列上的第一个段 */
 void tcp_push_one(struct sock *sk, unsigned cur_mss)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct sk_buff *skb = sk->sk_send_head;
 
-	if (tcp_snd_test(tp, skb, cur_mss, TCP_NAGLE_PUSH)) {
+	if (tcp_snd_test(tp, skb, cur_mss, TCP_NAGLE_PUSH)) {/* 判断是否可以立即发送，主要是考虑拥塞控制 */
 		/* Send it out now. */
+		/* 记录最后发送时间 */
 		TCP_SKB_CB(skb)->when = tcp_time_stamp;
 		tcp_tso_set_push(skb);
+		/* 发送报文 */
 		if (!tcp_transmit_skb(sk, skb_clone(skb, sk->sk_allocation))) {
+			/* 发送成功则更新发送队列头及一些统计数据 */
 			sk->sk_send_head = NULL;
 			tp->snd_nxt = TCP_SKB_CB(skb)->end_seq;
 			tcp_packets_out_inc(sk, tp, skb);
@@ -627,7 +661,7 @@ int tcp_trim_head(struct sock *sk, struct sk_buff *skb, u32 len)
    NOTE2. tp->pmtu_cookie and tp->mss_cache are READ ONLY outside
    this function.			--ANK (980731)
  */
-
+/* 为传输控制块中与mss相关的成员进行数据同步 */
 unsigned int tcp_sync_mss(struct sock *sk, u32 pmtu)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -640,28 +674,30 @@ unsigned int tcp_sync_mss(struct sock *sk, u32 pmtu)
 	/* Calculate base mss without TCP options:
 	   It is MMS_S - sizeof(tcphdr) of rfc1122
 	 */
+	/* 根据pmtu得到MSS，计算方法是pmtu减去IP首部长度和TCP首部长度 */
 	mss_now = pmtu - tp->af_specific->net_header_len - sizeof(struct tcphdr);
 
 	/* Clamp it (mss_clamp does not include tcp options) */
-	if (mss_now > tp->rx_opt.mss_clamp)
+	if (mss_now > tp->rx_opt.mss_clamp)/* MSS不能超过该连接的对端MSS上限 */
 		mss_now = tp->rx_opt.mss_clamp;
 
 	/* Now subtract optional transport overhead */
+	/* 再减去IP和TCP选项长度 */
 	mss_now -= tp->ext_header_len + tp->ext2_header_len;
 
 	/* Then reserve room for full set of TCP options and 8 bytes of data */
-	if (mss_now < 48)
+	if (mss_now < 48)/* MSS也不能小于48 */
 		mss_now = 48;
 
 	/* Now subtract TCP options size, not including SACKs */
 	mss_now -= tp->tcp_header_len - sizeof(struct tcphdr);
 
 	/* Bound mss with half of window */
-	if (tp->max_window && mss_now > (tp->max_window>>1))
+	if (tp->max_window && mss_now > (tp->max_window>>1))/* MSS不能超过接收方通告过的接收窗口的最大值的一半 */
 		mss_now = max((tp->max_window>>1), 68U - tp->tcp_header_len);
 
 	/* And store cached results */
-	tp->pmtu_cookie = pmtu;
+	tp->pmtu_cookie = pmtu;/* 保存pmtu，并更新mss到缓存中 */
 	tp->mss_cache = tp->mss_cache_std = mss_now;
 
 	return mss_now;
@@ -674,32 +710,35 @@ unsigned int tcp_sync_mss(struct sock *sk, u32 pmtu)
  * cannot be large. However, taking into account rare use of URG, this
  * is not a big flaw.
  */
-
+/* 计算当前有效MSS */
 unsigned int tcp_current_mss(struct sock *sk, int large)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct dst_entry *dst = __sk_dst_get(sk);
 	unsigned int do_large, mss_now;
 
+	/* 从套接口的路由缓存中取出PMTU */
 	mss_now = tp->mss_cache_std;
 	if (dst) {
 		u32 mtu = dst_pmtu(dst);
-		if (mtu != tp->pmtu_cookie ||
+		if (mtu != tp->pmtu_cookie ||/* PMTU与最近一次更新的PMTU不相等 */
 		    tp->ext2_header_len != dst->header_len)
-			mss_now = tcp_sync_mss(sk, mtu);
+			mss_now = tcp_sync_mss(sk, mtu);/* 更新有效MSS */
 	}
 
 	do_large = (large &&
 		    (sk->sk_route_caps & NETIF_F_TSO) &&
-		    !tp->urg_mode);
+		    !tp->urg_mode);/* 确定是否支持TSO */
 
-	if (do_large) {
+	if (do_large) {/* 支持TSO，则需要重新计算发送数据报的TCP段长度 */
 		unsigned int large_mss, factor, limit;
 
+		/* TSO模式下，TCP段长度的最大长度为64K减去IP首部及其选项、TCP首部的长度 */
 		large_mss = 65535 - tp->af_specific->net_header_len -
 			tp->ext_header_len - tp->ext2_header_len -
 			tp->tcp_header_len;
 
+		/* 不能超过接收方最大接收窗口的一半 */
 		if (tp->max_window && large_mss > (tp->max_window>>1))
 			large_mss = max((tp->max_window>>1),
 					68U - tp->tcp_header_len);
@@ -718,12 +757,14 @@ unsigned int tcp_current_mss(struct sock *sk, int large)
 		if (factor > limit)
 			factor = limit;
 
+		/* 支持TSO的TCP长度是当前有效MSS的整数倍，为什么?? */
 		tp->mss_cache = mss_now * factor;
 
 		mss_now = tp->mss_cache;
 	}
 
-	if (tp->rx_opt.eff_sacks)
+	if (tp->rx_opt.eff_sacks)/* 支持SACK */
+		/* 在有效MSS中减去SACK选项长度 */
 		mss_now -= (TCPOLEN_SACK_BASE_ALIGNED +
 			    (tp->rx_opt.eff_sacks * TCPOLEN_SACK_PERBLOCK));
 	return mss_now;
@@ -736,6 +777,7 @@ unsigned int tcp_current_mss(struct sock *sk, int large)
  * Returns 1, if no segments are in flight and we have queued segments, but
  * cannot send anything now because of SWS or another problem.
  */
+/* 将TCP发送队列上的段发送出去 */
 int tcp_write_xmit(struct sock *sk, int nonagle)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -745,9 +787,9 @@ int tcp_write_xmit(struct sock *sk, int nonagle)
 	 * In time closedown will finish, we empty the write queue and all
 	 * will be happy.
 	 */
-	if (sk->sk_state != TCP_CLOSE) {
+	if (sk->sk_state != TCP_CLOSE) {/* TCP_CLOSE状态不能发送数据 */
 		struct sk_buff *skb;
-		int sent_pkts = 0;
+		int sent_pkts = 0;/* 已发送总段数 */
 
 		/* Account for SACKS, we may need to fragment due to this.
 		 * It is just like the real MSS changing on us midstream.
@@ -756,34 +798,39 @@ int tcp_write_xmit(struct sock *sk, int nonagle)
 		 */
 		mss_now = tcp_current_mss(sk, 1);
 
-		while ((skb = sk->sk_send_head) &&
-		       tcp_snd_test(tp, skb, mss_now,
+		while ((skb = sk->sk_send_head) &&/* 发送队列不空，则继续发送 */
+		       tcp_snd_test(tp, skb, mss_now,/* 检测拥塞窗口大小，如果为0，则不能发送段 */
 			       	    tcp_skb_is_last(sk, skb) ? nonagle :
 				    			       TCP_NAGLE_PUSH)) {
-			if (skb->len > mss_now) {
+			if (skb->len > mss_now) {/* 如果段长度超过了MSS，则进行分段。这可能是由于MSS发生变化引起的 */
 				if (tcp_fragment(sk, skb, mss_now))
 					break;
 			}
 
+			/* 记录报文发送时间，用于RTT计算 */
 			TCP_SKB_CB(skb)->when = tcp_time_stamp;
 			tcp_tso_set_push(skb);
+			/* 发送TCP段 */
 			if (tcp_transmit_skb(sk, skb_clone(skb, GFP_ATOMIC)))
-				break;
+				break;/* 如果发送失败，则终止发送过程 */
 
 			/* Advance the send_head.  This one is sent out.
 			 * This call will increment packets_out.
 			 */
+			/* 更新发送队列头，同时更新snd_nxt即下一个发送段的序号，然后统计发送但没有确认的段数。最后视情况复位重传定时器。 */
 			update_send_head(sk, tp, skb);
 
+			/* 如果发送的段小于MSS，则更新最近发送的小包的序号 */
 			tcp_minshall_update(tp, mss_now, skb);
 			sent_pkts = 1;
 		}
 
-		if (sent_pkts) {
+		if (sent_pkts) {/* 如果本次发送了报文，则对拥塞窗口进行确认。 */
 			tcp_cwnd_validate(sk, tp);
 			return 0;
 		}
 
+		/* 本次没有发送数据，如果packets_out为0并且队列不为空，则表示成功 */
 		return !tp->packets_out && sk->sk_send_head;
 	}
 	return 0;
@@ -1026,6 +1073,7 @@ void tcp_simple_retransmit(struct sock *sk)
  * state updates are done by the caller.  Returns non-zero if an
  * error occurred which prevented the send.
  */
+/* 当超时或接收到分片ICMP时，重传段 */
 int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -1037,10 +1085,10 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 	 */
 	if (atomic_read(&sk->sk_wmem_alloc) >
 	    min(sk->sk_wmem_queued + (sk->sk_wmem_queued >> 2), sk->sk_sndbuf))
-		return -EAGAIN;
+		return -EAGAIN;/* 只有1/4的发送缓存是留给分段用的，如果过多，则暂时不进行重传 */
 
 	if (before(TCP_SKB_CB(skb)->seq, tp->snd_una)) {
-		if (before(TCP_SKB_CB(skb)->end_seq, tp->snd_una))
+		if (before(TCP_SKB_CB(skb)->end_seq, tp->snd_una))/* TCP已经确认了整个段，再进行重传说明有BUG */
 			BUG();
 
 		if (sk->sk_route_caps & NETIF_F_TSO) {
@@ -1049,6 +1097,7 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 			tp->mss_cache = tp->mss_cache_std;
 		}
 
+		/* 如果已经收到部分，则只需要重传一部分数据，将已经确认的部分截断 */
 		if (tcp_trim_head(sk, skb, tp->snd_una - TCP_SKB_CB(skb)->seq))
 			return -ENOMEM;
 	}
@@ -1058,15 +1107,15 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 	 * case, when window is shrunk to zero. In this case
 	 * our retransmit serves as a zero window probe.
 	 */
-	if (!before(TCP_SKB_CB(skb)->seq, tp->snd_una+tp->snd_wnd)
-	    && TCP_SKB_CB(skb)->seq != tp->snd_una)
+	if (!before(TCP_SKB_CB(skb)->seq, tp->snd_una+tp->snd_wnd)/* 如果待发送的段已经不在发送窗口内，则不重传 */
+	    && TCP_SKB_CB(skb)->seq != tp->snd_una)/* 这里是防止发送窗口为0，此时需要发送0探测窗口 */
 		return -EAGAIN;
 
-	if (skb->len > cur_mss) {
+	if (skb->len > cur_mss) {/* 数据报长度大于MSS */
 		int old_factor = tcp_skb_pcount(skb);
 		int new_factor;
 
-		if (tcp_fragment(sk, skb, cur_mss))
+		if (tcp_fragment(sk, skb, cur_mss))/* 将报文进行分片 */
 			return -ENOMEM; /* We'll try again later. */
 
 		/* New SKB created, account for it. */
@@ -1076,7 +1125,7 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 	}
 
 	/* Collapse two adjacent packets if worthwhile and we can. */
-	if(!(TCP_SKB_CB(skb)->flags & TCPCB_FLAG_SYN) &&
+	if(!(TCP_SKB_CB(skb)->flags & TCPCB_FLAG_SYN) &&/* 这是为适应某些有问题的打印机而进行的，不是减小报文，而是适当增大报文 */
 	   (skb->len < (cur_mss >> 1)) &&
 	   (skb->next != sk->sk_send_head) &&
 	   (skb->next != (struct sk_buff *)&sk->sk_write_queue) &&
@@ -1085,6 +1134,7 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 	   (sysctl_tcp_retrans_collapse != 0))
 		tcp_retrans_try_collapse(sk, skb, cur_mss);
 
+	/* 查找路由，并重建报文首部 */
 	if(tp->af_specific->rebuild_header(sk))
 		return -EHOSTUNREACH; /* Routing failure or similar. */
 
@@ -1092,7 +1142,7 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 	 * retransmit when old data is attached.  So strip it off
 	 * since it is cheap to do so and saves bytes on the network.
 	 */
-	if(skb->len > 0 &&
+	if(skb->len > 0 &&/* 处理Solaris相关的BUG */
 	   (TCP_SKB_CB(skb)->flags & TCPCB_FLAG_FIN) &&
 	   tp->snd_una == (TCP_SKB_CB(skb)->end_seq - 1)) {
 		if (!pskb_trim(skb, 0)) {
@@ -1107,18 +1157,20 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 	/* Make a copy, if the first transmission SKB clone we made
 	 * is still in somebody's hands, else make a clone.
 	 */
+	/* 记录发送时间戳 */
 	TCP_SKB_CB(skb)->when = tcp_time_stamp;
 	tcp_tso_set_push(skb);
 
+	/* 将数据报发送出去 */
 	err = tcp_transmit_skb(sk, (skb_cloned(skb) ?
 				    pskb_copy(skb, GFP_ATOMIC):
 				    skb_clone(skb, GFP_ATOMIC)));
 
-	if (err == 0) {
+	if (err == 0) {/* 如果重传成功，则更新一些计数 */
 		/* Update global TCP statistics. */
 		TCP_INC_STATS(TCP_MIB_RETRANSSEGS);
 
-		tp->total_retrans++;
+		tp->total_retrans++;/* 重传总次数 */
 
 #if FASTRETRANS_DEBUG > 0
 		if (TCP_SKB_CB(skb)->sacked&TCPCB_SACKED_RETRANS) {
@@ -1127,10 +1179,10 @@ int tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb)
 		}
 #endif
 		TCP_SKB_CB(skb)->sacked |= TCPCB_RETRANS;
-		tp->retrans_out += tcp_skb_pcount(skb);
+		tp->retrans_out += tcp_skb_pcount(skb);/* 重传而未确认的次数 */
 
 		/* Save stamp of the first retransmit. */
-		if (!tp->retrans_stamp)
+		if (!tp->retrans_stamp)/* 记录上一次拥塞以来第一个重传段的时间，用于拥塞撤销 */
 			tp->retrans_stamp = TCP_SKB_CB(skb)->when;
 
 		tp->undo_retrans++;
@@ -1356,6 +1408,7 @@ int tcp_send_synack(struct sock *sk)
 /*
  * Prepare a SYN-ACK.
  */
+/* 构造一个syn+ack报文 */
 struct sk_buff * tcp_make_synack(struct sock *sk, struct dst_entry *dst,
 				 struct open_request *req)
 {
@@ -1364,23 +1417,28 @@ struct sk_buff * tcp_make_synack(struct sock *sk, struct dst_entry *dst,
 	int tcp_header_size;
 	struct sk_buff *skb;
 
+	/* 不管发送缓存是否已经达到上限，都分配skb */
 	skb = sock_wmalloc(sk, MAX_TCP_HEADER + 15, 1, GFP_ATOMIC);
 	if (skb == NULL)
 		return NULL;
 
 	/* Reserve space for headers. */
+	/* 为TCP头保留空间 */
 	skb_reserve(skb, MAX_TCP_HEADER);
 
 	skb->dst = dst_clone(dst);
 
+	/* 根据接收的SYN段中的选项计算SYN+ACK段的首部长度 */
 	tcp_header_size = (sizeof(struct tcphdr) + TCPOLEN_MSS +
 			   (req->tstamp_ok ? TCPOLEN_TSTAMP_ALIGNED : 0) +
 			   (req->wscale_ok ? TCPOLEN_WSCALE_ALIGNED : 0) +
 			   /* SACK_PERM is in the place of NOP NOP of TS */
 			   ((req->sack_ok && !req->tstamp_ok) ? TCPOLEN_SACKPERM_ALIGNED : 0));
+	/* 在SKB中预留TCP首部空间并清0 */
 	skb->h.th = th = (struct tcphdr *) skb_push(skb, tcp_header_size);
 
 	memset(th, 0, sizeof(struct tcphdr));
+	/* 设置TCP控制块中的控制字段 */
 	th->syn = 1;
 	th->ack = 1;
 	if (dst->dev->features&NETIF_F_TSO)
@@ -1393,13 +1451,17 @@ struct sk_buff * tcp_make_synack(struct sock *sk, struct dst_entry *dst,
 	TCP_SKB_CB(skb)->sacked = 0;
 	skb_shinfo(skb)->tso_segs = 1;
 	skb_shinfo(skb)->tso_size = 0;
+	/* 设置首部中的序号 */
 	th->seq = htonl(TCP_SKB_CB(skb)->seq);
 	th->ack_seq = htonl(req->rcv_isn + 1);
+	/* 请求块中rcv_wnd为0，表示本端窗口被初始化为0 */
 	if (req->rcv_wnd == 0) { /* ignored for retransmitted syns */
 		__u8 rcv_wscale; 
 		/* Set this up on the first call only */
+		/* 根据路由项中获取的最大通告窗口初始化请求块中的最大通告窗口 */
 		req->window_clamp = tp->window_clamp ? : dst_metric(dst, RTAX_WINDOW);
 		/* tcp_full_space because it is guaranteed to be the first packet */
+		/* 设置接收窗口、最大通告窗口、窗口扩大因子 */
 		tcp_select_initial_window(tcp_full_space(sk), 
 			dst_metric(dst, RTAX_ADVMSS) - (req->tstamp_ok ? TCPOLEN_TSTAMP_ALIGNED : 0),
 			&req->rcv_wnd,
@@ -1410,15 +1472,20 @@ struct sk_buff * tcp_make_synack(struct sock *sk, struct dst_entry *dst,
 	}
 
 	/* RFC1323: The window in SYN & SYN/ACK segments is never scaled. */
+	/* 设置首部中的窗口大小 */
 	th->window = htons(req->rcv_wnd);
 
+	/* 设置控制块的发送时间 */
 	TCP_SKB_CB(skb)->when = tcp_time_stamp;
+	/* 根据SYN段中的选项，生成SYN+ACK段中的选项，包括MSS、SACK、窗口扩大因子、时间戳等 */
 	tcp_syn_build_options((__u32 *)(th + 1), dst_metric(dst, RTAX_ADVMSS), req->tstamp_ok,
 			      req->sack_ok, req->wscale_ok, req->rcv_wscale,
 			      TCP_SKB_CB(skb)->when,
 			      req->ts_recent);
 
+	/* 初始化首部校验值 */
 	skb->csum = 0;
+	/* 设置首部长度 */
 	th->doff = (tcp_header_size >> 2);
 	TCP_INC_STATS(TCP_MIB_OUTSEGS);
 	return skb;
@@ -1477,13 +1544,15 @@ static inline void tcp_connect_init(struct sock *sk)
 /*
  * Build a SYN and send it off.
  */ 
+/* 构造并发送SYN段 */
 int tcp_connect(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct sk_buff *buff;
 
-	tcp_connect_init(sk);
+	tcp_connect_init(sk);/* 初始化传输控制块中与连接相关的成员 */
 
+	/* 为SYN段分配报文并进行初始化 */
 	buff = alloc_skb(MAX_TCP_HEADER + 15, sk->sk_allocation);
 	if (unlikely(buff == NULL))
 		return -ENOBUFS;
@@ -1506,13 +1575,17 @@ int tcp_connect(struct sock *sk)
 	/* Send it off. */
 	TCP_SKB_CB(buff)->when = tcp_time_stamp;
 	tp->retrans_stamp = TCP_SKB_CB(buff)->when;
+
+	/* 将报文添加到发送队列上 */
 	__skb_queue_tail(&sk->sk_write_queue, buff);
 	sk_charge_skb(sk, buff);
 	tp->packets_out += tcp_skb_pcount(buff);
+	/* 发送SYN段 */
 	tcp_transmit_skb(sk, skb_clone(buff, GFP_KERNEL));
 	TCP_INC_STATS(TCP_MIB_ACTIVEOPENS);
 
 	/* Timer for repeating the SYN until an answer. */
+	/* 启动重传定时器 */
 	tcp_reset_xmit_timer(sk, TCP_TIME_RETRANS, tp->rto);
 	return 0;
 }
@@ -1571,10 +1644,11 @@ void tcp_send_delayed_ack(struct sock *sk)
 }
 
 /* This routine sends an ack and also updates the window. */
+/* 在主动连接时，向服务器端发送ACK完成连接，并更新窗口 */
 void tcp_send_ack(struct sock *sk)
 {
 	/* If we have been reset, we may not send again. */
-	if (sk->sk_state != TCP_CLOSE) {
+	if (sk->sk_state != TCP_CLOSE) {/* 不能处于TCP_CLOSE状态 */
 		struct tcp_sock *tp = tcp_sk(sk);
 		struct sk_buff *buff;
 
@@ -1582,8 +1656,8 @@ void tcp_send_ack(struct sock *sk)
 		 * tcp_transmit_skb() will set the ownership to this
 		 * sock.
 		 */
-		buff = alloc_skb(MAX_TCP_HEADER, GFP_ATOMIC);
-		if (buff == NULL) {
+		buff = alloc_skb(MAX_TCP_HEADER, GFP_ATOMIC);/* 分配一个SKB */
+		if (buff == NULL) {/* 如果分配失败，则启动延时确认定时器 */
 			tcp_schedule_ack(tp);
 			tp->ack.ato = TCP_ATO_MIN;
 			tcp_reset_xmit_timer(sk, TCP_TIME_DACK, TCP_DELACK_MAX);
@@ -1591,6 +1665,7 @@ void tcp_send_ack(struct sock *sk)
 		}
 
 		/* Reserve space for headers and prepare control bits. */
+		/* 设置SKB中相关的参数 */
 		skb_reserve(buff, MAX_TCP_HEADER);
 		buff->csum = 0;
 		TCP_SKB_CB(buff)->flags = TCPCB_FLAG_ACK;
@@ -1601,6 +1676,7 @@ void tcp_send_ack(struct sock *sk)
 		/* Send it off, this clears delayed acks for us. */
 		TCP_SKB_CB(buff)->seq = TCP_SKB_CB(buff)->end_seq = tcp_acceptable_seq(sk, tp);
 		TCP_SKB_CB(buff)->when = tcp_time_stamp;
+		/* 将SKB发送出去 */
 		tcp_transmit_skb(sk, buff);
 	}
 }
@@ -1644,18 +1720,21 @@ static int tcp_xmit_probe_skb(struct sock *sk, int urgent)
 	return tcp_transmit_skb(sk, skb);
 }
 
+/* 输出持续探测段 */
 int tcp_write_wakeup(struct sock *sk)
 {
 	if (sk->sk_state != TCP_CLOSE) {
 		struct tcp_sock *tp = tcp_sk(sk);
 		struct sk_buff *skb;
 
-		if ((skb = sk->sk_send_head) != NULL &&
-		    before(TCP_SKB_CB(skb)->seq, tp->snd_una+tp->snd_wnd)) {
+		if ((skb = sk->sk_send_head) != NULL &&/* 发送队列不为空 */
+		    before(TCP_SKB_CB(skb)->seq, tp->snd_una+tp->snd_wnd)) {/* 待发送的段在接收窗口内 */
 			int err;
+			/* 获取当前的MSS以及待分段的段长 */
 			unsigned int mss = tcp_current_mss(sk, 0);
 			unsigned int seg_size = tp->snd_una+tp->snd_wnd-TCP_SKB_CB(skb)->seq;
 
+			/* 段序号大于pushed_seq，则更新pushed_seq */
 			if (before(tp->pushed_seq, TCP_SKB_CB(skb)->end_seq))
 				tp->pushed_seq = TCP_SKB_CB(skb)->end_seq;
 
@@ -1663,11 +1742,11 @@ int tcp_write_wakeup(struct sock *sk)
 			 * but the window size is != 0
 			 * must have been a result SWS avoidance ( sender )
 			 */
-			if (seg_size < TCP_SKB_CB(skb)->end_seq - TCP_SKB_CB(skb)->seq ||
-			    skb->len > mss) {
-				seg_size = min(seg_size, mss);
+			if (seg_size < TCP_SKB_CB(skb)->end_seq - TCP_SKB_CB(skb)->seq ||/* 段长大于剩余等待发送数据 */
+			    skb->len > mss) {/* 段长大于当前mss */
+				seg_size = min(seg_size, mss);/* 分段段长取二者小值 */
 				TCP_SKB_CB(skb)->flags |= TCPCB_FLAG_PSH;
-				if (tcp_fragment(sk, skb, seg_size))
+				if (tcp_fragment(sk, skb, seg_size))/* 将数据分段 */
 					return -1;
 				/* SWS override triggered forced fragmentation.
 				 * Disable TSO, the connection is too sick. */
@@ -1679,6 +1758,7 @@ int tcp_write_wakeup(struct sock *sk)
 			} else if (!tcp_skb_pcount(skb))
 				tcp_set_skb_tso_segs(skb, tp->mss_cache_std);
 
+			/* 将分段发送出去 */
 			TCP_SKB_CB(skb)->flags |= TCPCB_FLAG_PSH;
 			TCP_SKB_CB(skb)->when = tcp_time_stamp;
 			tcp_tso_set_push(skb);
@@ -1687,10 +1767,12 @@ int tcp_write_wakeup(struct sock *sk)
 				update_send_head(sk, tp, skb);
 			}
 			return err;
-		} else {
+		} else {/* 发送队列为空 */
+			/* 如果处于紧急模式，多发送一个序号为SND.UNA的段给对方 */
 			if (tp->urg_mode &&
 			    between(tp->snd_up, tp->snd_una+1, tp->snd_una+0xFFFF))
 				tcp_xmit_probe_skb(sk, TCPCB_URG);
+			/* 构造并发送一个序号已确认，长度为0的段给对端 */
 			return tcp_xmit_probe_skb(sk, 0);
 		}
 	}
@@ -1705,8 +1787,10 @@ void tcp_send_probe0(struct sock *sk)
 	struct tcp_sock *tp = tcp_sk(sk);
 	int err;
 
+	/* 输出持续探测段 */
 	err = tcp_write_wakeup(sk);
 
+	/* 有已经发送但是未确认的段，或者发送队列为空，都无需发送探测段 */
 	if (tp->packets_out || !sk->sk_send_head) {
 		/* Cancel probe timer, if it is not required. */
 		tp->probes_out = 0;
@@ -1714,21 +1798,23 @@ void tcp_send_probe0(struct sock *sk)
 		return;
 	}
 
-	if (err <= 0) {
-		if (tp->backoff < sysctl_tcp_retries2)
+	if (err <= 0) {/* 重传成功，或者不是由于本地拥塞而导致失败 */
+		if (tp->backoff < sysctl_tcp_retries2)/* 更新计数 */
 			tp->backoff++;
 		tp->probes_out++;
+		/* 复位持续定时器 */
 		tcp_reset_xmit_timer (sk, TCP_TIME_PROBE0, 
 				      min(tp->rto << tp->backoff, TCP_RTO_MAX));
-	} else {
+	} else {/* 由于本地拥塞而失败 */
 		/* If packet was not sent due to local congestion,
 		 * do not backoff and do not remember probes_out.
 		 * Let local senders to fight for local resources.
 		 *
 		 * Use accumulated backoff yet.
 		 */
-		if (!tp->probes_out)
+		if (!tp->probes_out)/* 不需要累计重传计数 */
 			tp->probes_out=1;
+		/* 复位定时器，缩短超时时间 */
 		tcp_reset_xmit_timer (sk, TCP_TIME_PROBE0, 
 				      min(tp->rto << tp->backoff, TCP_RESOURCE_PROBE_INTERVAL));
 	}

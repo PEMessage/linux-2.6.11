@@ -80,6 +80,9 @@
 #include <linux/netfilter.h>
 #include <linux/netfilter_ipv4.h>
 
+/**
+ * 存储原始套接字处理函数的表。
+ */
 struct hlist_head raw_v4_htable[RAWV4_HTABLE_SIZE];
 DEFINE_RWLOCK(raw_v4_lock);
 
@@ -150,6 +153,9 @@ static __inline__ int icmp_filter(struct sock *sk, struct sk_buff *skb)
  * RFC 1122: SHOULD pass TOS value up to the transport layer.
  * -> It does. And not only TOS, but all IP header.
  */
+/**
+ * L3层向L4层分发原始数据包。
+ */
 void raw_v4_input(struct sk_buff *skb, struct iphdr *iph, int hash)
 {
 	struct sock *sk;
@@ -157,6 +163,9 @@ void raw_v4_input(struct sk_buff *skb, struct iphdr *iph, int hash)
 
 	read_lock(&raw_v4_lock);
 	head = &raw_v4_htable[hash];
+	/**
+	 * 这里需要再次检查原始套口链表是否为空。
+	 */
 	if (hlist_empty(head))
 		goto out;
 	sk = __raw_v4_lookup(__sk_head(head), iph->protocol,
@@ -259,6 +268,9 @@ int raw_rcv(struct sock *sk, struct sk_buff *skb)
 	return 0;
 }
 
+/**
+ * 发送原始套接字包。
+ */
 static int raw_send_hdrinc(struct sock *sk, void *from, int length,
 			struct rtable *rt, 
 			unsigned int flags)
@@ -371,6 +383,9 @@ static void raw_probe_proto_opt(struct flowi *fl, struct msghdr *msg)
 	}
 }
 
+/**
+ * 发送原始套接字包。
+ */
 static int raw_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		       size_t len)
 {

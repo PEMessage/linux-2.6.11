@@ -1114,6 +1114,9 @@ out:
 /*
  * RPC receive timeout handler.
  */
+/**
+ * RPC接收超时处理。
+ */
 static void
 xprt_timer(struct rpc_task *task)
 {

@@ -745,6 +745,9 @@ rtattr_failure:
         return -1;
 }
 
+/**
+ * 当本地IP地址有任何变更发生时，内核就会使用rtmsg_ifa函数去通知那些对该群组有注册的应用程序。
+ */
 static void rtmsg_ifa(int event, struct dn_ifaddr *ifa)
 {
 	struct sk_buff *skb;

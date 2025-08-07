@@ -251,6 +251,9 @@ svc_register(struct svc_serv *serv, int proto, unsigned short port)
 /*
  * Process the RPC request.
  */
+/**
+ * 处理套口上接收到的RPC请求。
+ */
 int
 svc_process(struct svc_serv *serv, struct svc_rqst *rqstp)
 {
@@ -301,6 +304,9 @@ svc_process(struct svc_serv *serv, struct svc_rqst *rqstp)
 
 	svc_putu32(resv, xdr_zero);		/* ACCEPT */
 
+	/**
+	 * 从发来的请求中找出远程调用的程序号、版本号以及过程号
+	 */
 	rqstp->rq_prog = prog = ntohl(svc_getu32(argv));	/* program number */
 	rqstp->rq_vers = vers = ntohl(svc_getu32(argv));	/* version number */
 	rqstp->rq_proc = proc = ntohl(svc_getu32(argv));	/* procedure number */
@@ -310,6 +316,9 @@ svc_process(struct svc_serv *serv, struct svc_rqst *rqstp)
 	 * Decode auth data, and add verifier to reply buffer.
 	 * We do this before anything else in order to get a decent
 	 * auth verifier.
+	 */
+	/**
+	 * 调用svc_authenticate函数对鉴别信息进行解码，并安装校验函数。
 	 */
 	if (progp->pg_authenticate != NULL)
 		auth_res = progp->pg_authenticate(rqstp, &auth_stat);
@@ -339,6 +348,9 @@ svc_process(struct svc_serv *serv, struct svc_rqst *rqstp)
 	  !(versp = progp->pg_vers[vers]))
 		goto err_bad_vers;
 
+	/**
+	 * 根据程序号、版本号以及过程号找到处理这个函数的指针。
+	 */
 	procp = versp->vs_proc + proc;
 	if (proc >= versp->vs_nproc || !procp->pc_func)
 		goto err_bad_proc;
@@ -368,13 +380,22 @@ svc_process(struct svc_serv *serv, struct svc_rqst *rqstp)
 	/* Call the function that processes the request. */
 	if (!versp->vs_dispatch) {
 		/* Decode arguments */
+		/**
+		 * 对传过来的过程参数进行解码
+		 */
 		xdr = procp->pc_decode;
 		if (xdr && !xdr(rqstp, argv->iov_base, rqstp->rq_argp))
 			goto err_garbage;
 
+		/**
+		 * 调用远程过程的处理函数。
+		 */
 		*statp = procp->pc_func(rqstp, rqstp->rq_argp, rqstp->rq_resp);
 
 		/* Encode reply */
+		/**
+		 * 对返回结果进行译码，并放入缓存中。
+		 */
 		if (*statp == rpc_success && (xdr = procp->pc_encode)
 		 && !xdr(rqstp, resv->iov_base+resv->iov_len, rqstp->rq_resp)) {
 			dprintk("svc: failed to encode reply\n");
@@ -405,6 +426,9 @@ svc_process(struct svc_serv *serv, struct svc_rqst *rqstp)
  sendit:
 	if (svc_authorise(rqstp))
 		goto dropit;
+	/**
+	 * 调用svc_send函数将返回结果发回给客户端。
+	 */
 	return svc_send(rqstp);
 
  dropit:

@@ -18,6 +18,9 @@
 #define BPDU_TYPE_CONFIG 0
 #define BPDU_TYPE_TCN 0x80
 
+/**
+ * 一个入配置BPDU帧的关键字段被复制到这个数据结构。并且替换原始BPDU后，传递给处理配置BPDU的函数。
+ */
 struct br_config_bpdu
 {
 	unsigned	topology_change:1;
@@ -33,6 +36,9 @@ struct br_config_bpdu
 };
 
 /* called under bridge lock */
+/**
+ * 当输入参数是一个指派端口时，Br_is_designated_port返回1,否则返回0.
+ */
 static inline int br_is_designated_port(const struct net_bridge_port *p)
 {
 	return !memcmp(&p->designated_bridge, &p->br->bridge_id, 8) &&

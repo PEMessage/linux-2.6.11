@@ -21,6 +21,9 @@
 #include "br_private_stp.h"
 
 /* called under bridge lock */
+/**
+ * 如果网桥至少拥有一个端口具有指派角色，br_is_designated_for_some_port就返回1,否则返回0.
+ */
 static int br_is_designated_for_some_port(const struct net_bridge *br)
 {
 	struct net_bridge_port *p;
@@ -48,6 +51,10 @@ static void br_hello_timer_expired(unsigned long arg)
 	spin_unlock_bh(&br->lock);
 }
 
+/**
+ * 当一个端口从指派网桥接收信息超期时（一般是因为指派网桥不再是指派网桥，或者指派网桥失效了）
+ * 这可能引起拓扑变化，也可能导致根桥变化。
+ */
 static void br_message_age_timer_expired(unsigned long arg)
 {
 	struct net_bridge_port *p = (struct net_bridge_port *) arg;
@@ -85,6 +92,9 @@ static void br_message_age_timer_expired(unsigned long arg)
 	spin_unlock_bh(&br->lock);
 }
 
+/**
+ * 当一个处于BR_STATE_LEARNING状态的端口，其状态变为BR_STATE_FORWARDING状态时调用。
+ */
 static void br_forward_delay_timer_expired(unsigned long arg)
 {
 	struct net_bridge_port *p = (struct net_bridge_port *) arg;
@@ -153,6 +163,9 @@ static inline void br_timer_init(struct timer_list *timer,
 	timer->data = _data;
 }
 
+/**
+ * 初始化网桥时钟。
+ */
 void br_stp_timer_init(struct net_bridge *br)
 {
 	br_timer_init(&br->hello_timer, br_hello_timer_expired,
@@ -168,6 +181,9 @@ void br_stp_timer_init(struct net_bridge *br)
 	br_timer_init(&br->gc_timer, br_fdb_cleanup, (unsigned long) br);
 }
 
+/**
+ * 初始化端口时钟。
+ */
 void br_stp_port_timer_init(struct net_bridge_port *p)
 {
 	br_timer_init(&p->message_age_timer, br_message_age_timer_expired,

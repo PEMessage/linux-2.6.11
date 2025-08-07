@@ -25,6 +25,7 @@
  *
  * FIXME: write proper description
  */
+/* 检测发送缓冲区的大小，如果可用则唤醒等待的线程 */
 void sk_stream_write_space(struct sock *sk)
 {
 	struct socket *sock = sk->sk_socket;
@@ -110,6 +111,7 @@ EXPORT_SYMBOL(sk_stream_wait_close);
  * @sk - socket to wait for memory
  * @timeo_p - for how long
  */
+/* 发送数据时，如果分配缓存区失败，则调用此函数进行等待 */
 int sk_stream_wait_memory(struct sock *sk, long *timeo_p)
 {
 	int err = 0;
@@ -168,12 +170,15 @@ do_interrupted:
 
 EXPORT_SYMBOL(sk_stream_wait_memory);
 
+/**
+ * 当释放与TCP相关的接收报文时，回调此函数。
+ */
 void sk_stream_rfree(struct sk_buff *skb)
 {
 	struct sock *sk = skb->sk;
 
-	atomic_sub(skb->truesize, &sk->sk_rmem_alloc);
-	sk->sk_forward_alloc += skb->truesize;
+	atomic_sub(skb->truesize, &sk->sk_rmem_alloc);/* 减少接收缓存总数 */
+	sk->sk_forward_alloc += skb->truesize;/* 增加预分配总数 */
 }
 
 EXPORT_SYMBOL(sk_stream_rfree);
@@ -193,10 +198,10 @@ void __sk_stream_mem_reclaim(struct sock *sk)
 {
 	if (sk->sk_forward_alloc >= SK_STREAM_MEM_QUANTUM) {
 		atomic_sub(sk->sk_forward_alloc / SK_STREAM_MEM_QUANTUM,
-			   sk->sk_prot->memory_allocated);
+			   sk->sk_prot->memory_allocated);/* 将预分配缓存归还后，需要减少页面分配计数 */
 		sk->sk_forward_alloc &= SK_STREAM_MEM_QUANTUM - 1;
-		if (*sk->sk_prot->memory_pressure &&
-		    (atomic_read(sk->sk_prot->memory_allocated) <
+		if (*sk->sk_prot->memory_pressure &&/* 目前已经进入告警状态 */
+		    (atomic_read(sk->sk_prot->memory_allocated) </* 已经分配的内存低于告警线，退出告警状态 */
 		     sk->sk_prot->sysctl_mem[0]))
 			*sk->sk_prot->memory_pressure = 0;
 	}
@@ -204,14 +209,18 @@ void __sk_stream_mem_reclaim(struct sock *sk)
 
 EXPORT_SYMBOL(__sk_stream_mem_reclaim);
 
+/* 确认套接口是否能够分配特定长度的缓存 */
 int sk_stream_mem_schedule(struct sock *sk, int size, int kind)
 {
+	/* 将长度转化为页面数 */
 	int amt = sk_stream_pages(size);
 
+	/* 调整预分配量，及总分配量 */
 	sk->sk_forward_alloc += amt * SK_STREAM_MEM_QUANTUM;
 	atomic_add(amt, sk->sk_prot->memory_allocated);
 
 	/* Under limit. */
+	/* 已分配内存低于低水平线，取消告警状态 */
 	if (atomic_read(sk->sk_prot->memory_allocated) < sk->sk_prot->sysctl_mem[0]) {
 		if (*sk->sk_prot->memory_pressure)
 			*sk->sk_prot->memory_pressure = 0;
@@ -219,41 +228,46 @@ int sk_stream_mem_schedule(struct sock *sk, int size, int kind)
 	}
 
 	/* Over hard limit. */
+	/* 超过告警限制，进入告警处理 */
 	if (atomic_read(sk->sk_prot->memory_allocated) > sk->sk_prot->sysctl_mem[2]) {
 		sk->sk_prot->enter_memory_pressure();
 		goto suppress_allocation;
 	}
 
 	/* Under pressure. */
+	/* 高于告警线，但是低于硬性限制线，则进入告警处理 */
 	if (atomic_read(sk->sk_prot->memory_allocated) > sk->sk_prot->sysctl_mem[1])
 		sk->sk_prot->enter_memory_pressure();
 
-	if (kind) {
+	if (kind) {/* 如果待确认的是接收缓存 */
+		/* 接收队列中的数据总长度小于接收缓存部区的长度上限，则返回成功 */
 		if (atomic_read(&sk->sk_rmem_alloc) < sk->sk_prot->sysctl_rmem[0])
 			return 1;
-	} else if (sk->sk_wmem_queued < sk->sk_prot->sysctl_wmem[0])
+	} else if (sk->sk_wmem_queued < sk->sk_prot->sysctl_wmem[0])/* 如果发送缓存总长度小于上限，也返回成功 */
 		return 1;
 
-	if (!*sk->sk_prot->memory_pressure ||
+	if (!*sk->sk_prot->memory_pressure ||/* 没有进入告警状态 */
 	    sk->sk_prot->sysctl_mem[2] > atomic_read(sk->sk_prot->sockets_allocated) *
 				sk_stream_pages(sk->sk_wmem_queued +
 						atomic_read(&sk->sk_rmem_alloc) +
-						sk->sk_forward_alloc))
+						sk->sk_forward_alloc))/* 或者总数据长度小于硬性限制线，也返回成功 */
 		return 1;
 
 suppress_allocation:
 
-	if (!kind) {
+	if (!kind) {/* 确认的是发送缓存 */
+		/* 缩小发送缓冲区的预分配大小为已经分配的缓冲队列大小的一半 */
 		sk_stream_moderate_sndbuf(sk);
 
 		/* Fail only if socket is _under_ its sndbuf.
 		 * In this case we cannot block, so that we have to fail.
 		 */
-		if (sk->sk_wmem_queued + size >= sk->sk_sndbuf)
+		if (sk->sk_wmem_queued + size >= sk->sk_sndbuf)/* ?? */
 			return 1;
 	}
 
 	/* Alas. Undo changes. */
+	/* 无法通过确认，恢复预分配值 */
 	sk->sk_forward_alloc -= amt * SK_STREAM_MEM_QUANTUM;
 	atomic_sub(amt, sk->sk_prot->memory_allocated);
 	return 0;

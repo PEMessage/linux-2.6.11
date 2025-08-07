@@ -246,6 +246,7 @@ static void dn_unhash_sock_bh(struct sock *sk)
 	write_unlock_bh(&dn_hash_lock);
 }
 
+/* 将侦听端口加入到哈希表 */
 static struct hlist_head *listen_hash(struct sockaddr_dn *addr)
 {
 	int i;

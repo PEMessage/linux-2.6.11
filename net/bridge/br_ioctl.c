@@ -389,6 +389,9 @@ int br_ioctl_deviceless_stub(unsigned int cmd, void __user *uarg)
 	return -EOPNOTSUPP;
 }
 
+/**
+ * 处理网桥相关的ioctl命令。
+ */
 int br_dev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 {
 	struct net_bridge *br = netdev_priv(dev);

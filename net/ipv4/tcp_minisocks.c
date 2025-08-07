@@ -35,10 +35,21 @@
 #define SYNC_INIT 1
 #endif
 
+/**
+ * 标识是否允许处于TIME-WAIT状态快速迁移到CLOSE状态。 
+ *		0:	套接口在TIME-WAIT状态等待60s
+ *		1:	默认值，能更快的迁移状态。
+ */
 int sysctl_tcp_tw_recycle;
+/**
+ * 可保持在TIME-WAIT状态的套接口的最大数目。
+ * 如果超过此值，新的迁移到TIME-WAIT的连接将被立即关闭。
+ */
 int sysctl_tcp_max_tw_buckets = NR_FILE*2;
 
+/* 是否启用SYN cookies功能，主要用于防止syn-flood攻击 */
 int sysctl_tcp_syncookies = SYNC_INIT; 
+/* 当进程太忙而不能接受新的连接时，是否向对方发送rst段。一般在WEB服务器上打开此选项 */
 int sysctl_tcp_abort_on_overflow;
 
 static void tcp_tw_schedule(struct tcp_tw_bucket *tw, int timeo);
@@ -54,6 +65,7 @@ static __inline__ int tcp_in_window(u32 seq, u32 end_seq, u32 s_win, u32 e_win)
 
 /* New-style handling of TIME_WAIT sockets. */
 
+/* 当前系统中，处于TIME_WAIT状态的套接口数 */
 int tcp_tw_count;
 
 
@@ -121,6 +133,7 @@ static void tcp_timewait_kill(struct tcp_tw_bucket *tw)
  * is ridiculously low and, seems, we could use some mb() tricks
  * to avoid misread sequence numbers, states etc.  --ANK
  */
+/* 用于处理在FIN_WAIT2和TIME_WAIT状态下接收到的段 */
 enum tcp_tw_status
 tcp_timewait_state_process(struct tcp_tw_bucket *tw, struct sk_buff *skb,
 			   struct tcphdr *th, unsigned len)
@@ -129,10 +142,11 @@ tcp_timewait_state_process(struct tcp_tw_bucket *tw, struct sk_buff *skb,
 	int paws_reject = 0;
 
 	tmp_opt.saw_tstamp = 0;
+	/* 存在选项并且需要做序号回绕处理 */
 	if (th->doff > (sizeof(struct tcphdr) >> 2) && tw->tw_ts_recent_stamp) {
-		tcp_parse_options(skb, &tmp_opt, 0);
+		tcp_parse_options(skb, &tmp_opt, 0);/* 解析选项 */
 
-		if (tmp_opt.saw_tstamp) {
+		if (tmp_opt.saw_tstamp) {/* 有时间戳，进行PAWS判断 */
 			tmp_opt.ts_recent	   = tw->tw_ts_recent;
 			tmp_opt.ts_recent_stamp = tw->tw_ts_recent_stamp;
 			paws_reject = tcp_paws_check(&tmp_opt, th->rst);
@@ -143,21 +157,22 @@ tcp_timewait_state_process(struct tcp_tw_bucket *tw, struct sk_buff *skb,
 		/* Just repeat all the checks of tcp_rcv_state_process() */
 
 		/* Out of window, send ACK */
-		if (paws_reject ||
+		if (paws_reject ||/* PAWS检测未通过 */
 		    !tcp_in_window(TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq,
 				   tw->tw_rcv_nxt,
-				   tw->tw_rcv_nxt + tw->tw_rcv_wnd))
+				   tw->tw_rcv_nxt + tw->tw_rcv_wnd))/* TCP序号不完全在接收窗口内，需要向对方发送ACK */
 			return TCP_TW_ACK;
 
-		if (th->rst)
+		if (th->rst)/* 接收到RST段，释放控制块并返回TCP_RW_SUCCESS */
 			goto kill;
 
+		/* 接收到SYN段，释放控制块并返回TCP_RW_RST */
 		if (th->syn && !before(TCP_SKB_CB(skb)->seq, tw->tw_rcv_nxt))
 			goto kill_with_rst;
 
 		/* Dup ACK? */
-		if (!after(TCP_SKB_CB(skb)->end_seq, tw->tw_rcv_nxt) ||
-		    TCP_SKB_CB(skb)->end_seq == TCP_SKB_CB(skb)->seq) {
+		if (!after(TCP_SKB_CB(skb)->end_seq, tw->tw_rcv_nxt) ||/* DACK */
+		    TCP_SKB_CB(skb)->end_seq == TCP_SKB_CB(skb)->seq) {/* 段中无数据，纯ACK */
 			tcp_tw_put(tw);
 			return TCP_TW_SUCCESS;
 		}
@@ -165,7 +180,7 @@ tcp_timewait_state_process(struct tcp_tw_bucket *tw, struct sk_buff *skb,
 		/* New data or FIN. If new data arrive after half-duplex close,
 		 * reset.
 		 */
-		if (!th->fin ||
+		if (!th->fin ||/* 在FIN_WAIT_2状态下，接收到非FIN段，或接收到的段序号与预期不符 */
 		    TCP_SKB_CB(skb)->end_seq != tw->tw_rcv_nxt + 1) {
 kill_with_rst:
 			tcp_tw_deschedule(tw);
@@ -174,6 +189,7 @@ kill_with_rst:
 		}
 
 		/* FIN arrived, enter true time-wait state. */
+		/* 接收到有效的FIN段，进入TIME_WAIT状态 */
 		tw->tw_substate	= TCP_TIME_WAIT;
 		tw->tw_rcv_nxt	= TCP_SKB_CB(skb)->end_seq;
 		if (tmp_opt.saw_tstamp) {
@@ -187,12 +203,12 @@ kill_with_rst:
 		 * do not undertsnad recycling in any case, it not
 		 * a big problem in practice. --ANK */
 		if (tw->tw_family == AF_INET &&
-		    sysctl_tcp_tw_recycle && tw->tw_ts_recent_stamp &&
+		    sysctl_tcp_tw_recycle && tw->tw_ts_recent_stamp &&/* 时间戳有效 */
 		    tcp_v4_tw_remember_stamp(tw))
-			tcp_tw_schedule(tw, tw->tw_timeout);
+			tcp_tw_schedule(tw, tw->tw_timeout);/* 根据往返时间启动MSL定时器 */
 		else
-			tcp_tw_schedule(tw, TCP_TIMEWAIT_LEN);
-		return TCP_TW_ACK;
+			tcp_tw_schedule(tw, TCP_TIMEWAIT_LEN);/* 使用固定的60s作为MSL定时器 */
+		return TCP_TW_ACK;/* 收到有效段，需要给对方发送ACK */
 	}
 
 	/*
@@ -211,10 +227,10 @@ kill_with_rst:
 	 *	(2)  returns to TIME-WAIT state if the SYN turns out 
 	 *	to be an old duplicate".
 	 */
-
+	/* TIME_WAIT状态处理 */
 	if (!paws_reject &&
 	    (TCP_SKB_CB(skb)->seq == tw->tw_rcv_nxt &&
-	     (TCP_SKB_CB(skb)->seq == TCP_SKB_CB(skb)->end_seq || th->rst))) {
+	     (TCP_SKB_CB(skb)->seq == TCP_SKB_CB(skb)->end_seq || th->rst))) {/* 预期段 */
 		/* In window segment, it may be only reset or bare ack. */
 
 		if (th->rst) {
@@ -222,13 +238,14 @@ kill_with_rst:
 			 * Oh well... nobody has a sufficient solution to this
 			 * protocol bug yet.
 			 */
-			if (sysctl_tcp_rfc1337 == 0) {
+			if (sysctl_tcp_rfc1337 == 0) {/* 为了安全方面的原因，这种情况下直接删除并释放timewait控制块 */
 kill:
 				tcp_tw_deschedule(tw);
 				tcp_tw_put(tw);
 				return TCP_TW_SUCCESS;
 			}
 		}
+		/* 如果段没有被丢弃，则进入TIME_WAIT等待阶段 */
 		tcp_tw_schedule(tw, TCP_TIMEWAIT_LEN);
 
 		if (tmp_opt.saw_tstamp) {
@@ -256,12 +273,12 @@ kill:
 	   we must return socket to time-wait state. It is not good,
 	   but not fatal yet.
 	 */
-
+	/* 在TIME_WAIT状态下接收到SYN段，且SYN段中没有RST和ACK标志，序号有效 */
 	if (th->syn && !th->rst && !th->ack && !paws_reject &&
 	    (after(TCP_SKB_CB(skb)->seq, tw->tw_rcv_nxt) ||
 	     (tmp_opt.saw_tstamp && (s32)(tw->tw_ts_recent - tmp_opt.rcv_tsval) < 0))) {
 		u32 isn = tw->tw_snd_nxt + 65535 + 2;
-		if (isn == 0)
+		if (isn == 0)/* 可接受该连接请求，重新计算初始序号后返回SYN由上层处理连接请求 */
 			isn++;
 		TCP_SKB_CB(skb)->when = isn;
 		return TCP_TW_SYN;
@@ -270,7 +287,7 @@ kill:
 	if (paws_reject)
 		NET_INC_STATS_BH(LINUX_MIB_PAWSESTABREJECTED);
 
-	if(!th->rst) {
+	if(!th->rst) {/* 非RST段，只要没有回绕都需要向对方回送ACK */
 		/* In this case we must reset the TIMEWAIT timer.
 		 *
 		 * If it is ACKless SYN it may be both old duplicate
@@ -326,23 +343,26 @@ static void __tcp_tw_hashdance(struct sock *sk, struct tcp_tw_bucket *tw)
 /* 
  * Move a socket to time-wait or dead fin-wait-2 state.
  */ 
+/* 将TCP控制块由正常状态转化为TIMEWAIT或TIMEWAIT2状态时调用本函数 */
 void tcp_time_wait(struct sock *sk, int state, int timeo)
 {
 	struct tcp_tw_bucket *tw = NULL;
 	struct tcp_sock *tp = tcp_sk(sk);
 	int recycle_ok = 0;
 
-	if (sysctl_tcp_tw_recycle && tp->rx_opt.ts_recent_stamp)
-		recycle_ok = tp->af_specific->remember_stamp(sk);
+	if (sysctl_tcp_tw_recycle && tp->rx_opt.ts_recent_stamp)/* 允许快速迁移到CLOSE状态，且有时间戳 */
+		recycle_ok = tp->af_specific->remember_stamp(sk);/* 记录时间戳到对端信息管理块中 */
 
-	if (tcp_tw_count < sysctl_tcp_max_tw_buckets)
+	if (tcp_tw_count < sysctl_tcp_max_tw_buckets)/* TW状态的套接口未达到最大值，允许分配控制块 */
 		tw = kmem_cache_alloc(tcp_timewait_cachep, SLAB_ATOMIC);
 
-	if(tw != NULL) {
+	if(tw != NULL) {/* 分配成功 */
 		struct inet_sock *inet = inet_sk(sk);
+		/* 根据重传超时时间计算TIMEWAIT状态的超时时间，后者是前者的3.5倍 */
 		int rto = (tp->rto<<2) - (tp->rto>>1);
 
 		/* Give us an identity. */
+		/* 初始化TW控制块的相关参数 */
 		tw->tw_daddr		= inet->daddr;
 		tw->tw_rcv_saddr	= inet->rcv_saddr;
 		tw->tw_bound_dev_if	= sk->sk_bound_dev_if;
@@ -364,7 +384,7 @@ void tcp_time_wait(struct sock *sk, int state, int timeo)
 		tw->tw_ts_recent_stamp	= tp->rx_opt.ts_recent_stamp;
 		tw_dead_node_init(tw);
 
-#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)/* IPV6相关，飘过 */
 		if (tw->tw_family == PF_INET6) {
 			struct ipv6_pinfo *np = inet6_sk(sk);
 
@@ -378,20 +398,22 @@ void tcp_time_wait(struct sock *sk, int state, int timeo)
 		}
 #endif
 		/* Linkage updates. */
+		/* 将timewait控制块添加到ehash散列表中 */
 		__tcp_tw_hashdance(sk, tw);
 
 		/* Get the TIME_WAIT timeout firing. */
-		if (timeo < rto)
+		if (timeo < rto)/* 超时时间不得小于3.5倍的MSL时间 */
 			timeo = rto;
 
-		if (recycle_ok) {
-			tw->tw_timeout = rto;
-		} else {
+		if (recycle_ok) {/* 成功的将信息添加到对端信息管理块 */
+			tw->tw_timeout = rto;/* 将超时时间设置为3.5倍的MSL */
+		} else {/* 否则将超时时间设置为60秒 */
 			tw->tw_timeout = TCP_TIMEWAIT_LEN;
 			if (state == TCP_TIME_WAIT)
 				timeo = TCP_TIMEWAIT_LEN;
 		}
 
+		/* 设置为TIMEWAIT状态，并启动TIMEWAIT定时器 */
 		tcp_tw_schedule(tw, timeo);
 		tcp_tw_put(tw);
 	} else {
@@ -403,26 +425,33 @@ void tcp_time_wait(struct sock *sk, int state, int timeo)
 			printk(KERN_INFO "TCP: time wait bucket table overflow\n");
 	}
 
+	/* 更新路由缓存中的值，然后关闭并释放传输控制块 */
 	tcp_update_metrics(sk);
 	tcp_done(sk);
 }
 
 /* Kill off TIME_WAIT sockets once their lifetime has expired. */
+/* tw_timer定时器超时时，正使用的slot */
 static int tcp_tw_death_row_slot;
 
 static void tcp_twkill(unsigned long);
 
 /* TIME_WAIT reaping mechanism. */
 #define TCP_TWKILL_SLOTS	8	/* Please keep this a power of 2. */
+/* tw_timer定时器的超时时间，即将60s分为8份 */
 #define TCP_TWKILL_PERIOD	(TCP_TIMEWAIT_LEN/TCP_TWKILL_SLOTS)
 
 #define TCP_TWKILL_QUOTA	100
-
+/* 用于存储2MSL等待超时时间较长的timewait控制块的散列表 */
 static struct hlist_head tcp_tw_death_row[TCP_TWKILL_SLOTS];
+/* 同步访问tcp_tw_death_row的自旋锁 */
 static DEFINE_SPINLOCK(tw_death_lock);
+/* 每TCP_TWKILL_PERIOD周期执行一次，删除timewait散列表中的twsk */
 static struct timer_list tcp_tw_timer = TIMER_INITIALIZER(tcp_twkill, 0, 0);
 static void twkill_work(void *);
+/* 删除并释放timewait控制块的工作队列 */
 static DECLARE_WORK(tcp_twkill_work, twkill_work, NULL);
+/* 分批删除并释放timewait控制块时，用于标识待删除slot的位图。 */
 static u32 twkill_thread_slots;
 
 /* Returns non-zero if quota exceeded.  */
@@ -546,13 +575,22 @@ void tcp_tw_deschedule(struct tcp_tw_bucket *tw)
 
 /* Short-time timewait calendar */
 
+/**
+ * -1表示twcal_timer定时器未使用过，或者使用后已经删除
+ * 不为-1表示正在使用的slot，作为遍历tcp_twcal_row的入口。
+ */
 static int tcp_twcal_hand = -1;
+/* 设置tcp_twcal_hand的时间 */
 static int tcp_twcal_jiffie;
+/* tcp_twcal_timer的超时处理函数，它扫描整个tcp_twcal_row，删除所有超时的tcp_twcal_row，并重设超时时间 */
 static void tcp_twcal_tick(unsigned long);
+/* 处理MSL的定时器 */
 static struct timer_list tcp_twcal_timer =
 		TIMER_INITIALIZER(tcp_twcal_tick, 0, 0);
+/* 较短的2MSL控制块散列表 */
 static struct hlist_head tcp_twcal_row[TCP_TW_RECYCLE_SLOTS];
 
+/* 启动FIN_WAIT_2或TIME_WAIT定时器 */
 static void tcp_tw_schedule(struct tcp_tw_bucket *tw, int timeo)
 {
 	struct hlist_head *list;
@@ -582,19 +620,20 @@ static void tcp_tw_schedule(struct tcp_tw_bucket *tw, int timeo)
 	 * is greater than TS tick!) and detect old duplicates with help
 	 * of PAWS.
 	 */
+	/* 根据超时时间计算slot，再根据slot决定将其添加到哪个散列表中 */
 	slot = (timeo + (1<<TCP_TW_RECYCLE_TICK) - 1) >> TCP_TW_RECYCLE_TICK;
 
 	spin_lock(&tw_death_lock);
 
 	/* Unlink it, if it was scheduled */
-	if (tw_del_dead_node(tw))
+	if (tw_del_dead_node(tw))/* 该TW控制块已经被调度，从散列表中摘除，则递减当前系统中TW状态的套接口数 */
 		tcp_tw_count--;
 	else
 		atomic_inc(&tw->tw_refcnt);
 
-	if (slot >= TCP_TW_RECYCLE_SLOTS) {
+	if (slot >= TCP_TW_RECYCLE_SLOTS) {/* 添加到CELL散列表中(超时时间较长) */
 		/* Schedule to slow timer */
-		if (timeo >= TCP_TIMEWAIT_LEN) {
+		if (timeo >= TCP_TIMEWAIT_LEN) {/* 根据超时时间计算应当加入到哪个桶中 */
 			slot = TCP_TWKILL_SLOTS-1;
 		} else {
 			slot = (timeo + TCP_TWKILL_PERIOD-1) / TCP_TWKILL_PERIOD;
@@ -604,29 +643,34 @@ static void tcp_tw_schedule(struct tcp_tw_bucket *tw, int timeo)
 		tw->tw_ttd = jiffies + timeo;
 		slot = (tcp_tw_death_row_slot + slot) & (TCP_TWKILL_SLOTS - 1);
 		list = &tcp_tw_death_row[slot];
-	} else {
+	} else {/* 添加到twcal_row散列表中 */
 		tw->tw_ttd = jiffies + (slot << TCP_TW_RECYCLE_TICK);
 
-		if (tcp_twcal_hand < 0) {
-			tcp_twcal_hand = 0;
+		if (tcp_twcal_hand < 0) {/* 散列表为空 */
+			tcp_twcal_hand = 0;/* 设置下次超时时处理的桶 */
 			tcp_twcal_jiffie = jiffies;
+			/* 设置超时时间后启动定时器 */
 			tcp_twcal_timer.expires = tcp_twcal_jiffie + (slot<<TCP_TW_RECYCLE_TICK);
 			add_timer(&tcp_twcal_timer);
 		} else {
+			/* 如果本次超时时间早于定时器的超时时间，则修改定时器的超时时间 */
 			if (time_after(tcp_twcal_timer.expires, jiffies + (slot<<TCP_TW_RECYCLE_TICK)))
 				mod_timer(&tcp_twcal_timer, jiffies + (slot<<TCP_TW_RECYCLE_TICK));
 			slot = (tcp_twcal_hand + slot)&(TCP_TW_RECYCLE_SLOTS-1);
 		}
+		/* 根据slot找到需要加入的桶 */
 		list = &tcp_twcal_row[slot];
 	}
 
+	/* 将控制块添加到相应的散列表中 */
 	hlist_add_head(&tw->tw_death_node, list);
 
-	if (tcp_tw_count++ == 0)
+	if (tcp_tw_count++ == 0)/* 之前没有tw控制块，则设置定时器 */
 		mod_timer(&tcp_tw_timer, jiffies+TCP_TWKILL_PERIOD);
 	spin_unlock(&tw_death_lock);
 }
 
+/* 处理2MSL等待的定时器 */
 void tcp_twcal_tick(unsigned long dummy)
 {
 	int n, slot;
@@ -636,31 +680,33 @@ void tcp_twcal_tick(unsigned long dummy)
 	int adv = 0;
 
 	spin_lock(&tw_death_lock);
-	if (tcp_twcal_hand < 0)
+	if (tcp_twcal_hand < 0)/* 散列表中不存在TW状态的控制块 */
 		goto out;
 
+	/* 扫描开始的入口及超时时间 */
 	slot = tcp_twcal_hand;
 	j = tcp_twcal_jiffie;
 
-	for (n=0; n<TCP_TW_RECYCLE_SLOTS; n++) {
-		if (time_before_eq(j, now)) {
+	for (n=0; n<TCP_TW_RECYCLE_SLOTS; n++) {/* 遍历散列表，删除超时的控制块 */
+		if (time_before_eq(j, now)) {/* 当前链表已经超时 */
 			struct hlist_node *node, *safe;
 			struct tcp_tw_bucket *tw;
 
 			tw_for_each_inmate_safe(tw, node, safe,
-					   &tcp_twcal_row[slot]) {
+					   &tcp_twcal_row[slot]) {/* 遍历链表删除tw控制块 */
 				__tw_del_dead_node(tw);
 				tcp_timewait_kill(tw);
 				tcp_tw_put(tw);
 				killed++;
 			}
-		} else {
+		} else {/* 当前桶没有超时，说明处理完毕 */
 			if (!adv) {
 				adv = 1;
 				tcp_twcal_jiffie = j;
 				tcp_twcal_hand = slot;
 			}
 
+			/* 如果剩余的链表还有控制块，则重设定时器 */
 			if (!hlist_empty(&tcp_twcal_row[slot])) {
 				mod_timer(&tcp_twcal_timer, j);
 				goto out;
@@ -669,7 +715,7 @@ void tcp_twcal_tick(unsigned long dummy)
 		j += (1<<TCP_TW_RECYCLE_TICK);
 		slot = (slot+1)&(TCP_TW_RECYCLE_SLOTS-1);
 	}
-	tcp_twcal_hand = -1;
+	tcp_twcal_hand = -1;/* 运行到这里，说明所有块都已经处理完毕 */
 
 out:
 	if ((tcp_tw_count -= killed) == 0)
@@ -854,35 +900,38 @@ struct sock *tcp_create_openreq_child(struct sock *sk, struct open_request *req,
  *	Process an incoming packet for SYN_RECV sockets represented
  *	as an open_request.
  */
-
+/* 在SYN_RECV状态下处理TCP段 */
 struct sock *tcp_check_req(struct sock *sk,struct sk_buff *skb,
 			   struct open_request *req,
 			   struct open_request **prev)
 {
 	struct tcphdr *th = skb->h.th;
 	struct tcp_sock *tp = tcp_sk(sk);
+	/* 获取RST、SYN、ACK标志 */
 	u32 flg = tcp_flag_word(th) & (TCP_FLAG_RST|TCP_FLAG_SYN|TCP_FLAG_ACK);
 	int paws_reject = 0;
 	struct tcp_options_received tmp_opt;
 	struct sock *child;
 
 	tmp_opt.saw_tstamp = 0;
-	if (th->doff > (sizeof(struct tcphdr)>>2)) {
-		tcp_parse_options(skb, &tmp_opt, 0);
+	if (th->doff > (sizeof(struct tcphdr)>>2)) {/* 首部中含有选项 */
+		tcp_parse_options(skb, &tmp_opt, 0);/* 解析首部中的选项 */
 
-		if (tmp_opt.saw_tstamp) {
+		if (tmp_opt.saw_tstamp) {/* 有时间戳选项 */
+			/* 记录时间戳选项 */
 			tmp_opt.ts_recent = req->ts_recent;
 			/* We do not store true stamp, but it is not required,
 			 * it can be estimated (approximately)
 			 * from another data.
 			 */
 			tmp_opt.ts_recent_stamp = xtime.tv_sec - ((TCP_TIMEOUT_INIT/HZ)<<req->retrans);
+			/* 校验TCP序号是否有效 */
 			paws_reject = tcp_paws_check(&tmp_opt, th->rst);
 		}
 	}
 
 	/* Check for pure retransmitted SYN. */
-	if (TCP_SKB_CB(skb)->seq == req->rcv_isn &&
+	if (TCP_SKB_CB(skb)->seq == req->rcv_isn &&/* 检查是否重发的ACK */
 	    flg == TCP_FLAG_SYN &&
 	    !paws_reject) {
 		/*
@@ -902,6 +951,7 @@ struct sock *tcp_check_req(struct sock *sk,struct sk_buff *skb,
 		 * Enforce "SYN-ACK" according to figure 8, figure 6
 		 * of RFC793, fixed by RFC1122.
 		 */
+		/* 是重发的SYN，向客户端发送SYN+ACK，然后返回NULL表示此次对段处理完毕 */
 		req->class->rtx_syn_ack(sk, req, NULL);
 		return NULL;
 	}
@@ -959,9 +1009,9 @@ struct sock *tcp_check_req(struct sock *sk,struct sk_buff *skb,
 	 *
 	 * Invalid ACK: reset will be sent by listening socket
 	 */
-	if ((flg & TCP_FLAG_ACK) &&
-	    (TCP_SKB_CB(skb)->ack_seq != req->snt_isn+1))
-		return sk;
+	if ((flg & TCP_FLAG_ACK) &&/* 是ACK段 */
+	    (TCP_SKB_CB(skb)->ack_seq != req->snt_isn+1))/* 不是预期的序号 */
+		return sk;/* 返回父传输控制块，在tcp_rcv_state_process中再做处理 */
 
 	/* Also, it would be not so bad idea to check rcv_tsecr, which
 	 * is essentially ACK extension and too early or too late values
@@ -971,9 +1021,9 @@ struct sock *tcp_check_req(struct sock *sk,struct sk_buff *skb,
 	/* RFC793: "first check sequence number". */
 
 	if (paws_reject || !tcp_in_window(TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq,
-					  req->rcv_isn+1, req->rcv_isn+1+req->rcv_wnd)) {
+					  req->rcv_isn+1, req->rcv_isn+1+req->rcv_wnd)) {/* 段序号不在接收窗口内 */
 		/* Out of window: send ACK and drop. */
-		if (!(flg & TCP_FLAG_RST))
+		if (!(flg & TCP_FLAG_RST))/* 不是RST段则需要向对方发送ACK段 */
 			req->class->send_ack(skb, req);
 		if (paws_reject)
 			NET_INC_STATS_BH(LINUX_MIB_PAWSESTABREJECTED);
@@ -982,10 +1032,10 @@ struct sock *tcp_check_req(struct sock *sk,struct sk_buff *skb,
 
 	/* In sequence, PAWS is OK. */
 
-	if (tmp_opt.saw_tstamp && !after(TCP_SKB_CB(skb)->seq, req->rcv_isn+1))
-			req->ts_recent = tmp_opt.rcv_tsval;
+	if (tmp_opt.saw_tstamp && !after(TCP_SKB_CB(skb)->seq, req->rcv_isn+1))/* ACK段序号正常 */
+			req->ts_recent = tmp_opt.rcv_tsval;/* 保存时间戳 */
 
-		if (TCP_SKB_CB(skb)->seq == req->rcv_isn) {
+		if (TCP_SKB_CB(skb)->seq == req->rcv_isn) {/* 在接收窗口之外，说明是无效SYN段，去掉SYN标志 */
 			/* Truncate SYN, it is out of window starting
 			   at req->rcv_isn+1. */
 			flg &= ~TCP_FLAG_SYN;
@@ -994,19 +1044,19 @@ struct sock *tcp_check_req(struct sock *sk,struct sk_buff *skb,
 		/* RFC793: "second check the RST bit" and
 		 *	   "fourth, check the SYN bit"
 		 */
-		if (flg & (TCP_FLAG_RST|TCP_FLAG_SYN))
+		if (flg & (TCP_FLAG_RST|TCP_FLAG_SYN))/* 有RST标志，需要复位未完成连接的套口 */
 			goto embryonic_reset;
 
 		/* ACK sequence verified above, just make sure ACK is
 		 * set.  If ACK not set, just silently drop the packet.
 		 */
-		if (!(flg & TCP_FLAG_ACK))
+		if (!(flg & TCP_FLAG_ACK))/* 正常情况下，应当有ACK标志，如果没有则丢弃报文 */
 			return NULL;
 
 		/* If TCP_DEFER_ACCEPT is set, drop bare ACK. */
-		if (tp->defer_accept && TCP_SKB_CB(skb)->end_seq == req->rcv_isn+1) {
+		if (tp->defer_accept && TCP_SKB_CB(skb)->end_seq == req->rcv_isn+1) {/* 如果设置了TCP_DEFER_ACCEPT，则无需接收ACK段 */
 			req->acked = 1;
-			return NULL;
+			return NULL;/* 返回NULL直接将其丢弃 */
 		}
 
 		/* OK, ACK is valid, create big socket and
@@ -1015,29 +1065,32 @@ struct sock *tcp_check_req(struct sock *sk,struct sk_buff *skb,
 		 * ESTABLISHED STATE. If it will be dropped after
 		 * socket is created, wait for troubles.
 		 */
+		/* 运行到此，说明第三次握手的ACK段是有效的，调用tcp_v4_syn_recv_sock创建子传输控制块 */
 		child = tp->af_specific->syn_recv_sock(sk, skb, req, NULL);
 		if (child == NULL)
 			goto listen_overflow;
 
+		/* 将刚建立连接的请求块插入到已完成连接的队列中，如果连接请求队列为空，还需要停止连接建立定时器 */
 		sk_set_owner(child, sk->sk_owner);
 		tcp_synq_unlink(tp, req, prev);
 		tcp_synq_removed(sk, req);
 
 		tcp_acceptq_queue(sk, req, child);
-		return child;
+		return child;/* 返回子传输控制块，表示连接建立成功 */
 
-	listen_overflow:
+	listen_overflow:/* 运行到此，说明是由于服务忙还导致连接未建立 */
 		if (!sysctl_tcp_abort_on_overflow) {
-			req->acked = 1;
+			req->acked = 1;/* 设置此标志表示已经收到ACK，但是还没有应答，延后应答客户端 */
 			return NULL;
 		}
 
+	/* 处于SYN_RECV状态的传输控制块接收到SYN段，根据RFC规定需要给对端发送RST段 */
 	embryonic_reset:
 		NET_INC_STATS_BH(LINUX_MIB_EMBRYONICRSTS);
 		if (!(flg & TCP_FLAG_RST))
 			req->class->send_reset(skb);
 
-		tcp_synq_drop(sk, req, prev);
+		tcp_synq_drop(sk, req, prev);/* 删除连接控制块 */
 		return NULL;
 }
 
@@ -1047,13 +1100,15 @@ struct sock *tcp_check_req(struct sock *sk,struct sk_buff *skb,
  * the new socket.
  */
 
+/* 服务器建立子传输控制块后，处理它的TCP段 */
 int tcp_child_process(struct sock *parent, struct sock *child,
 		      struct sk_buff *skb)
 {
 	int ret = 0;
 	int state = child->sk_state;
 
-	if (!sock_owned_by_user(child)) {
+	if (!sock_owned_by_user(child)) {/* 传输控制块的锁没有被用户进程所持有 */
+		/* 处理ESTABLISHED和TIME_WAIT状态以外的TCP段 */
 		ret = tcp_rcv_state_process(child, skb, skb->h.th, skb->len);
 
 		/* Wakeup parent, send SIGIO */
@@ -1064,6 +1119,7 @@ int tcp_child_process(struct sock *parent, struct sock *child,
 		 * in main socket hash table and lock on listening
 		 * socket does not protect us more.
 		 */
+		/* 如果锁被用户态进程持有，则将它加到后备队列中 */
 		sk_add_backlog(child, skb);
 	}
 

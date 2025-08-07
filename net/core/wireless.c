@@ -369,6 +369,9 @@ static inline iw_handler get_handler(struct net_device *dev,
 /*
  * Get statistics out of the driver
  */
+/**
+ * 获取无线设备的统计信息。
+ */
 static inline struct iw_statistics *get_wireless_stats(struct net_device *dev)
 {
 	/* New location */

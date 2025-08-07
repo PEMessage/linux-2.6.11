@@ -47,12 +47,24 @@
 	for(fi = dn_fib_info_list; fi; fi = fi->fib_next)
 #define endfor_fib_info() }
 
+/**
+ * 用于遍历一个fib_info实例中所有的fib_nh结构。
+ * for_nexthops循环内的代码不能改变所遍历的任何fib_nh实例的内容。
+ */
 #define for_nexthops(fi) { int nhsel; const struct dn_fib_nh *nh;\
 	for(nhsel = 0, nh = (fi)->fib_nh; nhsel < (fi)->fib_nhs; nh++, nhsel++)
 
+/**
+ * 用于遍历一个fib_info实例中所有的fib_nh结构。
+ * change_nexthops宏开始一个针对这些fib_nh结构的循环，每一个fib_nh结构用局部变量nh表示。
+ * 就象从这个宏的字面所给出的，该宏可以用于改变这些结构。
+ */
 #define change_nexthops(fi) { int nhsel; struct dn_fib_nh *nh;\
 	for(nhsel = 0, nh = (struct dn_fib_nh *)((fi)->fib_nh); nhsel < (fi)->fib_nhs; nh++, nhsel++)
 
+/**
+ * endfor_nexthops宏来结束change_nexthops和for_nexthops开始的循环
+ */
 #define endfor_nexthops(fi) }
 
 extern int dn_cache_dump(struct sk_buff *skb, struct netlink_callback *cb);

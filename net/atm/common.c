@@ -766,6 +766,9 @@ int vcc_getsockopt(struct socket *sock, int level, int optname,
 #if defined(CONFIG_ATM_LANE) || defined(CONFIG_ATM_LANE_MODULE)
 #if defined(CONFIG_BRIDGE) || defined(CONFIG_BRIDGE_MODULE)
 struct net_bridge;
+/**
+ * 供外部系统调用的，搜索网桥转发数据库中的MAC条目函数。
+ */
 struct net_bridge_fdb_entry *(*br_fdb_get_hook)(struct net_bridge *br,
 						unsigned char *addr) = NULL;
 void (*br_fdb_put_hook)(struct net_bridge_fdb_entry *ent) = NULL;

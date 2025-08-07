@@ -79,6 +79,10 @@ static struct ipv4_devconf ipv4_devconf_dflt = {
 
 static void rtmsg_ifa(int event, struct in_ifaddr *);
 
+/**
+ * 通知其他内核子系统有关本地址设备IP配置的变更。
+ * 在本地接口上添加，删除和修改地址时发送通知。
+ */
 static struct notifier_block *inetaddr_chain;
 static void inet_del_ifa(struct in_device *in_dev, struct in_ifaddr **ifap,
 			 int destroy);
@@ -90,6 +94,9 @@ static void devinet_sysctl_unregister(struct ipv4_devconf *p);
 
 /* Locks all the inet devices. */
 
+/**
+ * 分配一个in_ifaddr数据结构。当用户新增一个新地址至一个接口时，就会分配一个新结构。
+ */
 static struct in_ifaddr *inet_alloc_ifa(void)
 {
 	struct in_ifaddr *ifa = kmalloc(sizeof(*ifa), GFP_KERNEL);
@@ -110,6 +117,10 @@ static void inet_rcu_free_ifa(struct rcu_head *head)
 	kfree(ifa);
 }
 
+/**
+ * 释放一个in_ifaddr数据结构。
+ * 删除单一地址时，或者一起删除所有设备的IP配置时，就可以触发删除。
+ */
 static inline void inet_free_ifa(struct in_ifaddr *ifa)
 {
 	call_rcu(&ifa->rcu_head, inet_rcu_free_ifa);
@@ -133,6 +144,10 @@ void in_dev_finish_destroy(struct in_device *idev)
 	}
 }
 
+/**
+ * 当设备上配置第一个ipv4地址时，该函数被调用
+ * 它分配in_device结构，并将其链接到设备。
+ */
 struct in_device *inetdev_init(struct net_device *dev)
 {
 	struct in_device *in_dev;
@@ -180,6 +195,9 @@ static void in_dev_rcu_put(struct rcu_head *head)
 	in_dev_put(idev);
 }
 
+/**
+ * 把IP配置删除，inetdev_destroy就是把inetdev_init里所做的事情还原而已，另外把所有连接的in_ifaddr结构都删除掉。
+ */
 static void inetdev_destroy(struct in_device *in_dev)
 {
 	struct in_ifaddr *ifa;
@@ -212,6 +230,9 @@ static void inetdev_destroy(struct in_device *in_dev)
 	call_rcu(&in_dev->rcu_head, in_dev_rcu_put);
 }
 
+/**
+ * 输入一个设备和两个IP地址，该函数检查这两个地址是否属于同一个子网。
+ */
 int inet_addr_onlink(struct in_device *in_dev, u32 a, u32 b)
 {
 	rcu_read_lock();
@@ -227,6 +248,11 @@ int inet_addr_onlink(struct in_device *in_dev, u32 a, u32 b)
 	return 0;
 }
 
+/**
+ * Inet_del_ifa就是从相关in_device实例删除一个in_ifaddr结构，同时确保如果该地址为主要地址，所有相关的次要地址也会删除掉，除非管理员刻意通过该设备的/proc/sys/net/ipv4/conf/dev_name/promote_secondaries文件来配置该设备，不要删除次要地址。
+ * 相反的，当相配的主要地址被删除时，一个次要地址可以提升成主要地址。
+ * 		destroy:		当最后一个in_ifaddr实例删除时，是否要将in_device结构删除掉。虽然把空的in_device结构删除是正常的，但偶尔调用者可能不会做这件事。例如，当它知道很快就会新增一个新的in_ifaddr时。
+ */
 static void inet_del_ifa(struct in_device *in_dev, struct in_ifaddr **ifap,
 			 int destroy)
 {
@@ -280,6 +306,10 @@ static void inet_del_ifa(struct in_device *in_dev, struct in_ifaddr **ifap,
 	}
 }
 
+/**
+ * inet_insert_ifa会在in_device里的链表中增加一个新的in_ifaddr结构。
+ * 此函数会检测重复部分，然后，如果它发现有个地址处于另一个地址的子网内，就将其标识为次要。
+ */
 static int inet_insert_ifa(struct in_ifaddr *ifa)
 {
 	struct in_device *in_dev = ifa->ifa_dev;
@@ -331,6 +361,10 @@ static int inet_insert_ifa(struct in_ifaddr *ifa)
 	return 0;
 }
 
+/**
+ * 这是内含inet_insert_ifa的封装函数。
+ * 如果相关设备没有存在in_device结构，就建立一个结构，然后把127.x.x..x这类地址的scope设成本地（SCOPE_HOST）。
+ */
 static int inet_set_ifa(struct net_device *dev, struct in_ifaddr *ifa)
 {
 	struct in_device *in_dev = __in_dev_get(dev);
@@ -368,6 +402,10 @@ struct in_device *inetdev_by_index(int ifindex)
 
 /* Called only from RTNL semaphored context. No locks. */
 
+/**
+ * 给定一个设备、一个网络前缀prefix与一个掩码，该函数遍历该设备上配置的所有的主IP地址，来查找一个与入参数prefix及掩码相匹配的地址。
+ * 成功时返回匹配地址。
+ */
 struct in_ifaddr *inet_ifa_byprefix(struct in_device *in_dev, u32 prefix,
 				    u32 mask)
 {
@@ -380,6 +418,9 @@ struct in_ifaddr *inet_ifa_byprefix(struct in_device *in_dev, u32 prefix,
 	return NULL;
 }
 
+/**
+ * RTM_DELADDR选项实现，对应ip命令的delete子命令
+ */
 static int inet_rtm_deladdr(struct sk_buff *skb, struct nlmsghdr *nlh, void *arg)
 {
 	struct rtattr **rta = arg;
@@ -412,6 +453,9 @@ out:
 	return -EADDRNOTAVAIL;
 }
 
+/**
+ * RTM_NEWADDR选项实现，对应ip命令的add子命令
+ */
 static int inet_rtm_newaddr(struct sk_buff *skb, struct nlmsghdr *nlh, void *arg)
 {
 	struct rtattr **rta = arg;
@@ -767,6 +811,10 @@ out:
 	return done;
 }
 
+/**
+ * 该函数用于在指定设备上所配置的那些IP地址中选出一个IP地址。
+ * 此函数接受另外一个可选参数是scope，可用于缩小查询范围。
+ */
 u32 inet_select_addr(const struct net_device *dev, u32 dst, int scope)
 {
 	u32 addr = 0;
@@ -894,12 +942,17 @@ u32 inet_confirm_addr(const struct net_device *dev, u32 dst, u32 local, int scop
 /*
  *	Device notifier
  */
-
+/**
+ * 注册对inetaddr_chain链感兴趣的事件(IP配置改变)。主要是路由和Netfilter伪装对此感兴趣。
+ */
 int register_inetaddr_notifier(struct notifier_block *nb)
 {
 	return notifier_chain_register(&inetaddr_chain, nb);
 }
 
+/**
+ * 注销对inetaddr_chain链感兴趣的事件(IP配置改变)。
+ */
 int unregister_inetaddr_notifier(struct notifier_block *nb)
 {
 	return notifier_chain_unregister(&inetaddr_chain, nb);
@@ -1039,6 +1092,9 @@ rtattr_failure:
 	return -1;
 }
 
+/**
+ * RTM_GETADDR选项实现，对应ip命令的list, lst, show，flush子命令
+ */
 static int inet_dump_ifaddr(struct sk_buff *skb, struct netlink_callback *cb)
 {
 	int idx, ip_idx;

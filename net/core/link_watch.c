@@ -27,7 +27,14 @@
 
 
 enum lw_bits {
+	/**
+	 * 当这个标志被设置时，linkwatch_event被调度执行，此标志由linkwatch_event自己清除。
+	 */
 	LW_RUNNING = 0,
+	/**
+	 * 由于lweventlist 通常有不止一个的元素，代码优化静态分配的 lw_event 数据结构并总是用它作为第一个元素。仅当内核需要明了不止一个的未决事件(事件在不止一个设备)，为它分配额外的lw_event结构；否则，它简单的重用同一个结构。
+	 * 此标志表示第一个元素是否可用。
+	 */
 	LW_SE_USED
 };
 
@@ -37,11 +44,27 @@ static unsigned long linkwatch_nextevent;
 static void linkwatch_event(void *dummy);
 static DECLARE_WORK(linkwatch_work, linkwatch_event, NULL);
 
+/**
+ * 连接状态改变事件列表。
+ */
 static LIST_HEAD(lweventlist);
+/**
+ * 保护lweventlist链表的锁。
+ */
 static DEFINE_SPINLOCK(lweventlist_lock);
 
+/**
+ * 网络设备连接状态改变事件。
+ * lw_event结构并不包括任何区分信号传递的检测与丢失的参数.
+ */
 struct lw_event {
+	/**
+	 * 将结构连接到未决连接状态改变事件全局队列的字段lweventlist
+	 */
 	struct list_head list;
+	/**
+	 * 关联到net_device结构的指针
+	 */
 	struct net_device *dev;
 };
 
@@ -71,9 +94,16 @@ void linkwatch_run_queue(void)
 		/* We are about to handle this device,
 		 * so new events can be accepted
 		 */
+		/**
+		 * 清除dev->state的__LINK_STATE_LINKWATCH_PENDING标志位
+		 */
 		clear_bit(__LINK_STATE_LINKWATCH_PENDING, &dev->state);
 
 		if (dev->flags & IFF_UP) {
+			/**
+			 * 发送NETDEV_CHANGE通知给netdev_chain通知链。
+			 * 发送RTM_NEWLINK通知给RTMGRP_LINK RTnetlink组。
+			 */
 			netdev_state_change(dev);
 		}
 
@@ -81,7 +111,9 @@ void linkwatch_run_queue(void)
 	}
 }       
 
-
+/**
+ * 处理lweventlist(包含linkwatch_run_queue)中的元素，这些元素包含未决的连接状态改变事件。
+ */
 static void linkwatch_event(void *dummy)
 {
 	/* Limit the number of linkwatch events to one

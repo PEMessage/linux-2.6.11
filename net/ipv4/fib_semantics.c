@@ -47,10 +47,19 @@
 
 #define FSprintk(a...)
 
+/**
+ * 这个rwlock锁保护所有的fib_info数据结构。
+ */
 static DEFINE_RWLOCK(fib_info_lock);
 static struct hlist_head *fib_info_hash;
 static struct hlist_head *fib_info_laddrhash;
+/**
+ * HASH表容量。
+ */
 static unsigned int fib_hash_size;
+/**
+ * 所有fib_info结构的总数。
+ */
 static unsigned int fib_info_cnt;
 
 #define DEVINDEX_HASHBITS 8
@@ -59,11 +68,23 @@ static struct hlist_head fib_info_devhash[DEVINDEX_HASHSIZE];
 
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
 
+/**
+ * 当修改fib_info结构中由多路径特性使用的字段时，使用这个spin锁。
+ */
 static DEFINE_SPINLOCK(fib_multipath_lock);
 
+/**
+ * 用于遍历一个fib_info实例中所有的fib_nh结构。
+ * for_nexthops循环内的代码不能改变所遍历的任何fib_nh实例的内容。
+ */
 #define for_nexthops(fi) { int nhsel; const struct fib_nh * nh; \
 for (nhsel=0, nh = (fi)->fib_nh; nhsel < (fi)->fib_nhs; nh++, nhsel++)
 
+/**
+ * 用于遍历一个fib_info实例中所有的fib_nh结构。
+ * change_nexthops宏开始一个针对这些fib_nh结构的循环，每一个fib_nh结构用局部变量nh表示。
+ * 就象从这个宏的字面所给出的，该宏可以用于改变这些结构。
+ */
 #define change_nexthops(fi) { int nhsel; struct fib_nh * nh; \
 for (nhsel=0, nh = (struct fib_nh*)((fi)->fib_nh); nhsel < (fi)->fib_nhs; nh++, nhsel++)
 
@@ -79,6 +100,9 @@ for (nhsel=0; nhsel < 1; nhsel++)
 
 #endif /* CONFIG_IP_ROUTE_MULTIPATH */
 
+/**
+ * endfor_nexthops宏来结束change_nexthops和for_nexthops开始的循环
+ */
 #define endfor_nexthops(fi) }
 
 
@@ -270,6 +294,9 @@ int ip_fib_check_default(u32 gw, struct net_device *dev)
 	return -1;
 }
 
+/**
+ * 当添加或删除一条路由时，利用程序rtmsg_fib向Netlink组RTMGRP_IPV4_ROUTE发送一个通知。
+ */
 void rtmsg_fib(int event, u32 key, struct fib_alias *fa,
 	       int z, int tb_id,
 	       struct nlmsghdr *n, struct netlink_skb_parms *req)
@@ -830,28 +857,53 @@ failure:
 	return NULL;
 }
 
+/**
+ * 在与给定的fib_node相关的路由（fib_alias结构）中，查找与搜索key所有字段都匹配的路由项。
+ */
 int fib_semantic_match(struct list_head *head, const struct flowi *flp,
 		       struct fib_result *res, int prefixlen)
 {
 	struct fib_alias *fa;
 	int nh_sel = 0;
 
+	/**
+	 * 在与给定的fib_node相关的路由（fib_alias结构）中，查找与搜索key所有字段都匹配的路由项。
+	 */
 	list_for_each_entry(fa, head, fa_list) {
 		int err;
 
+		/**
+		 * 路由项配置了TOS，则比较是否与指定TOS匹配。
+		 */
 		if (fa->fa_tos &&
 		    fa->fa_tos != flp->fl4_tos)
 			continue;
 
+		/**
+		 * scope比搜索key更窄。
+		 * 例如，如果路由子系统查找scope为RT_SCOPE_UNIVERSE的路由，则不能使用scope为RT_SCOPE_LINK的路由项。
+		 */
 		if (fa->fa_scope < flp->fl4_scope)
 			continue;
 
+		/**
+		 * 设置FA_S_ACCESSED，这样，当删除本路由时，会刷新路由缓存。
+		 */
 		fa->fa_state |= FA_S_ACCESSED;
 
+		/**
+		 * 从相关的fib_node中提取出路由信息。
+		 */
 		err = fib_props[fa->fa_type].error;
+		/**
+		 * 如果err是负值，表示管理失败。返回一个错误码以使内核采取相应的行动。
+		 */
 		if (err == 0) {
 			struct fib_info *fi = fa->fa_info;
 
+			/**
+			 * 该路由已经被删除，选择下一个。
+			 */
 			if (fi->fib_flags & RTNH_F_DEAD)
 				continue;
 
@@ -861,7 +913,13 @@ int fib_semantic_match(struct list_head *head, const struct flowi *flp,
 			case RTN_BROADCAST:
 			case RTN_ANYCAST:
 			case RTN_MULTICAST:
+				/**
+				 * 根据下一跳，来判断是否包含指定的出设备。
+				 */
 				for_nexthops(fi) {
+					/**
+					 * 下一跳无效，搜索另外的下一跳。如果所有下一跳不可用，则搜索下一个路由项。
+					 */
 					if (nh->nh_flags&RTNH_F_DEAD)
 						continue;
 					if (!flp->oif || flp->oif == nh->nh_oif)
@@ -978,6 +1036,9 @@ rtattr_failure:
 
 #ifndef CONFIG_IP_NOSIOCRT
 
+/**
+ * 路由子系统中，将ioctl命令的输入信息转换为Netlink格式。
+ */
 int
 fib_convert_rtentry(int cmd, struct nlmsghdr *nl, struct rtmsg *rtm,
 		    struct kern_rta *rta, struct rtentry *r)
@@ -1127,6 +1188,16 @@ fib_convert_rtentry(int cmd, struct nlmsghdr *nl, struct rtmsg *rtm,
    - device went down -> we must shutdown all nexthops going via it.
  */
 
+/**
+ * 当一个设备被关闭或一个本地地址被删除时更新路由表。
+ *		local:		已经被删除的IP地址。
+ *		dev:		已经被关闭的设备。
+ *		force:		决定何时执行相应的活动。
+ *				0：一个IP地址已经被删除。
+ *				1：一个设备已经被关闭。
+ *				2：一个设备已经被注销
+ * 返回标记为dead的fib_info数量。
+ */
 int fib_sync_down(u32 local, struct net_device *dev, int force)
 {
 	int ret = 0;
@@ -1203,6 +1274,10 @@ int fib_sync_down(u32 local, struct net_device *dev, int force)
    It takes sense only on multipath routes.
  */
 
+/**
+ * 只有在内核支持多路径时才使用该函数。
+ * 它的主要目的是在路由的一些下一跳为alive时更新fib_info结构内路由的一些参数。返回值为RTNH_F_DEAD标志被清除的fib_info结构数量。
+ */
 int fib_sync_up(struct net_device *dev)
 {
 	struct fib_info *prev_fi;
@@ -1259,25 +1334,36 @@ int fib_sync_up(struct net_device *dev)
    The algorithm is suboptimal, but it provides really
    fair weighted route distribution.
  */
-
+/**
+ * 从多路径路由中选择下一跳。
+ */
 void fib_select_multipath(const struct flowi *flp, struct fib_result *res)
 {
 	struct fib_info *fi = res->fi;
 	int w;
 
 	spin_lock_bh(&fib_multipath_lock);
-	if (fi->fib_power <= 0) {
+	if (fi->fib_power <= 0) {/* 需要重新初始化权值。 */
 		int power = 0;
+		/**
+		 * change_nexthops循环设置下一跳的nh_power字段，同时将所有下一跳的权值累加到函数的局部变量power上。
+		 */
 		change_nexthops(fi) {
 			if (!(nh->nh_flags&RTNH_F_DEAD)) {
 				power += nh->nh_weight;
 				nh->nh_power = nh->nh_weight;
 			}
 		} endfor_nexthops(fi);
+		/**
+		 * fib_info->fib_power被初始化为所有下一跳权值的总和。
+		 */
 		fi->fib_power = power;
 		if (power <= 0) {
 			spin_unlock_bh(&fib_multipath_lock);
 			/* Race condition: route has just become dead. */
+			/**
+			 * 所有下一跳均不可用。
+			 */
 			res->nh_sel = 0;
 			return;
 		}
@@ -1287,9 +1373,14 @@ void fib_select_multipath(const struct flowi *flp, struct fib_result *res)
 	/* w should be random number [0..fi->fib_power-1],
 	   it is pretty bad approximation.
 	 */
-
+	/**
+	 * 根据当前jiffies生成一个伪随机数。
+	 */
 	w = jiffies % fi->fib_power;
 
+	/**
+	 * 遍历所有的下一跳，直到发现某个下一跳的tokens数（fib_nh->nh_power）大于或等于w。注意每次循环时递减w，以使每一次循环都更有可能找到匹配条件的下一跳。
+	 */
 	change_nexthops(fi) {
 		if (!(nh->nh_flags&RTNH_F_DEAD) && nh->nh_power) {
 			if ((w -= nh->nh_power) <= 0) {

@@ -51,13 +51,21 @@
 
 #define RT_TABLE_MIN RT_TABLE_MAIN
 
+/**
+ * 内核将到本地地址的路由表项放在该表中，包括到相关的网段地址以及网段广播地址的路由表项。
+ */
 struct fib_table *ip_fib_local_table;
+/**
+ * 所有其他的路由表项（包括用户配置的静态路由表项，路由协议生成的动态路由表项）都放在该表内。
+ */
 struct fib_table *ip_fib_main_table;
 
 #else
 
 #define RT_TABLE_MIN 1
-
+/**
+ * 在支持策略路由情况下，指向255个路由表的指针被存储在fib_tables数组内
+ */
 struct fib_table *fib_tables[RT_TABLE_MAX+1];
 
 struct fib_table *__fib_new_table(int id)
@@ -74,7 +82,12 @@ struct fib_table *__fib_new_table(int id)
 
 #endif /* CONFIG_IP_MULTIPLE_TABLES */
 
-
+/**
+ * 扫描ip_fib_main_table与ip_fib_local_table路由表，删除所有的设置有RTNH_F_DEAD 标志的fib_info结构。
+ * 它既删除fib_info结构，也删除相关联的fib_alias结构。
+ * 当一个fib_node实例不再有fib_alias结构时，该fib_node实例也被删除。
+ * 当内核支持多路径时，fib_flush扫描所有的路由表。
+ */
 static void fib_flush(void)
 {
 	int flushed = 0;
@@ -123,7 +136,9 @@ out:
 	fib_res_put(&res);
 	return dev;
 }
-
+/**
+ * 确定一个L3地址是一个单播、广播和多播地址。
+ */
 unsigned inet_addr_type(u32 addr)
 {
 	struct flowi		fl = { .nl_u = { .ip4_u = { .daddr = addr } } };
@@ -158,6 +173,10 @@ unsigned inet_addr_type(u32 addr)
    - check, that packet arrived from expected physical interface.
  */
 
+/**
+ * 对从一个给定设备接收到的报文的源IP地址检验，检测企图的IP欺骗。
+ * 而且还要在使能非对称路由情况下，确保报文的源IP地址通过该报文接收接口是可达的
+ */
 int fib_validate_source(u32 src, u32 dst, u8 tos, int oif,
 			struct net_device *dev, u32 *spec_dst, u32 *itag)
 {
@@ -408,6 +427,9 @@ static void fib_magic(int cmd, int type, u32 dst, int dst_len, struct in_ifaddr 
 		tb->tb_delete(tb, &req.rtm, &rta, &req.nlh, NULL);
 }
 
+/**
+ * 当配置一个新IP时，处理路由相关的事件。
+ */
 static void fib_add_ifaddr(struct in_ifaddr *ifa)
 {
 	struct in_device *in_dev = ifa->ifa_dev;
@@ -417,7 +439,13 @@ static void fib_add_ifaddr(struct in_ifaddr *ifa)
 	u32 addr = ifa->ifa_local;
 	u32 prefix = ifa->ifa_address&mask;
 
+	/**
+	 * 添加一条第二IP地址
+	 */
 	if (ifa->ifa_flags&IFA_F_SECONDARY) {
+		/**
+		 * 在该设备上必须存在在同一网段（prefix）内的一个主IP地址。如果这样的主IP地址不存在，那么将得到错误，配置不能够生效。
+		 */
 		prim = inet_ifa_byprefix(in_dev, prefix, mask);
 		if (prim == NULL) {
 			printk(KERN_DEBUG "fib_add_ifaddr: bug: prim == NULL\n");
@@ -425,21 +453,45 @@ static void fib_add_ifaddr(struct in_ifaddr *ifa)
 		}
 	}
 
+	/**
+	 * 添加到IP地址的本地路由。
+	 * 即使此时设备没有使能，也可以安全的添加本地地址路由，因为即使后面设备使能后，添加本地地址也不会成功，不会造成重复。
+	 */
 	fib_magic(RTM_NEWROUTE, RTN_LOCAL, addr, 32, prim);
 
+	/**
+	 * 当设备没有使能时，其上的广播地址、网络地址都不能使用，因此在此可以退出。
+	 * 当设备使能后，再添加它们的广播地址、网络地址。
+	 */
 	if (!(dev->flags&IFF_UP))
 		return;
 
 	/* Add broadcast address, if it is explicitly assigned. */
+	/**
+	 * 如果明确给出了广播地址且为受限广播地址255.255.255.255，那么不添加到该广播地址的路由，因为路由查找程序要检查全255的广播地址
+	 */
 	if (ifa->ifa_broadcast && ifa->ifa_broadcast != 0xFFFFFFFF)
+		/**
+		 * 否则添加设备广播地址到路由表中。
+		 */
 		fib_magic(RTM_NEWROUTE, RTN_BROADCAST, ifa->ifa_broadcast, 32, prim);
 
-	if (!ZERONET(prefix) && !(ifa->ifa_flags&IFA_F_SECONDARY) &&
-	    (prefix != addr || ifa->ifa_prefixlen < 32)) {
+	if (!ZERONET(prefix) && !(ifa->ifa_flags&IFA_F_SECONDARY) && /* 第二IP地址不需要到网络地址的路由，也不需要到导出的广播地址的路由：相关的主地址配置时已经添加了这些路由项。 */
+	    (prefix != addr || ifa->ifa_prefixlen < 32)) {/* 当prefixlen为32时，在子网内只有一个有效地址，所以不需要导出的广播路由或网络路由。 */
+		/**
+		 * 当prefixlen为31时，只有一个比特位参与，所以在子网内只有两个地址。
+		 * clear比特位的地址表示网络地址，set比特位的地址表示主机地址（函数正在配置的地址）。
+		 * 这种情况下需要到这两个地址的路由，而不需要到导出的广播地址的路由。
+		 */
 		fib_magic(RTM_NEWROUTE, dev->flags&IFF_LOOPBACK ? RTN_LOCAL :
 			  RTN_UNICAST, prefix, ifa->ifa_prefixlen, prim);
 
 		/* Add network specific broadcasts, when it takes a sense */
+
+		/**
+		 * 当prefixlen小于31时，子网内包含的地址数大于或等于四个，由于本地地址、网络地址和广播地址只占用其中三个，因而子网内还可以包含其他地址。
+		 * 这时内核添加一条到导出的广播地址的路由及一条到导出的网段地址的路由。
+		 */
 		if (ifa->ifa_prefixlen < 31) {
 			fib_magic(RTM_NEWROUTE, RTN_BROADCAST, prefix, 32, prim);
 			fib_magic(RTM_NEWROUTE, RTN_BROADCAST, prefix|~mask, 32, prim);
@@ -447,6 +499,9 @@ static void fib_add_ifaddr(struct in_ifaddr *ifa)
 	}
 }
 
+/**
+ * 当从一个接口删除一个IP地址时，路由子系统得到通知以便清理路由表和路由缓存。这是通过fib_del_ifaddr来实现的。
+ */
 static void fib_del_ifaddr(struct in_ifaddr *ifa)
 {
 	struct in_device *in_dev = ifa->ifa_dev;
@@ -462,9 +517,16 @@ static void fib_del_ifaddr(struct in_ifaddr *ifa)
 	unsigned ok = 0;
 
 	if (!(ifa->ifa_flags&IFA_F_SECONDARY))
+		/**
+		 * 删除本地地址。
+		 */
 		fib_magic(RTM_DELROUTE, dev->flags&IFF_LOOPBACK ? RTN_LOCAL :
 			  RTN_UNICAST, any, ifa->ifa_prefixlen, prim);
 	else {
+		/**
+		 * 若是删除一个第二IP地址，那么必须有一个主IP地址与它在同一网段。
+		 * 如果不是，则前面某个地方可能出错因而返回一个错误。
+		 */
 		prim = inet_ifa_byprefix(in_dev, any, ifa->ifa_mask);
 		if (prim == NULL) {
 			printk(KERN_DEBUG "fib_del_ifaddr: bug: prim == NULL\n");
@@ -477,7 +539,9 @@ static void fib_del_ifaddr(struct in_ifaddr *ifa)
 
 	   Scan address list to be sure that addresses are really gone.
 	 */
-
+	/**
+	 * fib_del_ifaddr扫描设备上配置的所有地址，检查哪些需要删除。
+	 */
 	for (ifa1 = in_dev->ifa_list; ifa1; ifa1 = ifa1->ifa_next) {
 		if (ifa->ifa_local == ifa1->ifa_local)
 			ok |= LOCAL_OK;
@@ -499,6 +563,10 @@ static void fib_del_ifaddr(struct in_ifaddr *ifa)
 		fib_magic(RTM_DELROUTE, RTN_LOCAL, ifa->ifa_local, 32, prim);
 
 		/* Check, that this local address finally disappeared. */
+		/**
+		 * 多数情况下，当删除一个第二IP地址时，路由子系统只需要删除到该IP地址的路由，而不删除到网段地址和广播地址的路由，因为主IP地址（以及其它可能存在的第二IP地址）仍然需要它们。
+		 * 但还可能在删除一个第二IP地址时，不需要删除到该IP地址的路由：例如，当管理员配置的一个IP地址具有两个不同的网络掩码。
+		 */
 		if (inet_addr_type(ifa->ifa_local) != RTN_LOCAL) {
 			/* And the last, but not the least thing.
 			   We must flush stray FIB entries.
@@ -506,6 +574,9 @@ static void fib_del_ifaddr(struct in_ifaddr *ifa)
 			   First of all, we scan fib_info list searching
 			   for stray nexthop entries, then ignite fib_flush.
 			*/
+			/**
+			 * 清理路由表。
+			 */
 			if (fib_sync_down(ifa->ifa_local, NULL, 0))
 				fib_flush();
 		}
@@ -516,6 +587,10 @@ static void fib_del_ifaddr(struct in_ifaddr *ifa)
 #undef BRD1_OK
 }
 
+/**
+ * 通过调用fib_sync_down来禁止输入参数dev上的IP协议。
+ * 当删除的路由项数量为正值时（通过fib_sync_down的返回值判断），该函数也立即flush路由表。
+ */
 static void fib_disable_ip(struct net_device *dev, int force)
 {
 	if (fib_sync_down(0, dev, force))
@@ -524,12 +599,19 @@ static void fib_disable_ip(struct net_device *dev, int force)
 	arp_ifdown(dev);
 }
 
+/**
+ * 旦设备的IP配置发生变化，路由子系统将收到一个通知，运行fib_inetaddr_event来处理该事件。
+ */
 static int fib_inetaddr_event(struct notifier_block *this, unsigned long event, void *ptr)
 {
 	struct in_ifaddr *ifa = (struct in_ifaddr*)ptr;
 
 	switch (event) {
 	case NETDEV_UP:
+		/**
+		 * 本地设备上已经配置了一个新的IP地址。
+		 * 处理钩子必须将必要的路由项添加到local_table路由表中，这是由fib_add_ifaddr程序来完成的。
+		 */
 		fib_add_ifaddr(ifa);
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
 		fib_sync_up(ifa->ifa_dev->dev);
@@ -537,7 +619,14 @@ static int fib_inetaddr_event(struct notifier_block *this, unsigned long event, 
 		rt_cache_flush(-1);
 		break;
 	case NETDEV_DOWN:
+		/**
+		 * 本地设备上已经删除了一个IP地址。
+		 * 处理钩子必须将以前由NETDEV_UP事件添加的路由项删除，这是由fib_del_ifaddr来完成的。
+		 */
 		fib_del_ifaddr(ifa);
+		/**
+		 * 当fib_del_ifaddr从一个设备上删除最后一个IP地址时，fib_inetaddr_event函数调用fib_disable_ip来禁止该设备上的IP协议。
+		 */
 		if (ifa->ifa_dev && ifa->ifa_dev->ifa_list == NULL) {
 			/* Last address was deleted from this interface.
 			   Disable IP.
@@ -551,12 +640,19 @@ static int fib_inetaddr_event(struct notifier_block *this, unsigned long event, 
 	return NOTIFY_DONE;
 }
 
+/**
+ * 当一个设备的状态或其某些配置部分发生变化，路由子系统将收到通知，调用fib_netdev_event来处理该事件。
+ */
 static int fib_netdev_event(struct notifier_block *this, unsigned long event, void *ptr)
 {
 	struct net_device *dev = ptr;
 	struct in_device *in_dev = __in_dev_get(dev);
 
 	if (event == NETDEV_UNREGISTER) {
+		/**
+		 * 当一个设备注销时，从路由表（包括路由缓存）删除使用该设备的所有路由项。
+		 * 如果多路径路由项的下一跳中至少有一个使用该设备，则该路由项也被删除。
+		 */
 		fib_disable_ip(dev, 2);
 		return NOTIFY_DONE;
 	}
@@ -566,6 +662,10 @@ static int fib_netdev_event(struct notifier_block *this, unsigned long event, vo
 
 	switch (event) {
 	case NETDEV_UP:
+		/**
+		 * 当一个设备变为UP时，必须将与该设备上所有IP地址相关的路由表项添加到ip_fib_local_table路由表中。
+		 * 这是通过对该设备上配置的每一个IP地址，都调用fib_add_ifaddr函数来完成的。
+		 */
 		for_ifa(in_dev) {
 			fib_add_ifaddr(ifa);
 		} endfor_ifa(in_dev);
@@ -575,10 +675,17 @@ static int fib_netdev_event(struct notifier_block *this, unsigned long event, vo
 		rt_cache_flush(-1);
 		break;
 	case NETDEV_DOWN:
+		/**
+		 * 当一个设备变为DOWN时，调用fib_disable_ip从路由表（包括路由缓存）删除使用该设备的所有路由项。
+		 */
 		fib_disable_ip(dev, 0);
 		break;
 	case NETDEV_CHANGEMTU:
 	case NETDEV_CHANGE:
+		/**
+		 * 当一个设备的配置发生变化时，flush路由表缓存。
+		 * 最常见的配置变化是MTU或PROMISCUITY状态被修改。
+		 */
 		rt_cache_flush(0);
 		break;
 	}

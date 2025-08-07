@@ -36,15 +36,17 @@
  *	Save time not doing verify_area. copy_*_user will make this work
  *	in any case.
  */
-
+/**
+ * 对用户态提供的msghdr结构进行检验。
+ */
 int verify_iovec(struct msghdr *m, struct iovec *iov, char *address, int mode)
 {
 	int size, err, ct;
 	
-	if (m->msg_namelen) {
+	if (m->msg_namelen) {/* 地址长度有效 */
 		if (mode == VERIFY_READ) {
 			err = move_addr_to_kernel(m->msg_name, m->msg_namelen,
-						  address);
+						  address);/* 从用户态复制地址到内核中 */
 			if (err < 0)
 				return err;
 		}
@@ -54,13 +56,13 @@ int verify_iovec(struct msghdr *m, struct iovec *iov, char *address, int mode)
 	}
 
 	size = m->msg_iovlen * sizeof(struct iovec);
-	if (copy_from_user(iov, m->msg_iov, size))
+	if (copy_from_user(iov, m->msg_iov, size))/* 从用户态复制缓冲区描述表 */
 		return -EFAULT;
 
 	m->msg_iov = iov;
 	err = 0;
 
-	for (ct = 0; ct < m->msg_iovlen; ct++) {
+	for (ct = 0; ct < m->msg_iovlen; ct++) {/* 遍历所有iovec长度，防止整形溢出 */
 		err += iov[ct].iov_len;
 		/*
 		 * Goal is not to verify user data, but to prevent returning
@@ -71,7 +73,7 @@ int verify_iovec(struct msghdr *m, struct iovec *iov, char *address, int mode)
 			return -EMSGSIZE;
 	}
 
-	return err;
+	return err;/* 返回缓冲区总大小 */
 }
 
 /*
@@ -79,7 +81,9 @@ int verify_iovec(struct msghdr *m, struct iovec *iov, char *address, int mode)
  *
  *	Note: this modifies the original iovec.
  */
- 
+/**
+ * 将内核中的数据复制到用户态缓冲区中。
+ */
 int memcpy_toiovec(struct iovec *iov, unsigned char *kdata, int len)
 {
 	while (len > 0) {
@@ -103,7 +107,9 @@ int memcpy_toiovec(struct iovec *iov, unsigned char *kdata, int len)
  *
  *	Note: this modifies the original iovec.
  */
- 
+/**
+ * 将用户态缓冲区中的数据复制到内核中
+ */ 
 int memcpy_fromiovec(unsigned char *kdata, struct iovec *iov, int len)
 {
 	while (len > 0) {
@@ -124,6 +130,9 @@ int memcpy_fromiovec(unsigned char *kdata, struct iovec *iov, int len)
 
 /*
  *	For use with ip_build_xmit
+ */
+/**
+ * 将用户态缓冲区中指定偏移处的数据复制到内核中。
  */
 int memcpy_fromiovecend(unsigned char *kdata, struct iovec *iov, int offset,
 			int len)
@@ -156,6 +165,9 @@ int memcpy_fromiovecend(unsigned char *kdata, struct iovec *iov, int offset,
  *
  *	ip_build_xmit must ensure that when fragmenting only the last
  *	call to this function will be unaligned also.
+ */
+/**
+ * 与memcpy_fromiovecend类似，但是它还对复制的数据计算校验和，并累计到原来的校验和中。
  */
 int csum_partial_copy_fromiovecend(unsigned char *kdata, struct iovec *iov,
 				 int offset, unsigned int len, int *csump)

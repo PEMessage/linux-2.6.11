@@ -82,31 +82,63 @@ static struct inet_peer peer_fake_node = {
 };
 #define peer_avl_empty (&peer_fake_node)
 static struct inet_peer *peer_root = peer_avl_empty;
+/**
+ * 保护IP长效端点信息。
+ */
 static DEFINE_RWLOCK(peer_pool_lock);
 #define PEER_MAXDEPTH 40 /* sufficient for about 2^27 nodes */
 
 static volatile int peer_total;
 /* Exported for sysctl_net_ipv4.  */
+/**
+ * 可以分配的inet_peer的最大数目。
+ */
 int inet_peer_threshold = 65536 + 128;	/* start to throw entries more
 					 * aggressively at this stage */
+/**
+ * 垃圾定时器最小间隔时间。
+ */
 int inet_peer_minttl = 120 * HZ;	/* TTL under high load: 120 sec */
+/**
+ * 垃圾定时器最大间隔时间。
+ */
 int inet_peer_maxttl = 10 * 60 * HZ;	/* usual time to live: 10 min */
 
 /* Exported for inet_putpeer inline function.  */
+/**
+ * 未用项目链表的头节点和尾节点。
+ */
 struct inet_peer *inet_peer_unused_head,
 		**inet_peer_unused_tailp = &inet_peer_unused_head;
+/**
+ * 保护未用项目链表。
+ */
 DEFINE_SPINLOCK(inet_peer_unused_lock);
+/**
+ * 为了避免定时器长期占用处理器资源，每次定时器到期时可删除的元素数目是PEER_MAX_CLEANUP_WORK（30）。
+ */
 #define PEER_MAX_CLEANUP_WORK 30
 
 static void peer_check_expire(unsigned long dummy);
+/**
+ * 定期删除一些给定时间内没使用过的长效端点项目
+ */
 static struct timer_list peer_periodic_timer =
 	TIMER_INITIALIZER(peer_check_expire, 0, 0);
 
 /* Exported for sysctl_net_ipv4.  */
+/**
+ * 两次定期垃圾收集之间所经过的时间量。因为由那些inet_peer结构所用的内存量有限。
+ * 有个定期定时器会上未用项目到期。当系统负载不沉重时，就使用inet_peer_gc_maxtime，而系统负载沉重时，就使用inet_peer_gc_mintime。
+ * 于是，项目越多，此定时器就越常到期。
+ */
 int inet_peer_gc_mintime = 10 * HZ,
     inet_peer_gc_maxtime = 120 * HZ;
 
 /* Called from ip_output.c:ip_init  */
+/**
+ * 初始化长效端点信息。由ip_init调用。
+ */
 void __init inet_initpeers(void)
 {
 	struct sysinfo si;
@@ -117,6 +149,9 @@ void __init inet_initpeers(void)
 	 * <kuznet@ms2.inr.ac.ru>.  I don't have any opinion about the values
 	 * myself.  --SAW
 	 */
+	/**
+	 * 定义长效端点占用的内存阀值。其值的计算是根据系统中RAM的数量。
+	 */
 	if (si.totalram <= (32768*1024)/PAGE_SIZE)
 		inet_peer_threshold >>= 1; /* max pool size about 1MB on IA32 */
 	if (si.totalram <= (16384*1024)/PAGE_SIZE)
@@ -124,6 +159,9 @@ void __init inet_initpeers(void)
 	if (si.totalram <= (8192*1024)/PAGE_SIZE)
 		inet_peer_threshold >>= 2; /* about 128KB */
 
+	/**
+	 * 创建缓存对象。
+	 */
 	peer_cachep = kmem_cache_create("inet_peer_cache",
 			sizeof(struct inet_peer),
 			0, SLAB_HWCACHE_ALIGN,
@@ -138,6 +176,9 @@ void __init inet_initpeers(void)
 	peer_periodic_timer.expires = jiffies
 		+ net_random() % inet_peer_gc_maxtime
 		+ inet_peer_gc_maxtime;
+	/**
+	 * 垃圾收集定时器。
+	 */
 	add_timer(&peer_periodic_timer);
 }
 
@@ -158,6 +199,9 @@ static void unlink_from_unused(struct inet_peer *p)
 }
 
 /* Called with local BH disabled and the pool lock held. */
+/**
+ * 在AVL树中实现简单的搜索。
+ */
 #define lookup(daddr) 						\
 ({								\
 	struct inet_peer *u, **v;				\
@@ -337,6 +381,10 @@ static void unlink_from_pool(struct inet_peer *p)
 }
 
 /* May be called with local BH enabled. */
+/**
+ * 清除未用链表中的项目.
+ * 		ttl:		inet_peer实例必须在未用链表中停留多久才能被删除。当为0时，任何实例都可以被删除。
+ */
 static int cleanup_once(unsigned long ttl)
 {
 	struct inet_peer *p;
@@ -373,6 +421,10 @@ static int cleanup_once(unsigned long ttl)
 }
 
 /* Called with or without local BH being disabled. */
+/**
+ * 搜索长效IP端点。此函数可以由其他子系统使用。
+ * 例如，TCP和路由，用来搜寻指定项目。此函数建立在lookup之上。
+ */
 struct inet_peer *inet_getpeer(__u32 daddr, int create)
 {
 	struct inet_peer *p, *n;
@@ -380,11 +432,17 @@ struct inet_peer *inet_getpeer(__u32 daddr, int create)
 
 	/* Look up for the address quickly. */
 	read_lock_bh(&peer_pool_lock);
+	/**
+	 * 搜索成功，需要在锁保护下增加引用计数。
+	 */
 	p = lookup(daddr);
 	if (p != peer_avl_empty)
 		atomic_inc(&p->refcnt);
 	read_unlock_bh(&peer_pool_lock);
 
+	/**
+	 * 从未用链表中删除。
+	 */
 	if (p != peer_avl_empty) {
 		/* The existing node has been found. */
 		/* Remove the entry from unused list if it was there. */
@@ -392,10 +450,16 @@ struct inet_peer *inet_getpeer(__u32 daddr, int create)
 		return p;
 	}
 
+	/**
+	 * 如果是仅查询，则返回NULL。
+	 */
 	if (!create)
 		return NULL;
 
 	/* Allocate the space outside the locked region. */
+	/**
+	 * 在AVL树中没有搜索到节点，需要新创建一个。
+	 */
 	n = kmem_cache_alloc(peer_cachep, GFP_ATOMIC);
 	if (n == NULL)
 		return NULL;
@@ -406,11 +470,17 @@ struct inet_peer *inet_getpeer(__u32 daddr, int create)
 
 	write_lock_bh(&peer_pool_lock);
 	/* Check if an entry has suddenly appeared. */
+	/**
+	 * 重新搜索，这是因为在打开锁的期间，可能有其他代码已经建立了长效端点。
+	 */	
 	p = lookup(daddr);
 	if (p != peer_avl_empty)
 		goto out_free;
 
 	/* Link the node. */
+	/**
+	 * 将新建立的节点加入到AVL和链表中。
+	 */
 	link_to_pool(n);
 	n->unused_prevp = NULL; /* not on the list */
 	peer_total++;
@@ -434,6 +504,9 @@ out_free:
 }
 
 /* Called with local BH disabled. */
+/**
+ * 定期删除过期的长效IP端点。
+ */
 static void peer_check_expire(unsigned long dummy)
 {
 	int i;

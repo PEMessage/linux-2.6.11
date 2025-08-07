@@ -48,22 +48,70 @@
 static kmem_cache_t *fn_hash_kmem;
 static kmem_cache_t *fn_alias_kmem;
 
+/**
+ * 一条路由表项。
+ * 例如，该数据结构用于存储由route add或ip route add命令添加一条路由时生成的信息。
+ * 内核路由项中每一个唯一的目的网络对应一个fib_node实例。目的网络相同但其它配置参数不同的路由项共享同一个fib_node实例。
+ */
 struct fib_node {
+	/**
+	 * fib_node元素是用哈希表来组织的。
+	 * 这个指针用于将分布在一张哈希表中的一个桶内所有的fib_node元素链接在一起。
+	 */
 	struct hlist_node	fn_hash;
+	/**
+	 * 同一网段内的所有路由项。
+	 * 每个fib_node结构与包含一个或多个fib_alias结构的链表相关联。fn_alias指针指向该链表的头部。
+	 */
 	struct list_head	fn_alias;
+	/**
+	 * 关键字，对应路由网段。
+	 * 这是路由项的前缀（或网络地址，用路由项的netmask字段来表示）。该字段被用作查找路由表时的搜索key。
+	 */
 	u32			fn_key;
 };
 
+/**
+ * 一个zone表示网络掩码长度相同的一组路由表项。
+ * 因为网络掩码占用32比特（对IPv4而言），因而每个路由表有33个zone。
+ * 这样，到达子网10.0.1.0/24与10.0.2.0/24的路由项都将放在24比特的zone链表（即第25个zone）内，到达子网10.0.3.128/25的路由项将放在25比特的zone链表内。
+ */
 struct fn_zone {
+	/**
+	 * 将活动zones链接在一起的指针。
+	 * 该链表的头部由fn_zone_list来跟踪，fn_zone_list是fn_hash数据结构的一个字段。
+	 */
 	struct fn_zone		*fz_next;	/* Next not empty zone	*/
+	/**
+	 * 指向存储该zone中路由项的哈希表。
+	 */
 	struct hlist_head	*fz_hash;	/* Hash table pointer	*/
+	/**
+	 * 在该zone中路由项的数目（即在该zone的哈希表中fib_node实例的数目）。
+	 * 这个值可以用于检查是否需要改变该哈希表的容量
+	 */
 	int			fz_nent;	/* Number of entries	*/
 
+	/**
+	 * HASH表桶数量。
+	 * 哈希表fz_hash的容量（桶的数目）
+	 */
 	int			fz_divisor;	/* Hash divisor		*/
+	/**
+	 * 这为fz_divisor-1，提供该字段的理由是可以用操作数更少的按位与操作，而不是用操作数更多的取模操作来计算一个值对fz_divisor取模操作
+	 */
 	u32			fz_hashmask;	/* (fz_divisor - 1)	*/
 #define FZ_HASHMASK(fz)		((fz)->fz_hashmask)
 
+	/**
+	 * 在网络掩码fz_mask中（所有连续）的比特数目，在代码中也用prefixlen来表示。
+	 * 例如，网络掩码255.255.255.0所对应的fz_order为24。
+	 */
 	int			fz_order;	/* Zone order		*/
+	/**
+	 * 用fz_order构造的网络掩码。
+	 * 例如设fz_order值取3，则生成的fz_mask的二进制表示为11100000.00000000.00000000.00000000，其十进制表示为224.0.0.0。
+	 */
 	u32			fz_mask;
 #define FZ_MASK(fz)		((fz)->fz_mask)
 };
@@ -71,7 +119,10 @@ struct fn_zone {
 /* NOTE. On fast computers evaluation of fz_hashmask and fz_mask
  * can be cheaper than memory lookup, so that FZ_* macros are used.
  */
-
+/**
+ * 该结构内包含指向33个fn_zone链表的头指针，以及将活动zone（active zone，即那些至少有一个元素的zone）链接在一起的一个链表。
+ * 后面一个链表中的元素按照网络掩码长度的降序排列。
+ */
 struct fn_hash {
 	struct fn_zone	*fn_zones[33];
 	struct fn_zone	*fn_zone_list;
@@ -92,6 +143,9 @@ static inline u32 fz_key(u32 dst, struct fn_zone *fz)
 	return dst & FZ_MASK(fz);
 }
 
+/**
+ * 这个读写spin锁（rwlock）保护所有的路由表。
+ */
 static DEFINE_RWLOCK(fib_hash_lock);
 
 #define FZ_MAX_DIVISOR ((PAGE_SIZE<<MAX_ORDER) / sizeof(struct hlist_head))
@@ -240,6 +294,16 @@ fn_new_zone(struct fn_hash *table, int z)
 	return fz;
 }
 
+/**
+ * 所有的路由表查找，不论路由表是否由策略路由提供，也不论流量方向如何，都是利用fn_hash_lookup来查找。
+ *		tb:		搜索的路由表。
+ *		flp:	搜索key。
+ *		res:	查找成功时，利用路由信息来初始化res。
+ * 返回值:
+ *		0:		成功。已经根据转发信息初始化res（通过fib_semantic_match函数）。
+ *		1:		失败。没有与搜索key匹配的路由项。
+ *		小于0：	管理失败。这表示查找不成功，因为查找到的路由没有价值：例如相关的主机可能被标记为不可达。
+ */
 static int
 fn_hash_lookup(struct fib_table *tb, const struct flowi *flp, struct fib_result *res)
 {
@@ -248,20 +312,40 @@ fn_hash_lookup(struct fib_table *tb, const struct flowi *flp, struct fib_result 
 	struct fn_hash *t = (struct fn_hash*)tb->tb_data;
 
 	read_lock(&fib_hash_lock);
+	/**
+	 * 从表示最长网络掩码的zone开始遍历路由。
+	 */
 	for (fz = t->fn_zone_list; fz; fz = fz->fz_next) {
 		struct hlist_head *head;
 		struct hlist_node *node;
 		struct fib_node *f;
+		/**
+		 * 将目的IP地址与检查的active zone的网络掩码相与（ANDs），与操作的结果作为搜索key。
+		 */
 		u32 k = fz_key(flp->fl4_dst, fz);
 
+		/**
+		 * 因为路由被存储在哈希表（fz_hash）内，所以首先通过一个哈希函数对搜索key k进行哈希，得到相应的哈希桶head。
+		 */
 		head = &fz->fz_hash[fn_hash(k, fz)];
+		/**
+		 * 遍历与该哈希桶相关的路由链表（fib_node结构），查找与k匹配的路由项。
+		 */
 		hlist_for_each_entry(f, node, head, fn_hash) {
 			if (f->fn_key != k)
 				continue;
 
+			/**
+			 * 一个fib_node覆盖了同一子网内的所有路由项，但这些路由项在诸如TOS等其他字段上可能不同。
+			 * 现在，如果fn_hash_lookup函数找到了与搜索key k匹配的fib_node，它还需要检查每一个潜在的路由项，来查找与输入参数flp中其他搜索字段相匹配的路由。
+			 * 这个详细检查是由fib_semantic_match来完成的
+			 */
 			err = fib_semantic_match(&f->fn_alias,
 						 flp, res,
 						 fz->fz_order);
+			/**
+			 * fib_semantic_match也用查找结果来初始化输入参数res，如果它返回成功，fn_hash_lookup就将该结果返回给调用方。
+			 */
 			if (err <= 0)
 				goto out;
 		}
@@ -274,6 +358,10 @@ out:
 
 static int fn_hash_last_dflt=-1;
 
+/**
+ * IPV4中，确定一个缺省网关。
+ *		res:		fib_lookup返回的路由查找结果。
+ */
 static void
 fn_hash_select_default(struct fib_table *tb, const struct flowi *flp, struct fib_result *res)
 {
@@ -299,22 +387,25 @@ fn_hash_select_default(struct fib_table *tb, const struct flowi *flp, struct fib
 		list_for_each_entry(fa, &f->fn_alias, fa_list) {
 			struct fib_info *next_fi = fa->fa_info;
 
-			if (fa->fa_scope != res->scope ||
+			if (fa->fa_scope != res->scope || /* 为了被选中，缺省路由的scope必须与res->scope相同 */
 			    fa->fa_type != RTN_UNICAST)
 				continue;
 
+			/**
+			 * 优先级要小于或等于res->fi->fib_priority
+			 */
 			if (next_fi->fib_priority > res->fi->fib_priority)
 				break;
 			if (!next_fi->fib_nh[0].nh_gw ||
-			    next_fi->fib_nh[0].nh_scope != RT_SCOPE_LINK)
+			    next_fi->fib_nh[0].nh_scope != RT_SCOPE_LINK)/* 下一跳的scope必须为RT_SCOPE_LINK */
 				continue;
 			fa->fa_state |= FA_S_ACCESSED;
 
 			if (fi == NULL) {
 				if (next_fi != res->fi)
 					break;
-			} else if (!fib_detect_death(fi, order, &last_resort,
-						     &last_idx, &fn_hash_last_dflt)) {
+			} else if (!fib_detect_death(fi, order, &last_resort,/* fib_detect_death函数将路由项中L3地址已经被解析为L2地址的下一跳（即状态为NUD_REACHABLE）给予更高的优先级。 */
+						     &last_idx, &fn_hash_last_dflt)) {/* 选择出的缺省路由被保存在全局变量fn_hash_last_dflt中。 */
 				if (res->fi)
 					fib_info_put(res->fi);
 				res->fi = fi;
@@ -376,6 +467,9 @@ static struct fib_node *fib_find_node(struct fn_zone *fz, u32 key)
 	return NULL;
 }
 
+/**
+ * 添加路由表项
+ */
 static int
 fn_hash_insert(struct fib_table *tb, struct rtmsg *r, struct kern_rta *rta,
 	       struct nlmsghdr *n, struct netlink_skb_parms *req)
@@ -532,6 +626,9 @@ out:
 }
 
 
+/**
+ * 删除路由表项
+ */
 static int
 fn_hash_delete(struct fib_table *tb, struct rtmsg *r, struct kern_rta *rta,
 	       struct nlmsghdr *n, struct netlink_skb_parms *req)
@@ -549,6 +646,9 @@ fn_hash_delete(struct fib_table *tb, struct rtmsg *r, struct kern_rta *rta,
 	if ((fz  = table->fn_zones[z]) == NULL)
 		return -ESRCH;
 
+	/**
+	 * 构造搜索key
+	 */
 	key = 0;
 	if (rta->rta_dst) {
 		u32 dst;
@@ -558,6 +658,9 @@ fn_hash_delete(struct fib_table *tb, struct rtmsg *r, struct kern_rta *rta,
 		key = fz_key(dst, fz);
 	}
 
+	/**
+	 * 查找待删除的表项是否还存在。
+	 */
 	f = fib_find_node(fz, key);
 
 	if (!f)
@@ -567,6 +670,9 @@ fn_hash_delete(struct fib_table *tb, struct rtmsg *r, struct kern_rta *rta,
 	if (!fa)
 		return -ESRCH;
 
+	/**
+	 * 当查找到fib_alias结构时，就删除它
+	 */
 	fa_to_delete = NULL;
 	fa = list_entry(fa->fa_list.prev, struct fib_alias, fa_list);
 	list_for_each_entry_continue(fa, &f->fn_alias, fa_list) {
@@ -591,6 +697,9 @@ fn_hash_delete(struct fib_table *tb, struct rtmsg *r, struct kern_rta *rta,
 		int kill_fn;
 
 		fa = fa_to_delete;
+		/**
+		 * 通过Netlink广播通知感兴趣的子系统
+		 */
 		rtmsg_fib(RTM_DELROUTE, key, fa, z, tb->tb_id, n, req);
 
 		kill_fn = 0;
@@ -602,6 +711,9 @@ fn_hash_delete(struct fib_table *tb, struct rtmsg *r, struct kern_rta *rta,
 		}
 		write_unlock_bh(&fib_hash_lock);
 
+		/**
+		 * 如果该路由表项已经被使用（即设置了FA_S_ACCESSED标志）则flush路由缓存表。
+		 */
 		if (fa->fa_state & FA_S_ACCESSED)
 			rt_cache_flush(-1);
 		fn_free_alias(fa);
@@ -756,14 +868,24 @@ static int fn_hash_dump(struct fib_table *tb, struct sk_buff *skb, struct netlin
 	return skb->len;
 }
 
+/**
+ * 路由表初始化过程
+ */
 #ifdef CONFIG_IP_MULTIPLE_TABLES
 struct fib_table * fib_hash_init(int id)
 #else
+/**
+ * 路由表初始化。被IP路由子系统的ip_fib)init调用。
+ * 在配置策略路由的情况下，可以在任意时刻创建一个新路由表。所以fib_hash_init不带有__init宏。
+ */
 struct fib_table * __init fib_hash_init(int id)
 #endif
 {
 	struct fib_table *tb;
 
+	/**
+	 * 创建用于分配fib_node数据结构的内存池fn_hash_kmem。
+	 */
 	if (fn_hash_kmem == NULL)
 		fn_hash_kmem = kmem_cache_create("ip_fib_hash",
 						 sizeof(struct fib_node),
@@ -781,6 +903,9 @@ struct fib_table * __init fib_hash_init(int id)
 	if (tb == NULL)
 		return NULL;
 
+	/**
+	 * 分配并初始fib_table，并设置33个路由表为空。
+	 */
 	tb->tb_id = id;
 	tb->tb_lookup = fn_hash_lookup;
 	tb->tb_insert = fn_hash_insert;
@@ -795,6 +920,9 @@ struct fib_table * __init fib_hash_init(int id)
 /* ------------------------------------------------------------------------ */
 #ifdef CONFIG_PROC_FS
 
+/**
+ * 当遍历组成一张路由表的数据结构实例时存储的上下文信息，在处理/proc接口的代码中使用该数据结构。
+ */
 struct fib_iter_state {
 	struct fn_zone	*zone;
 	int		bucket;

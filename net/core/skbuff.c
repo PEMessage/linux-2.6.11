@@ -125,31 +125,53 @@ void skb_under_panic(struct sk_buff *skb, int sz, void *here)
  *	Buffers may only be allocated from interrupts using a @gfp_mask of
  *	%GFP_ATOMIC.
  */
+/**
+ * 分配sk_buff结构及其缓冲区。
+ */
 struct sk_buff *alloc_skb(unsigned int size, int gfp_mask)
 {
 	struct sk_buff *skb;
 	u8 *data;
 
 	/* Get the HEAD */
+	/**
+	 * 从缓存中获取一个sk_buff结构
+	 */
 	skb = kmem_cache_alloc(skbuff_head_cache,
 			       gfp_mask & ~__GFP_DMA);
 	if (!skb)
 		goto out;
 
 	/* Get the DATA. Size must match skb_add_mtu(). */
+	/**
+	 * 分配缓冲区.
+	 * 在调用 kmalloc 前，size 参数通过 SKB_DATA_ALIGN宏强制对齐。
+	 */
 	size = SKB_DATA_ALIGN(size);
+	/**
+	 * skb_shared_info 块主要用来处理 IP 分片
+	 */
 	data = kmalloc(size + sizeof(struct skb_shared_info), gfp_mask);
 	if (!data)
 		goto nodata;
 
+	/**
+	 * 初始化分配的缓冲区数据字段。
+	 */
 	memset(skb, 0, offsetof(struct sk_buff, truesize));
 	skb->truesize = size + sizeof(struct sk_buff);
+	/**
+	 * 设置缓冲区结构引用计数。
+	 */
 	atomic_set(&skb->users, 1);
 	skb->head = data;
 	skb->data = data;
 	skb->tail = data;
 	skb->end  = data + size;
 
+	/**
+	 * 数据缓冲区引用计数。
+	 */
 	atomic_set(&(skb_shinfo(skb)->dataref), 1);
 	skb_shinfo(skb)->nr_frags  = 0;
 	skb_shinfo(skb)->tso_size = 0;
@@ -272,19 +294,30 @@ void kfree_skbmem(struct sk_buff *skb)
  *	Clean the state. This is an internal helper function. Users should
  *	always call kfree_skb
  */
-
+/**
+ * 当sk_buff引用计数变为0后，释放相关的对象及内存。
+ */
 void __kfree_skb(struct sk_buff *skb)
 {
+	/**
+	 * 如果skb仍然在链表中，则不能释放它，此处打印警告信息后挂起。
+	 */
 	if (skb->list) {
 	 	printk(KERN_WARNING "Warning: kfree_skb passed an skb still "
 		       "on a list (from %p).\n", NET_CALLER(skb));
 		BUG();
 	}
 
+	/**
+	 * 释放对路由缓存的引用。
+	 */
 	dst_release(skb->dst);
 #ifdef CONFIG_XFRM
 	secpath_put(skb->sp);
 #endif
+	/**
+	 * 调用destructor回调钩子，此钩子可能会处理socket相关的操作。
+	 */
 	if(skb->destructor) {
 		if (in_irq())
 			printk(KERN_WARNING "Warning: kfree_skb on "
@@ -306,6 +339,10 @@ void __kfree_skb(struct sk_buff *skb)
 #endif
 #endif
 
+	/**
+	 * 将sk_buff结构放回内存缓冲区。
+	 * 如果存在分片，分在kfree_skbmem中释放分片占用的内存。
+	 */
 	kfree_skbmem(skb);
 }
 
@@ -322,7 +359,11 @@ void __kfree_skb(struct sk_buff *skb)
  *	If this function is called from an interrupt gfp_mask() must be
  *	%GFP_ATOMIC.
  */
-
+/**
+ * skb_clone克隆缓冲区
+ * 当一个缓冲区需要被不同的用户独立地操作，而这些用户可能会修改sk_buff中某些变量的值（比如h和nh值）时调用。
+ * 克隆过程只复制sk_buff结构，同时修改缓冲区的引用计数以避免共享的数据被提前释放.
+ */
 struct sk_buff *skb_clone(struct sk_buff *skb, int gfp_mask)
 {
 	struct sk_buff *n = kmem_cache_alloc(skbuff_head_cache, gfp_mask);
@@ -332,6 +373,9 @@ struct sk_buff *skb_clone(struct sk_buff *skb, int gfp_mask)
 
 #define C(x) n->x = skb->x
 
+	/**
+	 * 被克隆的sk_buff不会放在任何链表中，同时也不会有到socket的引用。
+	 */
 	n->next = n->prev = NULL;
 	n->list = NULL;
 	n->sk = NULL;
@@ -352,6 +396,9 @@ struct sk_buff *skb_clone(struct sk_buff *skb, int gfp_mask)
 	C(data_len);
 	C(csum);
 	C(local_df);
+	/**
+	 * 原始的和克隆的sk_buff中的skb->cloned值都被置为1。
+	 */
 	n->cloned = 1;
 	C(pkt_type);
 	C(ip_summed);
@@ -388,13 +435,22 @@ struct sk_buff *skb_clone(struct sk_buff *skb, int gfp_mask)
 
 #endif
 	C(truesize);
+	/**
+	 * 克隆包的skb->users值被置为1，这样，在释放时，可以先释放sk_buff结构。
+	 */
 	atomic_set(&n->users, 1);
 	C(head);
 	C(data);
 	C(tail);
 	C(end);
 
+	/**
+	 * 缓冲区的引用计数(dataref)增加1（因为有多个sk_buff结构指向它）
+	 */
 	atomic_inc(&(skb_shinfo(skb)->dataref));
+	/**
+	 * 原始的和克隆的sk_buff中的skb->cloned值都被置为1。
+	 */
 	skb->cloned = 1;
 
 	return n;
@@ -467,7 +523,13 @@ static void copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
  *	function is not recommended for use in circumstances when only
  *	header is going to be modified. Use pskb_copy() instead.
  */
-
+/**
+ * 如果一个缓冲区被克隆了，这个缓冲区的内容就不能被修改。
+ * 这就意味着，访问数据的函数没有必要加锁。
+ * 因此，当一个函数不仅要修改sk_buff，而且要修改缓冲区内容时，就需要同时复制缓冲区。
+ * 如果所修改的数据在skb->start和skb->end之间，可以使用pskb_copy来复制这部分数据.
+ * 如果同时需要修改分片中的数据，就必须使用skb_copy。
+ */
 struct sk_buff *skb_copy(const struct sk_buff *skb, int gfp_mask)
 {
 	int headerlen = skb->data - skb->head;
@@ -506,7 +568,13 @@ struct sk_buff *skb_copy(const struct sk_buff *skb, int gfp_mask)
  *	or the pointer to the buffer on success.
  *	The returned buffer has a reference count of 1.
  */
-
+/**
+ * 如果一个缓冲区被克隆了，这个缓冲区的内容就不能被修改。
+ * 这就意味着，访问数据的函数没有必要加锁。
+ * 因此，当一个函数不仅要修改sk_buff，而且要修改缓冲区内容时，就需要同时复制缓冲区。
+ * 如果所修改的数据在skb->start和skb->end之间，可以使用pskb_copy来复制这部分数据.
+ * 如果同时需要修改分片中的数据，就必须使用skb_copy。
+ */
 struct sk_buff *pskb_copy(struct sk_buff *skb, int gfp_mask)
 {
 	/*
@@ -1047,7 +1115,9 @@ void skb_iter_abort(const struct sk_buff *skb, struct skb_iter *i)
 }
 
 /* Checksum skb data. */
-
+/**
+ * 它是一个通用的校验和计算函数，被几个包装函数使用，并且基本上是被L4协议使用。
+ */
 unsigned int skb_checksum(const struct sk_buff *skb, int offset,
 			  int len, unsigned int csum)
 {
@@ -1239,7 +1309,9 @@ void skb_copy_and_csum_dev(const struct sk_buff *skb, u8 *to)
  *	may be used safely with other locking list functions. The head item is
  *	returned or %NULL if the list is empty.
  */
-
+/**
+ * 从队列的头部取下一个缓冲区
+ */
 struct sk_buff *skb_dequeue(struct sk_buff_head *list)
 {
 	unsigned long flags;
@@ -1258,6 +1330,9 @@ struct sk_buff *skb_dequeue(struct sk_buff_head *list)
  *	Remove the tail of the list. The list lock is taken so the function
  *	may be used safely with other locking list functions. The tail item is
  *	returned or %NULL if the list is empty.
+ */
+/**
+ * 从队列的尾部取下一个缓冲区
  */
 struct sk_buff *skb_dequeue_tail(struct sk_buff_head *list)
 {
@@ -1278,6 +1353,9 @@ struct sk_buff *skb_dequeue_tail(struct sk_buff_head *list)
  *	the list and one reference dropped. This function takes the list
  *	lock and is atomic with respect to other list locking functions.
  */
+/**
+ * 清空一个队列。
+ */
 void skb_queue_purge(struct sk_buff_head *list)
 {
 	struct sk_buff *skb;
@@ -1295,6 +1373,9 @@ void skb_queue_purge(struct sk_buff_head *list)
  *	safely.
  *
  *	A buffer cannot be placed on two lists at the same time.
+ */
+/**
+ * 把一个缓冲区加入队列的头部
  */
 void skb_queue_head(struct sk_buff_head *list, struct sk_buff *newsk)
 {
@@ -1315,6 +1396,9 @@ void skb_queue_head(struct sk_buff_head *list, struct sk_buff *newsk)
  *	safely.
  *
  *	A buffer cannot be placed on two lists at the same time.
+ */
+/**
+ * 把一个缓冲区加入队列的尾部
  */
 void skb_queue_tail(struct sk_buff_head *list, struct sk_buff *newsk)
 {
@@ -1478,6 +1562,9 @@ void skb_split(struct sk_buff *skb, struct sk_buff *skb1, const u32 len)
 		skb_split_no_header(skb, skb1, len, pos);
 }
 
+/**
+ * 初始化sk_buff缓冲区。
+ */
 void __init skb_init(void)
 {
 	skbuff_head_cache = kmem_cache_create("skbuff_head_cache",

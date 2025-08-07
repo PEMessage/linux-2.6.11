@@ -379,6 +379,13 @@ out:
 /*
  * New rpc_call implementation
  */
+/**
+ * RPC核心函数，进行远程过程调用。
+ *		msg			:调用的过程号、参数、返回结果等。
+ *		flag		:调用标志。
+ *		callback	:回调函数。
+ *		data		:回调函数的参数。
+ */
 int
 rpc_call_async(struct rpc_clnt *clnt, struct rpc_message *msg, int flags,
 	       rpc_action callback, void *data)
@@ -388,9 +395,15 @@ rpc_call_async(struct rpc_clnt *clnt, struct rpc_message *msg, int flags,
 	int		status;
 
 	/* If this client is slain all further I/O fails */
+	/**
+	 * 由于IO的原因，此客户端已经不可用，直接返回。
+	 */
 	if (clnt->cl_dead) 
 		return -EIO;
 
+	/**
+	 * 设置异步执行标志。
+	 */
 	flags |= RPC_TASK_ASYNC;
 
 	rpc_clnt_sigmask(clnt, &oldset);		
@@ -399,13 +412,22 @@ rpc_call_async(struct rpc_clnt *clnt, struct rpc_message *msg, int flags,
 	if (!callback)
 		callback = rpc_default_callback;
 	status = -ENOMEM;
+	/**
+	 * 创建一个rpc_task结构，并进行一些初始化。
+	 */
 	if (!(task = rpc_new_task(clnt, callback, flags)))
 		goto out;
 	task->tk_calldata = data;
 
+	/**
+	 * 对参数和返回结果指针以及tk_action进行初始化。
+	 */
 	rpc_call_setup(task, msg, 0);
 
 	/* Set up the call info struct and execute the task */
+	/**
+	 * 调用rpc_execute函数执行这个任务。其中会执行tk_action指针指向的函数，即首先执行call_start
+	 */
 	if (task->tk_status == 0)
 		status = rpc_execute(task);
 	else {
@@ -494,7 +516,7 @@ call_reserve(struct rpc_task *task)
 {
 	dprintk("RPC: %4d call_reserve\n", task->tk_pid);
 
-	if (!rpcauth_uptodatecred(task)) {
+	if (!rpcauth_uptodxatecred(task)) {
 		task->tk_action = call_refresh;
 		return;
 	}

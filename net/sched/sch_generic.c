@@ -89,14 +89,26 @@ void qdisc_unlock_tree(struct net_device *dev)
 
    NOTE: Called under dev->queue_lock with locally disabled BH.
 */
-
+/**
+ * 选择出队列中可以发送的包。
+ */
 int qdisc_restart(struct net_device *dev)
 {
 	struct Qdisc *q = dev->qdisc;
 	struct sk_buff *skb;
 
 	/* Dequeue packet */
+	/**
+	 * 如果实际上没有数据在等待发送，调用dequeue方法会失败。
+	 * 即使有等待发送的包，调用也可能失败。这是因为队列惩罚算法认为不能再发送任何数据
+	 */
 	if ((skb = q->dequeue(q)) != NULL) {
+		/**
+		 * 发送一个帧需要获得两个锁：
+		 *		一个锁保护队列（dev->queue_lock），这由调用qdisc_restart的函数获得的（dev_queue_xmit）。
+ 		 * 		一个在设备发送函数hard_start_xmit(dev->xmit_lock)上的锁。这个锁由该函数管理。
+ 		 * 当设备驱动已经实现它的自己锁，它通过设置NETIF_F_LLTX标志来表明这一点。
+		 */
 		unsigned nolock = (dev->features & NETIF_F_LLTX);
 		/*
 		 * When the driver has LLTX set it does its own locking
@@ -107,8 +119,8 @@ int qdisc_restart(struct net_device *dev)
 		 * of lock congestion it should return -1 and the packet
 		 * will be requeued.
 		 */
-		if (!nolock) {
-			if (!spin_trylock(&dev->xmit_lock)) {
+		if (!nolock) {/* 驱动自己没有实现锁 */
+			if (!spin_trylock(&dev->xmit_lock)) {/* 获取锁失败 */
 			collision:
 				/* So, someone grabbed the driver. */
 				
@@ -117,29 +129,57 @@ int qdisc_restart(struct net_device *dev)
 				   it by checking xmit owner and drop the
 				   packet when deadloop is detected.
 				*/
+				/**
+				 * 死锁了。
+				 */
 				if (dev->xmit_lock_owner == smp_processor_id()) {
 					kfree_skb(skb);
 					if (net_ratelimit())
 						printk(KERN_DEBUG "Dead loop on netdevice %s, fix it urgently!\n", dev->name);
 					return -1;
 				}
+				/**
+				 * 发送冲突计数。
+				 */
 				__get_cpu_var(netdev_rx_stat).cpu_collision++;
 				goto requeue;
 			}
 			/* Remember that the driver is grabbed by us. */
+			/**
+			 * 获取锁成功，设置获得锁的CPU号。
+			 */
 			dev->xmit_lock_owner = smp_processor_id();
 		}
 		
 		{
 			/* And release queue */
+			/**
+			 * 在这里，一般情况下，是已经获得了设备锁。因此可以暂时释放队列锁。
+			 * 在退出函数前，会再次获得该锁。并在dev_queue_xmit函数中再次释放队列锁。
+			 */
 			spin_unlock(&dev->queue_lock);
 
+			/**
+			 * 上层函数qdisc_run已经判断了队列状态，这时重新检测，这不是多余的。
+			 * 当qdisc_run调用netif_queue_stopped时，驱动锁还没有被获得，当锁被获得时，另外一个CPU已经发送了一些包，网卡可能已经没有空间了.
+			 * 因此，之前的netif_queue_stopped可能会返回FALSE，但是现在返回TRUE。
+			 */
 			if (!netif_queue_stopped(dev)) {
 				int ret;
+				/**
+				 * netdev_nit表示注册的协议数量。
+				 * 如果有注册的协议，dev_queue_xmit_nit被用来分发帧的拷贝给每一个注册的协议。
+				 */
 				if (netdev_nit)
 					dev_queue_xmit_nit(skb, dev);
 
+				/**
+				 * 调用hard_start_xmit在网卡上实际的发送包。
+				 */
 				ret = dev->hard_start_xmit(skb, dev);
+				/**
+				 * 发送成功，此时缓冲区还没有释放。
+				 */
 				if (ret == NETDEV_TX_OK) { 
 					if (!nolock) {
 						dev->xmit_lock_owner = -1;
@@ -148,6 +188,9 @@ int qdisc_restart(struct net_device *dev)
 					spin_lock(&dev->queue_lock);
 					return -1;
 				}
+				/**
+				 * 驱动中获得锁冲突了。走冲突流程。
+				 */
 				if (ret == NETDEV_TX_LOCKED && nolock) {
 					spin_lock(&dev->queue_lock);
 					goto collision; 
@@ -156,6 +199,9 @@ int qdisc_restart(struct net_device *dev)
 
 			/* NETDEV_TX_BUSY - we need to requeue */
 			/* Release the driver */
+			/**
+			 * 设备被禁止了，释放两把锁，退出。
+			 */
 			if (!nolock) { 
 				dev->xmit_lock_owner = -1;
 				spin_unlock(&dev->xmit_lock);
@@ -174,6 +220,11 @@ int qdisc_restart(struct net_device *dev)
 		   3. device is buggy (ppp)
 		 */
 
+/**
+ * 运行到这里，可能是获取发送锁时冲突了。
+ * 也可能是发送队列暂时被禁止了。
+ * 重新新包放回队列，然后重新调度发送。
+ */
 requeue:
 		q->ops->requeue(skb, q);
 		netif_schedule(dev);
@@ -222,6 +273,10 @@ void __netdev_watchdog_up(struct net_device *dev)
 	}
 }
 
+/**
+ * 当设备由dev_activate激活时，由本函数启动看门狗时钟，以监视设备状态。
+ * 它确保设备正常，然后重新开始 。
+ */
 static void dev_watchdog_up(struct net_device *dev)
 {
 	spin_lock_bh(&dev->xmit_lock);

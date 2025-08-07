@@ -120,6 +120,9 @@ static ssize_t sock_sendpage(struct file *file, struct page *page,
  *	in the operation structures but are done directly via the socketcall() multiplexor.
  */
 
+/**
+ * 套接口文件的接口
+ */
 static struct file_operations socket_file_ops = {
 	.owner =	THIS_MODULE,
 	.llseek =	no_llseek,
@@ -276,11 +279,20 @@ static kmem_cache_t * sock_inode_cachep;
 static struct inode *sock_alloc_inode(struct super_block *sb)
 {
 	struct socket_alloc *ei;
+	/**
+	 * 分配socket_alloc用于存放socket inode
+	 */
 	ei = (struct socket_alloc *)kmem_cache_alloc(sock_inode_cachep, SLAB_KERNEL);
 	if (!ei)
 		return NULL;
+	/**
+	 * 初始化套接口的等待队列
+	 */
 	init_waitqueue_head(&ei->socket.wait);
-	
+
+	/**
+	 * 初始化套接口的其他信息。
+	 */
 	ei->socket.fasync_list = NULL;
 	ei->socket.state = SS_UNCONNECTED;
 	ei->socket.flags = 0;
@@ -294,6 +306,9 @@ static struct inode *sock_alloc_inode(struct super_block *sb)
 
 static void sock_destroy_inode(struct inode *inode)
 {
+	/**
+	 * 释放socket文件的inode
+	 */
 	kmem_cache_free(sock_inode_cachep,
 			container_of(inode, struct socket_alloc, vfs_inode));
 }
@@ -318,9 +333,21 @@ static int init_inodecache(void)
 	return 0;
 }
 
+/**
+ * socket文件系统超级块接口
+ */
 static struct super_operations sockfs_ops = {
+	/**
+	 * 分配inode
+	 */
 	.alloc_inode =	sock_alloc_inode,
+	/**
+	 * 释放indoe
+	 */
 	.destroy_inode =sock_destroy_inode,
+	/**
+	 * 获取文件系统状态信息
+	 */
 	.statfs =	simple_statfs,
 };
 
@@ -332,6 +359,9 @@ static struct super_block *sockfs_get_sb(struct file_system_type *fs_type,
 
 static struct vfsmount *sock_mnt;
 
+/**
+ * socket文件系统
+ */
 static struct file_system_type sock_fs_type = {
 	.name =		"sockfs",
 	.get_sb =	sockfs_get_sb,
@@ -362,6 +392,9 @@ static struct dentry_operations sockfs_dentry_operations = {
  *	but we take care of internal coherence yet.
  */
 
+/**
+ * 将套接口与文件描述符绑定。
+ */
 int sock_map_fd(struct socket *sock)
 {
 	int fd;
@@ -371,9 +404,11 @@ int sock_map_fd(struct socket *sock)
 	/*
 	 *	Find a file descriptor suitable for return to the user. 
 	 */
-
+	/**
+	 * 获得空闲的文件描述符。
+	 */
 	fd = get_unused_fd();
-	if (fd >= 0) {
+	if (fd >= 0) {/* 成功分配文件描述符 */
 		struct file *file = get_empty_filp();
 
 		if (!file) {
@@ -387,6 +422,9 @@ int sock_map_fd(struct socket *sock)
 		this.len = strlen(name);
 		this.hash = SOCK_INODE(sock)->i_ino;
 
+		/**
+		 * 分配文件目录项。
+		 */
 		file->f_dentry = d_alloc(sock_mnt->mnt_sb->s_root, &this);
 		if (!file->f_dentry) {
 			put_filp(file);
@@ -404,6 +442,7 @@ int sock_map_fd(struct socket *sock)
 		file->f_mode = FMODE_READ | FMODE_WRITE;
 		file->f_flags = O_RDWR;
 		file->f_pos = 0;
+		/* 将文件描述符实例增加到已经打开的文件列表中，完成文件与进程的绑定 */
 		fd_install(fd, file);
 	}
 
@@ -424,27 +463,30 @@ out:
  *	On a success the socket object pointer is returned.
  */
 
+/**
+ * 根据文件描述符得到套接口结构。
+ */
 struct socket *sockfd_lookup(int fd, int *err)
 {
 	struct file *file;
 	struct inode *inode;
 	struct socket *sock;
 
-	if (!(file = fget(fd)))
+	if (!(file = fget(fd)))/* 根据文件描述符得到文件结构 */
 	{
 		*err = -EBADF;
 		return NULL;
 	}
 
-	inode = file->f_dentry->d_inode;
-	if (!inode->i_sock || !(sock = SOCKET_I(inode)))
+	inode = file->f_dentry->d_inode;/* 文件对应的inode */
+	if (!inode->i_sock || !(sock = SOCKET_I(inode)))/* inode没有与socket关联，或者关联的socket为空 */
 	{
 		*err = -ENOTSOCK;
 		fput(file);
 		return NULL;
 	}
 
-	if (sock->file != file) {
+	if (sock->file != file) {/* sock指向的文件对象不一致，数据有错误 */
 		printk(KERN_ERR "socki_lookup: socket file changed!\n");
 		sock->file = file;
 	}
@@ -507,18 +549,18 @@ struct file_operations bad_sock_fops = {
  
 void sock_release(struct socket *sock)
 {
-	if (sock->ops) {
+	if (sock->ops) {/* 存在传输层接口 */
 		struct module *owner = sock->ops->owner;
 
-		sock->ops->release(sock);
+		sock->ops->release(sock);/* 调用release释放传输控制块，如inet_release */
 		sock->ops = NULL;
-		module_put(owner);
+		module_put(owner);/* 减少模块引用计数 */
 	}
 
-	if (sock->fasync_list)
+	if (sock->fasync_list)/* 此时异步通知队列应当为空，不为空说明有问题，打印警告信息 */
 		printk(KERN_ERR "sock_release: fasync list not empty!\n");
 
-	get_cpu_var(sockets_in_use)--;
+	get_cpu_var(sockets_in_use)--;/* 当前打开的套接口文件数量减1 */
 	put_cpu_var(sockets_in_use);
 	if (!sock->file) {
 		iput(SOCK_INODE(sock));
@@ -829,18 +871,21 @@ EXPORT_SYMBOL(dlci_ioctl_set);
  *	what to do with it - that's up to the protocol still.
  */
 
+/**
+ * 通过文件系统ioctl被调用。
+ */
 static long sock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 {
 	struct socket *sock;
 	void __user *argp = (void __user *)arg;
 	int pid, err;
 
-	sock = SOCKET_I(file->f_dentry->d_inode);
-	if (cmd >= SIOCDEVPRIVATE && cmd <= (SIOCDEVPRIVATE + 15)) {
+	sock = SOCKET_I(file->f_dentry->d_inode);/* 文件对应的套接口 */
+	if (cmd >= SIOCDEVPRIVATE && cmd <= (SIOCDEVPRIVATE + 15)) {/* 设备自定义的ioctl命令 */
 		err = dev_ioctl(cmd, argp);
 	} else
 #ifdef WIRELESS_EXT
-	if (cmd >= SIOCIWFIRST && cmd <= SIOCIWLAST) {
+	if (cmd >= SIOCIWFIRST && cmd <= SIOCIWLAST) {/* WIFI设备命令字 */
 		err = dev_ioctl(cmd, argp);
 	} else
 #endif	/* WIRELESS_EXT */
@@ -848,13 +893,13 @@ static long sock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		case FIOSETOWN:
 		case SIOCSPGRP:
 			err = -EFAULT;
-			if (get_user(pid, (int __user *)argp))
+			if (get_user(pid, (int __user *)argp))/* 获得进程id参数 */
 				break;
-			err = f_setown(sock->file, pid, 1);
+			err = f_setown(sock->file, pid, 1);/* 设置文件的进程id */
 			break;
 		case FIOGETOWN:
 		case SIOCGPGRP:
-			err = put_user(sock->file->f_owner.pid, (int __user *)argp);
+			err = put_user(sock->file->f_owner.pid, (int __user *)argp);/* 获得进程id */
 			break;
 		case SIOCGIFBR:
 		case SIOCSIFBR:
@@ -866,7 +911,7 @@ static long sock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 
 			down(&br_ioctl_mutex);
 			if (br_ioctl_hook) 
-				err = br_ioctl_hook(cmd, argp);
+				err = br_ioctl_hook(cmd, argp);/* 处理桥接相关的ioctl */
 			up(&br_ioctl_mutex);
 			break;
 		case SIOCGIFVLAN:
@@ -877,7 +922,7 @@ static long sock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 
 			down(&vlan_ioctl_mutex);
 			if (vlan_ioctl_hook)
-				err = vlan_ioctl_hook(argp);
+				err = vlan_ioctl_hook(argp);/* vlan相关的ioctl */
 			up(&vlan_ioctl_mutex);
 			break;
 		case SIOCGIFDIVERT:
@@ -893,11 +938,14 @@ static long sock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 
 			if (dlci_ioctl_hook) {
 				down(&dlci_ioctl_mutex);
-				err = dlci_ioctl_hook(cmd, argp);
+				err = dlci_ioctl_hook(cmd, argp);/* 创建或者删除DLCI设备 */
 				up(&dlci_ioctl_mutex);
 			}
 			break;
 		default:
+			/**
+			 * 默认情况下，调用套接口层的ioctl，对ipv4来说，就是inet_ioctl。
+			 */
 			err = sock->ops->ioctl(sock, cmd, arg);
 			break;
 	}
@@ -945,6 +993,7 @@ static int sock_mmap(struct file * file, struct vm_area_struct * vma)
 	return sock->ops->mmap(file, sock, vma);
 }
 
+/* 当关闭sock文件时，调用此函数 */
 int sock_close(struct inode *inode, struct file *filp)
 {
 	/*
@@ -952,12 +1001,14 @@ int sock_close(struct inode *inode, struct file *filp)
 	 *	closing an unfinished socket. 
 	 */
 
-	if (!inode)
+	if (!inode)/* 检验参数合法性 */
 	{
 		printk(KERN_DEBUG "sock_close: NULL inode\n");
 		return 0;
 	}
+	/* 从文件描述符相关的异步通知队列中删除与文件描述符有关的异常通知结点 */
 	sock_fasync(-1, filp, 0);
+	/* 释放套接口 */
 	sock_release(SOCKET_I(inode));
 	return 0;
 }
@@ -976,21 +1027,24 @@ int sock_close(struct inode *inode, struct file *filp)
  *	   write_lock_bh(&sk->sk_callback_lock).
  *							--ANK (990710)
  */
-
+/**
+ * 对套接口的异步通知队列的增加、删除操作。
+ */
 static int sock_fasync(int fd, struct file *filp, int on)
 {
 	struct fasync_struct *fa, *fna=NULL, **prev;
 	struct socket *sock;
 	struct sock *sk;
 
-	if (on)
+	if (on)/* 增加操作 */
 	{
+		/* 分配异步通知节点 */
 		fna=(struct fasync_struct *)kmalloc(sizeof(struct fasync_struct), GFP_KERNEL);
 		if(fna==NULL)
 			return -ENOMEM;
 	}
 
-	sock = SOCKET_I(filp->f_dentry->d_inode);
+	sock = SOCKET_I(filp->f_dentry->d_inode);/* 获取文件的套接口和传输控制块 */
 
 	if ((sk=sock->sk) == NULL) {
 		if (fna)
@@ -998,17 +1052,18 @@ static int sock_fasync(int fd, struct file *filp, int on)
 		return -EINVAL;
 	}
 
-	lock_sock(sk);
+	lock_sock(sk);/* 锁传输套接口 */
 
 	prev=&(sock->fasync_list);
 
+	/* 在套接口的异步通知链表中搜索匹配的节点 */
 	for (fa=*prev; fa!=NULL; prev=&fa->fa_next,fa=*prev)
 		if (fa->fa_file==filp)
 			break;
 
-	if(on)
+	if(on)/* 添加操作 */
 	{
-		if(fa!=NULL)
+		if(fa!=NULL)/* 已经有异步通知节点了，更新已有节点 */
 		{
 			write_lock_bh(&sk->sk_callback_lock);
 			fa->fa_fd=fd;
@@ -1017,6 +1072,7 @@ static int sock_fasync(int fd, struct file *filp, int on)
 			kfree(fna);
 			goto out;
 		}
+		/* 否则新增节点 */
 		fna->fa_file=filp;
 		fna->fa_fd=fd;
 		fna->magic=FASYNC_MAGIC;
@@ -1025,9 +1081,9 @@ static int sock_fasync(int fd, struct file *filp, int on)
 		sock->fasync_list=fna;
 		write_unlock_bh(&sk->sk_callback_lock);
 	}
-	else
+	else/* 删除操作 */
 	{
-		if (fa!=NULL)
+		if (fa!=NULL)/* 搜索的节点存在，删除它 */
 		{
 			write_lock_bh(&sk->sk_callback_lock);
 			*prev=fa->fa_next;
@@ -1042,32 +1098,42 @@ out:
 }
 
 /* This function may be called only under socket lock or callback_lock */
-
+/* 唤醒异常等待的线程 */
 int sock_wake_async(struct socket *sock, int how, int band)
 {
-	if (!sock || !sock->fasync_list)
+	if (!sock || !sock->fasync_list)/* 检查异步等待队列是否有效 */
 		return -1;
 	switch (how)
 	{
 	case 1:
 		
-		if (test_bit(SOCK_ASYNC_WAITDATA, &sock->flags))
+		if (test_bit(SOCK_ASYNC_WAITDATA, &sock->flags))/* 应用程序正在等待接收数据，不需要异步唤醒 */
 			break;
-		goto call_kill;
+		goto call_kill;/* 发送kill信号唤醒任务 */
 	case 2:
+		/* 没有等待缓冲区的进程，退出 */
 		if (!test_and_clear_bit(SOCK_ASYNC_NOSPACE, &sock->flags))
 			break;
 		/* fall through */
-	case 0:
+		/* 有进程在等待，唤醒它 */
+	case 0:/* 普通数据，给进程发送SIGIO信号 */
 	call_kill:
 		__kill_fasync(sock->fasync_list, SIGIO, band);
 		break;
-	case 3:
+	case 3:/* 带外数据，发送SIGURG信号 */
 		__kill_fasync(sock->fasync_list, SIGURG, band);
 	}
 	return 0;
 }
 
+/**
+ * 创建一个套接口
+ *		family:		套接口协议族
+ *		type:		套接口类型
+ *		protocol:	传输层协议
+ *		res:		输出参数，创建成功的套接口指针
+ *		kern:		由内核还是应用程序创建。
+ */
 static int __sock_create(int family, int type, int protocol, struct socket **res, int kern)
 {
 	int err;
@@ -1076,7 +1142,7 @@ static int __sock_create(int family, int type, int protocol, struct socket **res
 	/*
 	 *	Check protocol is in range
 	 */
-	if (family < 0 || family >= NPROTO)
+	if (family < 0 || family >= NPROTO)/* 参数合法性检测 */
 		return -EAFNOSUPPORT;
 	if (type < 0 || type >= SOCK_MAX)
 		return -EINVAL;
@@ -1086,6 +1152,9 @@ static int __sock_create(int family, int type, int protocol, struct socket **res
 	   This uglymoron is moved from INET layer to here to avoid
 	   deadlock in module load.
 	 */
+	/**
+	 * IPV4协议族的SOCK_PACKET类型套接口已经不被支持
+	 * 为兼容旧程序，转换为PF_PACKET */
 	if (family == PF_INET && type == SOCK_PACKET) {
 		static int warned; 
 		if (!warned) {
@@ -1095,6 +1164,7 @@ static int __sock_create(int family, int type, int protocol, struct socket **res
 		family = PF_PACKET;
 	}
 
+	/* 由安全模块对创建过程进行审计 */
 	err = security_socket_create(family, type, protocol, kern);
 	if (err)
 		return err;
@@ -1106,14 +1176,15 @@ static int __sock_create(int family, int type, int protocol, struct socket **res
 	 * requested real, full-featured networking support upon configuration.
 	 * Otherwise module support will break!
 	 */
-	if (net_families[family]==NULL)
+	if (net_families[family]==NULL)/* 相应的协议族在内核中尚不存在，加载模块以支持该协议族 */
 	{
 		request_module("net-pf-%d",family);
 	}
 #endif
 
+	/* 等待，直到锁被释放 */
 	net_family_read_lock();
-	if (net_families[family] == NULL) {
+	if (net_families[family] == NULL) {/* 如果协议族仍然不存在，说明不支持此协议族 */
 		err = -EAFNOSUPPORT;
 		goto out;
 	}
@@ -1124,30 +1195,31 @@ static int __sock_create(int family, int type, int protocol, struct socket **res
  *	default.
  */
 
-	if (!(sock = sock_alloc())) {
+	if (!(sock = sock_alloc())) {/* 分配与inode关联的套接口 */
 		printk(KERN_WARNING "socket: no more sockets\n");
 		err = -ENFILE;		/* Not exactly a match, but its the
 					   closest posix thing */
 		goto out;
 	}
 
-	sock->type  = type;
+	sock->type  = type;/* 设置套接口类型。 */
 
 	/*
 	 * We will call the ->create function, that possibly is in a loadable
 	 * module, so we have to bump that loadable module refcnt first.
 	 */
 	err = -EAFNOSUPPORT;
-	if (!try_module_get(net_families[family]->owner))
+	if (!try_module_get(net_families[family]->owner))/* 增加对协议族模块的引用，如果失败则退出 */
 		goto out_release;
 
+	/* 调用协议族的创建方法，对IPV4来说，调用的是inet_create */
 	if ((err = net_families[family]->create(sock, protocol)) < 0)
 		goto out_module_put;
 	/*
 	 * Now to bump the refcnt of the [loadable] module that owns this
 	 * socket at sock_release time we decrement its refcnt.
 	 */
-	if (!try_module_get(sock->ops->owner)) {
+	if (!try_module_get(sock->ops->owner)) {/* 增加传输层模块的引用计数 */
 		sock->ops = NULL;
 		goto out_module_put;
 	}
@@ -1155,8 +1227,10 @@ static int __sock_create(int family, int type, int protocol, struct socket **res
 	 * Now that we're done with the ->create function, the [loadable]
 	 * module can have its refcnt decremented
 	 */
+	/* 增加了传输层模块的引用计数后，可以释放协议族的模块引用计数 */
 	module_put(net_families[family]->owner);
 	*res = sock;
+	/* 通知安全模块，对创建过程进行检查。 */
 	security_socket_post_create(sock, family, type, protocol, kern);
 
 out:
@@ -1171,6 +1245,7 @@ out_release:
 
 int sock_create(int family, int type, int protocol, struct socket **res)
 {
+	/* 传入0表示是用户态进程创建套接口 */
 	return __sock_create(family, type, protocol, res, 0);
 }
 
@@ -1184,10 +1259,12 @@ asmlinkage long sys_socket(int family, int type, int protocol)
 	int retval;
 	struct socket *sock;
 
+	/* 根据协议族、套口类型、传输层协议创建套口 */
 	retval = sock_create(family, type, protocol, &sock);
 	if (retval < 0)
 		goto out;
 
+	/* 为创建的套接口分配一个文件描述符并进行绑定 */
 	retval = sock_map_fd(sock);
 	if (retval < 0)
 		goto out_release;
@@ -1275,22 +1352,27 @@ out:
  *	the protocol layer (having also checked the address is ok).
  */
 
+/**
+ * bind系统调用，将本地地址及传输层端口与套接口关联起来。
+ */
 asmlinkage long sys_bind(int fd, struct sockaddr __user *umyaddr, int addrlen)
 {
 	struct socket *sock;
 	char address[MAX_SOCK_ADDR];
 	int err;
 
-	if((sock = sockfd_lookup(fd,&err))!=NULL)
+	if((sock = sockfd_lookup(fd,&err))!=NULL)/* 根据文件描述符查找套接口 */
 	{
-		if((err=move_addr_to_kernel(umyaddr,addrlen,address))>=0) {
-			err = security_socket_bind(sock, (struct sockaddr *)address, addrlen);
+		if((err=move_addr_to_kernel(umyaddr,addrlen,address))>=0) {/* 从用户态复制地址到内核中 */
+			err = security_socket_bind(sock, (struct sockaddr *)address, addrlen);/* 安全审计 */
 			if (err) {
 				sockfd_put(sock);
 				return err;
 			}
+			/* 调用套接口层的bind回调，对IPV4来说，就是inet_bind */
 			err = sock->ops->bind(sock, (struct sockaddr *)address, addrlen);
 		}
+		/* 释放对文件句柄的引用 */
 		sockfd_put(sock);
 	}			
 	return err;
@@ -1302,25 +1384,28 @@ asmlinkage long sys_bind(int fd, struct sockaddr __user *umyaddr, int addrlen)
  *	necessary for a listen, and if that works, we mark the socket as
  *	ready for listening.
  */
-
+/* 在侦听时，允许每个套接口连接队列长度的最大值。默认为128。 */
 int sysctl_somaxconn = SOMAXCONN;
 
+/**
+ * listen系统调用
+ */
 asmlinkage long sys_listen(int fd, int backlog)
 {
 	struct socket *sock;
 	int err;
 	
-	if ((sock = sockfd_lookup(fd, &err)) != NULL) {
-		if ((unsigned) backlog > sysctl_somaxconn)
+	if ((sock = sockfd_lookup(fd, &err)) != NULL) {/* 根据文件描述符获得套接口指针 */
+		if ((unsigned) backlog > sysctl_somaxconn)/* 最大连接数量，超过此数量的未accept连接将被丢弃 */
 			backlog = sysctl_somaxconn;
 
-		err = security_socket_listen(sock, backlog);
+		err = security_socket_listen(sock, backlog);/* 安全审计 */
 		if (err) {
-			sockfd_put(sock);
+			sockfd_put(sock);/* 安全审计失败则释放文件引用计数 */
 			return err;
 		}
 
-		err=sock->ops->listen(sock, backlog);
+		err=sock->ops->listen(sock, backlog);/* 调用传输层的listen回调，如inet_listen */
 		sockfd_put(sock);
 	}
 	return err;
@@ -1345,18 +1430,19 @@ asmlinkage long sys_accept(int fd, struct sockaddr __user *upeer_sockaddr, int _
 	int err, len;
 	char address[MAX_SOCK_ADDR];
 
-	sock = sockfd_lookup(fd, &err);
+	sock = sockfd_lookup(fd, &err);/* 获得侦听端口的socket */
 	if (!sock)
 		goto out;
 
 	err = -ENFILE;
-	if (!(newsock = sock_alloc())) 
+	if (!(newsock = sock_alloc()))/* 分配一个新的套接口，用来处理与客户端的连接 */ 
 		goto out_put;
 
+	/* 根据侦听套接口来初始化新连接的类型和回调表 */
 	newsock->type = sock->type;
 	newsock->ops = sock->ops;
 
-	err = security_socket_accept(sock, newsock);
+	err = security_socket_accept(sock, newsock);/* 安全审计 */
 	if (err)
 		goto out_release;
 
@@ -1364,17 +1450,20 @@ asmlinkage long sys_accept(int fd, struct sockaddr __user *upeer_sockaddr, int _
 	 * We don't need try_module_get here, as the listening socket (sock)
 	 * has the protocol module (sock->ops->owner) held.
 	 */
-	__module_get(newsock->ops->owner);
+	__module_get(newsock->ops->owner);/* 增加模块引用计数 */
 
+	/* 调用传输层的accept，对TCP来说，是inet_accept */
 	err = sock->ops->accept(sock, newsock, sock->file->f_flags);
 	if (err < 0)
 		goto out_release;
 
-	if (upeer_sockaddr) {
+	if (upeer_sockaddr) {/* 调用者需要获取对方套接口地址和端口 */
+		/* 调用传输层回调获得对方的地址和端口 */
 		if(newsock->ops->getname(newsock, (struct sockaddr *)address, &len, 2)<0) {
 			err = -ECONNABORTED;
 			goto out_release;
 		}
+		/* 成功后复制到用户态 */
 		err = move_addr_to_user(address, len, upeer_sockaddr, upeer_addrlen);
 		if (err < 0)
 			goto out_release;
@@ -1382,10 +1471,10 @@ asmlinkage long sys_accept(int fd, struct sockaddr __user *upeer_sockaddr, int _
 
 	/* File flags are not inherited via accept() unlike another OSes. */
 
-	if ((err = sock_map_fd(newsock)) < 0)
+	if ((err = sock_map_fd(newsock)) < 0)/* 为新连接分配文件描述符 */
 		goto out_release;
 
-	security_socket_post_accept(sock, newsock);
+	security_socket_post_accept(sock, newsock);/* 安全审计 */
 
 out_put:
 	sockfd_put(sock);
@@ -1409,23 +1498,29 @@ out_release:
  *	include the -EINPROGRESS status for such sockets.
  */
 
+/**
+ * connet系统调用
+ */
 asmlinkage long sys_connect(int fd, struct sockaddr __user *uservaddr, int addrlen)
 {
 	struct socket *sock;
 	char address[MAX_SOCK_ADDR];
 	int err;
 
-	sock = sockfd_lookup(fd, &err);
+	sock = sockfd_lookup(fd, &err);/* 查找文件句柄对应的socket */
 	if (!sock)
 		goto out;
+	/* 从用户态复制地址参数到内核中 */
 	err = move_addr_to_kernel(uservaddr, addrlen, address);
 	if (err < 0)
 		goto out_put;
 
+	/* 安全审计 */
 	err = security_socket_connect(sock, (struct sockaddr *)address, addrlen);
 	if (err)
 		goto out_put;
 
+	/* 调用传输层的connet方法inet_stream_connect或inet_dgram_connect */
 	err = sock->ops->connect(sock, (struct sockaddr *) address, addrlen,
 				 sock->file->f_flags);
 out_put:
@@ -1439,27 +1534,32 @@ out:
  *	name to user space.
  */
 
+/**
+ * getsockname系统调用，返回本地地址和端口
+ */
 asmlinkage long sys_getsockname(int fd, struct sockaddr __user *usockaddr, int __user *usockaddr_len)
 {
 	struct socket *sock;
 	char address[MAX_SOCK_ADDR];
 	int len, err;
 	
-	sock = sockfd_lookup(fd, &err);
+	sock = sockfd_lookup(fd, &err);/* 根据文件描述符获取套接口 */
 	if (!sock)
 		goto out;
 
-	err = security_socket_getsockname(sock);
+	err = security_socket_getsockname(sock);/* 安全审计 */
 	if (err)
 		goto out_put;
 
+	/* 调用传输层的接口来获取地址和端口。ipv4的接口是inet_getname */
 	err = sock->ops->getname(sock, (struct sockaddr *)address, &len, 0);
 	if (err)
 		goto out_put;
+	/* 将获取到的地址信息复制到用户空间 */
 	err = move_addr_to_user(address, len, usockaddr, usockaddr_len);
 
 out_put:
-	sockfd_put(sock);
+	sockfd_put(sock);/* 递减文件引用计数 */
 out:
 	return err;
 }
@@ -1496,7 +1596,9 @@ asmlinkage long sys_getpeername(int fd, struct sockaddr __user *usockaddr, int _
  *	space and check the user space data area is readable before invoking
  *	the protocol.
  */
-
+/**
+ * sendto系统调用
+ */
 asmlinkage long sys_sendto(int fd, void __user * buff, size_t len, unsigned flags,
 			   struct sockaddr __user *addr, int addr_len)
 {
@@ -1506,9 +1608,10 @@ asmlinkage long sys_sendto(int fd, void __user * buff, size_t len, unsigned flag
 	struct msghdr msg;
 	struct iovec iov;
 	
-	sock = sockfd_lookup(fd, &err);
+	sock = sockfd_lookup(fd, &err);/* 根据文件描述符得到socket */
 	if (!sock)
 		goto out;
+	/* 准备输出结构的消息头 */
 	iov.iov_base=buff;
 	iov.iov_len=len;
 	msg.msg_name=NULL;
@@ -1517,7 +1620,7 @@ asmlinkage long sys_sendto(int fd, void __user * buff, size_t len, unsigned flag
 	msg.msg_control=NULL;
 	msg.msg_controllen=0;
 	msg.msg_namelen=0;
-	if(addr)
+	if(addr)/* 如果指定了目的地址，则从用户空间复制目的地址到内核中。 */
 	{
 		err = move_addr_to_kernel(addr, addr_len, address);
 		if (err < 0)
@@ -1525,10 +1628,10 @@ asmlinkage long sys_sendto(int fd, void __user * buff, size_t len, unsigned flag
 		msg.msg_name=address;
 		msg.msg_namelen=addr_len;
 	}
-	if (sock->file->f_flags & O_NONBLOCK)
+	if (sock->file->f_flags & O_NONBLOCK)/* 如果文件指定了非阻塞方式，则设置发送标志 */
 		flags |= MSG_DONTWAIT;
 	msg.msg_flags = flags;
-	err = sock_sendmsg(sock, &msg, len);
+	err = sock_sendmsg(sock, &msg, len);/* 发送数据 */
 
 out_put:		
 	sockfd_put(sock);
@@ -1542,6 +1645,7 @@ out:
 
 asmlinkage long sys_send(int fd, void __user * buff, size_t len, unsigned flags)
 {
+	/* 不指定目的地址，则发送到默认地址 */
 	return sys_sendto(fd, buff, len, flags, NULL, 0);
 }
 
@@ -1601,25 +1705,30 @@ asmlinkage long sys_recv(int fd, void __user * ubuf, size_t size, unsigned flags
  *	to pass the user mode parameter for the protocols to sort out.
  */
 
+/* 设置套接口选项的总入口函数 */
 asmlinkage long sys_setsockopt(int fd, int level, int optname, char __user *optval, int optlen)
 {
 	int err;
 	struct socket *sock;
 
-	if (optlen < 0)
+	if (optlen < 0)/* 参数检测 */
 		return -EINVAL;
 			
-	if ((sock = sockfd_lookup(fd, &err))!=NULL)
+	if ((sock = sockfd_lookup(fd, &err))!=NULL)/* 查找文件描述符对应的套接口 */
 	{
-		err = security_socket_setsockopt(sock,level,optname);
+		err = security_socket_setsockopt(sock,level,optname);/* 安全审计 */
 		if (err) {
 			sockfd_put(sock);
 			return err;
 		}
 
-		if (level == SOL_SOCKET)
+		if (level == SOL_SOCKET)/* 通用套接口层的选项设置 */
 			err=sock_setsockopt(sock,level,optname,optval,optlen);
 		else
+			/**
+			 * 调用套接口层setsockopt，对SOCK_STREAM、SOCK_DGRAM、SOCK_RAW来说，都是调用sock_common_setsockopt。
+			 * sock_common_setsockopt则调用传输层的setsockopt
+			 */
 			err=sock->ops->setsockopt(sock, level, optname, optval, optlen);
 		sockfd_put(sock);
 	}
@@ -1672,7 +1781,7 @@ asmlinkage long sys_shutdown(int fd, int how)
 			return err;
 		}
 				
-		err=sock->ops->shutdown(sock, how);
+		err=sock->ops->shutdown(sock, how);/* 对IPV4来说，是inet_shutdown */
 		sockfd_put(sock);
 	}
 	return err;
@@ -1689,7 +1798,9 @@ asmlinkage long sys_shutdown(int fd, int how)
 /*
  *	BSD sendmsg interface
  */
-
+/**
+ * sendmsg系统调用
+ */
 asmlinkage long sys_sendmsg(int fd, struct msghdr __user *msg, unsigned flags)
 {
 	struct compat_msghdr __user *msg_compat = (struct compat_msghdr __user *)msg;
@@ -1702,45 +1813,45 @@ asmlinkage long sys_sendmsg(int fd, struct msghdr __user *msg, unsigned flags)
 	int err, ctl_len, iov_size, total_len;
 	
 	err = -EFAULT;
-	if (MSG_CMSG_COMPAT & flags) {
-		if (get_compat_msghdr(&msg_sys, msg_compat))
+	if (MSG_CMSG_COMPAT & flags) {/* 兼容模式 */
+		if (get_compat_msghdr(&msg_sys, msg_compat))/* 以兼容模式复制用户态参数 */
 			return -EFAULT;
-	} else if (copy_from_user(&msg_sys, msg, sizeof(struct msghdr)))
+	} else if (copy_from_user(&msg_sys, msg, sizeof(struct msghdr)))/* 正常复制msghdr */
 		return -EFAULT;
 
-	sock = sockfd_lookup(fd, &err);
+	sock = sockfd_lookup(fd, &err);/* 查找文件描述符对应的套接口 */
 	if (!sock) 
 		goto out;
 
 	/* do not move before msg_sys is valid */
 	err = -EMSGSIZE;
-	if (msg_sys.msg_iovlen > UIO_MAXIOV)
+	if (msg_sys.msg_iovlen > UIO_MAXIOV)/* 数据块数量超过上限 */
 		goto out_put;
 
 	/* Check whether to allocate the iovec area*/
 	err = -ENOMEM;
-	iov_size = msg_sys.msg_iovlen * sizeof(struct iovec);
-	if (msg_sys.msg_iovlen > UIO_FASTIOV) {
-		iov = sock_kmalloc(sock->sk, iov_size, GFP_KERNEL);
+	iov_size = msg_sys.msg_iovlen * sizeof(struct iovec);/* 计数iovec缓存大小 */
+	if (msg_sys.msg_iovlen > UIO_FASTIOV) {/* iovec缓存较大，不能使用栈中的缓存 */
+		iov = sock_kmalloc(sock->sk, iov_size, GFP_KERNEL);/* 分配iovec缓存 */
 		if (!iov)
 			goto out_put;
 	}
 
 	/* This will also move the address data into kernel space */
-	if (MSG_CMSG_COMPAT & flags) {
+	if (MSG_CMSG_COMPAT & flags) {/* 初步验证iovec的有效性 */
 		err = verify_compat_iovec(&msg_sys, iov, address, VERIFY_READ);
 	} else
 		err = verify_iovec(&msg_sys, iov, address, VERIFY_READ);
 	if (err < 0) 
 		goto out_freeiov;
-	total_len = err;
+	total_len = err;/* 如果iovec验证通过，则返回值是所有iovec缓存长度和 */
 
 	err = -ENOBUFS;
 
-	if (msg_sys.msg_controllen > INT_MAX)
+	if (msg_sys.msg_controllen > INT_MAX)/* 检查控制信息长度 */
 		goto out_freeiov;
 	ctl_len = msg_sys.msg_controllen; 
-	if ((MSG_CMSG_COMPAT & flags) && ctl_len) {
+	if ((MSG_CMSG_COMPAT & flags) && ctl_len) {/* 复制控制信息到内存 */
 		err = cmsghdr_from_user_compat_to_kern(&msg_sys, ctl, sizeof(ctl));
 		if (err)
 			goto out_freeiov;
@@ -1764,12 +1875,12 @@ asmlinkage long sys_sendmsg(int fd, struct msghdr __user *msg, unsigned flags)
 	}
 	msg_sys.msg_flags = flags;
 
-	if (sock->file->f_flags & O_NONBLOCK)
+	if (sock->file->f_flags & O_NONBLOCK)/* 如果文件系统是非阻塞方式，则发送也是非阻塞方式 */
 		msg_sys.msg_flags |= MSG_DONTWAIT;
-	err = sock_sendmsg(sock, &msg_sys, total_len);
+	err = sock_sendmsg(sock, &msg_sys, total_len);/* 发送报文 */
 
 out_freectl:
-	if (ctl_buf != ctl)    
+	if (ctl_buf != ctl)    /* 如果临时申请了缓冲区，则释放 */
 		sock_kfree_s(sock->sk, ctl_buf, ctl_len);
 out_freeiov:
 	if (iov != iovstack)
@@ -1896,6 +2007,9 @@ static unsigned char nargs[18]={AL(0),AL(3),AL(3),AL(3),AL(2),AL(3),
  *  it is set by the callees. 
  */
 
+/**
+ * 与socket相关的系统调用总入口。
+ */
 asmlinkage long sys_socketcall(int call, unsigned long __user *args)
 {
 	unsigned long a[6];
@@ -2024,26 +2138,31 @@ int sock_unregister(int family)
 
 extern void sk_init(void);
 
+/**
+ * 套接口层初始化。
+ */
 void __init sock_init(void)
 {
 	/*
 	 *	Initialize sock SLAB cache.
 	 */
 	 
-	sk_init();
+	sk_init();/* 初始化套接口层的SLAB缓存 */
 
 #ifdef SLAB_SKB
 	/*
 	 *	Initialize skbuff SLAB cache 
 	 */
-	skb_init();
+	skb_init();/* 初始化SKB缓存 */
 #endif
 
 	/*
 	 *	Initialize the protocols module. 
 	 */
 
+	/* 初始化套接口层的inode slab缓存 */
 	init_inodecache();
+	/* 注册套接口文件系统 */
 	register_filesystem(&sock_fs_type);
 	sock_mnt = kern_mount(&sock_fs_type);
 	/* The real protocol initialization is performed when

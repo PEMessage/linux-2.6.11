@@ -194,6 +194,7 @@ no_packet:
 	return NULL;
 }
 
+/* 当UDP传输控制块接收队列上的报文已经复制到用户空间后，调用此函数。 */
 void skb_free_datagram(struct sock *sk, struct sk_buff *skb)
 {
 	kfree_skb(skb);
@@ -208,55 +209,57 @@ void skb_free_datagram(struct sock *sk, struct sk_buff *skb)
  *
  *	Note: the iovec is modified during the copy.
  */
+/* 将报文中的数据复制到用户空间，不进行校验和检查 */
 int skb_copy_datagram_iovec(const struct sk_buff *skb, int offset,
 			    struct iovec *to, int len)
 {
 	int start = skb_headlen(skb);
-	int i, copy = start - offset;
+	int i, copy = start - offset;/* copy初始化为skb第一个数据区中需要复制的字节 */
 
 	/* Copy header. */
-	if (copy > 0) {
-		if (copy > len)
+	if (copy > 0) {/* 需要从第一个数据区中复制数据 */
+		if (copy > len)/* 报文太长，只能复制部分数据 */
 			copy = len;
-		if (memcpy_toiovec(to, skb->data + offset, copy))
+		if (memcpy_toiovec(to, skb->data + offset, copy))/* 复制数据到用户空间 */
 			goto fault;
-		if ((len -= copy) == 0)
+		if ((len -= copy) == 0)/* 复制完所有数据，退出 */
 			return 0;
 		offset += copy;
 	}
 
 	/* Copy paged appendix. Hmm... why does this look so complicated? */
-	for (i = 0; i < skb_shinfo(skb)->nr_frags; i++) {
+	for (i = 0; i < skb_shinfo(skb)->nr_frags; i++) {/* 遍历S/G段 */
 		int end;
 
 		BUG_TRAP(start <= offset + len);
 
-		end = start + skb_shinfo(skb)->frags[i].size;
-		if ((copy = end - offset) > 0) {
+		end = start + skb_shinfo(skb)->frags[i].size;/* S/G段的起始、结束位置 */
+		if ((copy = end - offset) > 0) {/* 需要从当前段复制数据到用户空间 */
 			int err;
 			u8  *vaddr;
 			skb_frag_t *frag = &skb_shinfo(skb)->frags[i];
 			struct page *page = frag->page;
 
-			if (copy > len)
+			if (copy > len)/* 只能复制部分数据到用户空间 */
 				copy = len;
-			vaddr = kmap(page);
+			vaddr = kmap(page);/* 映射报文S/G段 */
+			/* 将S/G段中的数据复制到用户空间 */
 			err = memcpy_toiovec(to, vaddr + frag->page_offset +
 					     offset - start, copy);
-			kunmap(page);
+			kunmap(page);/* 解除映射 */
 			if (err)
 				goto fault;
-			if (!(len -= copy))
+			if (!(len -= copy))/* 复制完所有数据，返回 */
 				return 0;
 			offset += copy;
 		}
 		start = end;
 	}
 
-	if (skb_shinfo(skb)->frag_list) {
+	if (skb_shinfo(skb)->frag_list) {/* 从frag_list中复制数据 */
 		struct sk_buff *list = skb_shinfo(skb)->frag_list;
 
-		for (; list; list = list->next) {
+		for (; list; list = list->next) {/* 遍历所有frag */
 			int end;
 
 			BUG_TRAP(start <= offset + len);
@@ -265,6 +268,7 @@ int skb_copy_datagram_iovec(const struct sk_buff *skb, int offset,
 			if ((copy = end - offset) > 0) {
 				if (copy > len)
 					copy = len;
+				/* 递归调用本函数从frag中复制 */
 				if (skb_copy_datagram_iovec(list,
 							    offset - start,
 							    to, copy))
@@ -388,6 +392,7 @@ fault:
  *		 -EFAULT - fault during copy. Beware, in this case iovec
  *			   can be modified!
  */
+/* 类似于skb_copy_datagram_iovec，但是要进行校验和检验 */
 int skb_copy_and_csum_datagram_iovec(const struct sk_buff *skb,
 				     int hlen, struct iovec *iov)
 {
@@ -437,28 +442,31 @@ fault:
  *	and you use a different write policy from sock_writeable()
  *	then please supply your own write_space callback.
  */
+/* 获得传输控制块中的数据标志 */
 unsigned int datagram_poll(struct file *file, struct socket *sock,
 			   poll_table *wait)
 {
 	struct sock *sk = sock->sk;
 	unsigned int mask;
 
+	/* 将当前进程添加到传输控制块的等待队列中 */
 	poll_wait(file, sk->sk_sleep, wait);
 	mask = 0;
 
 	/* exceptional events? */
+	/* 传输控制块有错误发生，则返回错误标志 */
 	if (sk->sk_err || !skb_queue_empty(&sk->sk_error_queue))
 		mask |= POLLERR;
-	if (sk->sk_shutdown == SHUTDOWN_MASK)
+	if (sk->sk_shutdown == SHUTDOWN_MASK)/* 套接口已经关闭，返回POLLHUP标志 */
 		mask |= POLLHUP;
 
 	/* readable? */
-	if (!skb_queue_empty(&sk->sk_receive_queue) ||
+	if (!skb_queue_empty(&sk->sk_receive_queue) ||/* 接收队列中存在数据并且没有关闭接收 */
 	    (sk->sk_shutdown & RCV_SHUTDOWN))
 		mask |= POLLIN | POLLRDNORM;
 
 	/* Connection-based need to check for termination and startup */
-	if (connection_based(sk)) {
+	if (connection_based(sk)) {/* 如果是基于连接的标志，则判断是否允许写数据 */
 		if (sk->sk_state == TCP_CLOSE)
 			mask |= POLLHUP;
 		/* connection hasn't started yet? */
@@ -467,7 +475,7 @@ unsigned int datagram_poll(struct file *file, struct socket *sock,
 	}
 
 	/* writable? */
-	if (sock_writeable(sk))
+	if (sock_writeable(sk))/* 根据缓存区的情况确定是否可写 */
 		mask |= POLLOUT | POLLWRNORM | POLLWRBAND;
 	else
 		set_bit(SOCK_ASYNC_NOSPACE, &sk->sk_socket->flags);

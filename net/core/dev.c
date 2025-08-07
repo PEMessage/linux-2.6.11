@@ -183,6 +183,9 @@ static struct timer_list samp_timer = TIMER_INITIALIZER(sample_queue, 0, 0);
  * unregister_netdevice(), which must be called with the rtnl
  * semaphore held.
  */
+/**
+ * 所有设备的 net_device 结构都放在一个全局链表中，链表的头指针是 dev_base。
+ */
 struct net_device *dev_base;
 static struct net_device **dev_tail = &dev_base;
 DEFINE_RWLOCK(dev_base_lock);
@@ -191,7 +194,15 @@ EXPORT_SYMBOL(dev_base);
 EXPORT_SYMBOL(dev_base_lock);
 
 #define NETDEV_HASHBITS	8
+/**
+ * 以设备名为索引的哈希表，它非常有用，如，当由 ioctl 接口改变一个配置时。
+ * 早期的配置工具通过ioctl接口与内核交互，通常通过设备名来引用设备。 
+ */
 static struct hlist_head dev_name_head[1<<NETDEV_HASHBITS];
+/**
+ * 这是以设备 ID：dev->ifindex 为索引的哈希表，交叉引用 net_device 结构通常要么存储设备 ID，要么存储 net_device 结构的指针。
+ * dev_index_head 对这种情形很有用，新的IP配置工具(来自 IPROUTE2包)通过 Netlink套接字和内核交互，通常通过设备ID引用设备。
+ */
 static struct hlist_head dev_index_head[1<<NETDEV_HASHBITS];
 
 static inline struct hlist_head *dev_name_hash(const char *name)
@@ -208,7 +219,9 @@ static inline struct hlist_head *dev_index_hash(int ifindex)
 /*
  *	Our notifier list
  */
-
+/**
+ * 网络设备状态改变时发送通知。
+ */
 static struct notifier_block *netdev_chain;
 
 /*
@@ -237,7 +250,9 @@ extern void netdev_unregister_sysfs(struct net_device *);
 /*
  *	For efficiency
  */
-
+/**
+ * netdev_nit表示ETH_P_ALL协议数量。
+ */
 int netdev_nit;
 
 /*
@@ -269,15 +284,30 @@ int netdev_nit;
  *	will see the new packet type (until the next received packet).
  */
 
+/**
+ * 注册一个二层协议处理函数。
+ */
 void dev_add_pack(struct packet_type *pt)
 {
 	int hash;
 
 	spin_lock_bh(&ptype_lock);
+	/**
+	 * 要添加的函数是否是一个协议嗅探器(pt_type == htons(ETH_P_ALL))
+	 */
 	if (pt->type == htons(ETH_P_ALL)) {
+		/**
+		 * 增加注册的协议嗅探器数量(netdev_nit++)
+		 */
 		netdev_nit++;
+		/**
+		 * 添加它到ptype_all链表
+		 */
 		list_add_rcu(&pt->list, &ptype_all);
 	} else {
+		/**
+		 * 将它插入到由ptype_base指向的16个链表中的一个，具体插入到哪个链表，依赖于它的hash值
+		 */
 		hash = ntohs(pt->type) & 15;
 		list_add_rcu(&pt->list, &ptype_base[hash]);
 	}
@@ -337,10 +367,19 @@ out:
  *	This call sleeps to guarantee that no CPU is looking at the packet
  *	type after return.
  */
+/**
+ * 移除协议处理函数。
+ */
 void dev_remove_pack(struct packet_type *pt)
 {
+	/**
+	 * 从ptype_all或者ptype_base中删除packet_type数据结构。
+	 */
 	__dev_remove_pack(pt);
-	
+
+	/**
+	 * Synchronize_net用于确保在dev_remove_pack函数返回时，没有一个地方还在对packet_type数据结构有所引用。
+	 */
 	synchronize_net();
 }
 
@@ -388,6 +427,9 @@ static int netdev_boot_setup_add(char *name, struct ifmap *map)
  *	The found settings are set for the device to be used
  *	later in the device probing.
  *	Returns 0 if no settings found, 1 if they are.
+ */
+/**
+ * 启动阶段结束时，网络代码会调用 netdev_boot_setup_check 函数检查给定的接口是否与启动时配置有关联，在 dev_boot_setup 数组中查找时基于设备名 dev->name
  */
 int netdev_boot_setup_check(struct net_device *dev)
 {
@@ -447,6 +489,9 @@ int __init netdev_boot_setup(char *str)
 	int ints[5];
 	struct ifmap map;
 
+	/**
+	 * 从启动参数中提取输入参数，填充到 ifmap 结构中
+	 */
 	str = get_options(str, ARRAY_SIZE(ints), ints);
 	if (!str || !*str)
 		return 0;
@@ -463,9 +508,14 @@ int __init netdev_boot_setup(char *str)
 		map.mem_end = ints[4];
 
 	/* Add new entry to the list */
+	/**
+	 * 通过 netdev_boot_setup_add 函数将 ifmap 信息加入到 dev_boot_setup 数组中
+	 */
 	return netdev_boot_setup_add(str, &map);
 }
-
+/**
+ * 当内核参数中包含netdev=时，调用netdev_boot_setup函数。
+ */
 __setup("netdev=", netdev_boot_setup);
 
 /*******************************************************************************
@@ -508,7 +558,9 @@ struct net_device *__dev_get_by_name(const char *name)
  *	release it when it is no longer needed. %NULL is returned if no
  *	matching device is found.
  */
-
+/**
+ * 根据设备名称，在hash表中搜索网络设备。
+ */
 struct net_device *dev_get_by_name(const char *name)
 {
 	struct net_device *dev;
@@ -555,7 +607,9 @@ struct net_device *__dev_get_by_index(int ifindex)
  *	had a reference added and the pointer is safe until the user calls
  *	dev_put to indicate they have finished with it.
  */
-
+/**
+ * 根据设备索引，在hash表中搜索网络设备。
+ */
 struct net_device *dev_get_by_index(int ifindex)
 {
 	struct net_device *dev;
@@ -818,6 +872,9 @@ static int default_rebuild_header(struct sk_buff *skb)
  *	Calling this function on an active interface is a nop. On a failure
  *	a negative errno code is returned.
  */
+/**
+ * 使能网络设备。
+ */
 int dev_open(struct net_device *dev)
 {
 	int ret = 0;
@@ -838,7 +895,13 @@ int dev_open(struct net_device *dev)
 	/*
 	 *	Call device private open method
 	 */
+	/**
+	 * 设置dev->state的__LINK_STATE_START标志位，标记设备打开并在运行。
+	 */
 	set_bit(__LINK_STATE_START, &dev->state);
+	/**
+	 * 如果dev->open被定义则调用它。并非所有的驱动程序都初始化这个函数。
+	 */
 	if (dev->open) {
 		ret = dev->open(dev);
 		if (ret)
@@ -853,6 +916,9 @@ int dev_open(struct net_device *dev)
 		/*
 		 *	Set the flags.
 		 */
+		/**
+		 * 设置dev->flags的IFF_UP标志位标记设备启动。
+		 */
 		dev->flags |= IFF_UP;
 
 		/*
@@ -863,10 +929,17 @@ int dev_open(struct net_device *dev)
 		/*
 		 *	Wakeup transmit queue engine
 		 */
+		/**
+		 * 调用dev_activate所指函数初始化流量控制用的排队规则，并启动监视定时器。
+		 * 如果用户没有配置流量控制，则指定缺省的先进先出(FIFO)队列。
+		 */
 		dev_activate(dev);
 
 		/*
 		 *	... and announce new interface.
+		 */
+		/**
+		 * 发送NETDEV_UP通知给netdev_chain通知链以通知对设备使能有兴趣的内核组件。
 		 */
 		notifier_call_chain(&netdev_chain, NETDEV_UP, dev);
 	}
@@ -882,6 +955,9 @@ int dev_open(struct net_device *dev)
  *	is then deactivated and finally a %NETDEV_DOWN is sent to the notifier
  *	chain.
  */
+/**
+ * 禁止一个网络设备。
+ */
 int dev_close(struct net_device *dev)
 {
 	if (!(dev->flags & IFF_UP))
@@ -891,10 +967,19 @@ int dev_close(struct net_device *dev)
 	 *	Tell people we are going down, so that they can
 	 *	prepare to death, when device is still operating.
 	 */
+	/**
+	 * 发送NETDEV_GOING_DOWN通知到netdev_chain通知链以通知对设备禁止有兴趣的内核组件。
+	 */
 	notifier_call_chain(&netdev_chain, NETDEV_GOING_DOWN, dev);
 
+	/**
+	 * 调用dev_deactivate函数禁止出口队列规则，这样确保设备不再用于传输，并停止不再需要的监控定时器。
+	 */
 	dev_deactivate(dev);
 
+	/**
+	 * 清除dev->state标志的__LINK_STATE_START标志位，标记设备卸载。
+	 */
 	clear_bit(__LINK_STATE_START, &dev->state);
 
 	/* Synchronize to scheduled poll. We cannot touch poll list,
@@ -904,6 +989,10 @@ int dev_close(struct net_device *dev)
 	 * engine, but this requires more changes in devices. */
 
 	smp_mb__after_clear_bit(); /* Commit netif_running(). */
+	/**
+	 * 如果轮询动作被调度在读设备入队列数据包，则等待此动作完成。
+	 * 这是由于__LINK_STATE_START 标志位被清除，不再接受其它轮询在设备上调度，但在标志被清除前已有一个轮询正被调度
+	 */
 	while (test_bit(__LINK_STATE_RX_SCHED, &dev->state)) {
 		/* No hurry. */
 		current->state = TASK_INTERRUPTIBLE;
@@ -917,17 +1006,25 @@ int dev_close(struct net_device *dev)
 	 *	We allow it to be called even after a DETACH hot-plug
 	 *	event.
 	 */
+	/**
+	 * 如果dev->stop指针不空则调用它，并非所有的设备驱动都初始化此函数指针。
+	 */
 	if (dev->stop)
 		dev->stop(dev);
 
 	/*
 	 *	Device is now down.
 	 */
-
+	/**
+	 * 清除dev->flags的IFF_UP标志位标识设备关闭。
+	 */
 	dev->flags &= ~IFF_UP;
 
 	/*
 	 * Tell people we are down
+	 */
+	/**
+	 * 发送NETDEV_DOWN通知给netdev_chain通知链，通知对设备禁止感兴趣的内核组件。
 	 */
 	notifier_call_chain(&netdev_chain, NETDEV_DOWN, dev);
 
@@ -1074,6 +1171,11 @@ void dev_queue_xmit_nit(struct sk_buff *skb, struct net_device *dev)
  * Invalidate hardware checksum when packet is to be mangled, and
  * complete checksum manually on outgoing path.
  */
+/**
+ * 这个函数有两个不同的行为。依赖于传递参数的是一个入包还是一个出包。
+ * 对入包来说，它会使硬件校验和失效。
+ * 对出包来说，它计算它的L4校验和。
+ */
 int skb_checksum_help(struct sk_buff *skb, int inward)
 {
 	unsigned int csum;
@@ -1132,6 +1234,10 @@ static inline int illegal_highdma(struct net_device *dev, struct sk_buff *skb)
 extern void skb_release_data(struct sk_buff *);
 
 /* Keep head the same: replace data */
+/**
+ * 将分片组合成一个单一的缓冲区
+ * 组合分片涉及到数据拷贝，它将严重影响系统性能。
+ */
 int __skb_linearize(struct sk_buff *skb, int gfp_mask)
 {
 	unsigned int size;
@@ -1215,21 +1321,38 @@ int __skb_linearize(struct sk_buff *skb, int gfp_mask)
  *	guarantee the frame will be transmitted as it may be dropped due
  *	to congestion or traffic shaping.
  */
-
+/**
+ * 发送报文的主函数。dev_queue_xmit能够通过两个路径，导致驱动发送函数hard_start_xmit的执行：
+ *		与流量控制的接口（QoS层）：这是通过qdisc_run函数完成的。
+ *		直接调用hard_start_xmit：当设备不使用流量控制机制时。
+ */
 int dev_queue_xmit(struct sk_buff *skb)
 {
 	struct net_device *dev = skb->dev;
 	struct Qdisc *q;
 	int rc = -ENOMEM;
 
+	/**
+	 * 当skb_shinfo(skb)->frag_list非空时，有效数据是一个分片列表；
+	 * 其他情况下，有效数据是单一的块。
+	 */
 	if (skb_shinfo(skb)->frag_list &&
+		/**
+		 * 如果分片了，代码检查设备是否支持分散/聚集DMA功能。如果不支持，就自行将分片合并到单一缓冲区。
+		 */
 	    !(dev->features & NETIF_F_FRAGLIST) &&
+	    /**
+	     * 合并分片
+	     */
 	    __skb_linearize(skb, GFP_ATOMIC))
 		goto out_kfree_skb;
 
 	/* Fragmented skb is linearized if device does not support SG,
 	 * or if at least one of fragments is in highmem and device
 	 * does not support DMA from it.
+	 */
+	/**
+	 * 如果报文被分片，并且设备不支持分片发送或者某个分片在高端内存，也需要合并分片。
 	 */
 	if (skb_shinfo(skb)->nr_frags &&
 	    (!(dev->features & NETIF_F_SG) || illegal_highdma(dev, skb)) &&
@@ -1239,10 +1362,22 @@ int dev_queue_xmit(struct sk_buff *skb)
 	/* If packet is not checksummed and device does not support
 	 * checksumming for this protocol, complete checksumming here.
 	 */
+	/**
+	 * 软件还没有计算校验和。一般情况下，软件不会在之前计算校验和，但是某些情况下，软件会自行计算校验和。
+	 */
 	if (skb->ip_summed == CHECKSUM_HW &&
+		/**
+		 * 硬件不支持校验和计算，必须由软件计算。
+		 */
 	    (!(dev->features & (NETIF_F_HW_CSUM | NETIF_F_NO_CSUM)) &&
+	    /**
+		 * 硬件只支持IP层的校验和计算，但是报文不是IP协议。
+		 */
 	     (!(dev->features & NETIF_F_IP_CSUM) ||
 	      skb->protocol != htons(ETH_P_IP))))
+	      	/**
+	      	 * 如果软件计算校验和失败，则退出。
+	      	 */
 	      	if (skb_checksum_help(skb, 0))
 	      		goto out_kfree_skb;
 
@@ -1263,14 +1398,30 @@ int dev_queue_xmit(struct sk_buff *skb)
 	 * also serializes access to the device queue.
 	 */
 
+	/**
+	 * 一旦校验和被处理了，所有包头都准备好；下一步就是决定发送哪一个帧。
+	 * 此时，后续行为还得看设备是否支持流量控制，如果支持流量控制，存在队列惩罚的问题。
+	 * 这也许令人感到奇怪：函数只是处理一个缓冲区（如果必要就进行分片组合及校验和），但是却依赖于队列惩罚。
+	 * 视出队列的状态，当前缓冲可能不是下一个需要发送的包。
+	 */
 	q = rcu_dereference(dev->qdisc);
 #ifdef CONFIG_NET_CLS_ACT
 	skb->tc_verd = SET_TC_AT(skb->tc_verd,AT_EGRESS);
 #endif
+
+	/**
+     * 如果存在队列惩罚，那么设备受到dev->qdisc的影响。输入帧由enqueue虚函数进行排队，并且由qdisc_run进行出队和传送
+ 	 */
 	if (q->enqueue) {
 		/* Grab device queue */
+		/**
+		 * 出队和入队都由队列上的queue_lock锁保护。软中断也由local_bh_disable禁止，也通过RCU禁止了抢占。
+		 */
 		spin_lock(&dev->queue_lock);
 
+		/**
+		 * 将包入队。由于队列处罚的原因，disc_run中取出的待发送包并不一定是刚入队的包。
+		 */
 		rc = q->enqueue(skb, q);
 
 		qdisc_run(dev);
@@ -1292,23 +1443,38 @@ int dev_queue_xmit(struct sk_buff *skb)
 	   Check this and shot the lock. It is not prone from deadlocks.
 	   Either shot noqueue qdisc, it is even simpler 8)
 	 */
-	if (dev->flags & IFF_UP) {
+	/**
+	 * 设备没有队列，可能是环回设备这样的设备。
+	 * 直接发送它们。
+	 */
+	if (dev->flags & IFF_UP) {/* 一般都会有这个标志 */
 		int cpu = smp_processor_id(); /* ok because BHs are off */
 
-		if (dev->xmit_lock_owner != cpu) {
-
+		if (dev->xmit_lock_owner != cpu) {/* 应该不会死锁。 */
+			/**
+			 * HARD_TX_LOCK使用spin_lock而不是spin_trylock：如果驱动锁被其他CPU获得了，dev_queue_xmit自旋，直到锁被释放。
+			 */
 			HARD_TX_LOCK(dev, cpu);
 
-			if (!netif_queue_stopped(dev)) {
+			if (!netif_queue_stopped(dev)) {/* 会被停止吗? */
+				/**
+				 * 回送包。AF_PACKET协议。
+				 */
 				if (netdev_nit)
 					dev_queue_xmit_nit(skb, dev);
 
 				rc = 0;
+				/**
+				 * 由虚拟设备发送。
+				 */
 				if (!dev->hard_start_xmit(skb, dev)) {
 					HARD_TX_UNLOCK(dev);
 					goto out;
 				}
 			}
+			/**
+			 * 这以后的状态都是不太正常的。
+			 */
 			HARD_TX_UNLOCK(dev);
 			if (net_ratelimit())
 				printk(KERN_CRIT "Virtual device %s asks to "
@@ -1338,6 +1504,10 @@ out:
 			Receiver routines
   =======================================================================*/
 
+/**
+ * 使用非NAPI时，每个CPU的输入队列的最大长度。可以通过proc修改。
+ * 这个限制应用于非NAPI设备。因为NAPI使用私有队列，设备可以选择各自的最大值。通常是16,32,64。10G以太网驱动driver/net/s2io.c使用更大的值：90。
+ */
 int netdev_max_backlog = 300;
 int weight_p = 64;            /* old backlog weight */
 /* These numbers are selected based on intuition and some
@@ -1351,7 +1521,11 @@ int mod_cong = 290;
 
 DEFINE_PER_CPU(struct netif_rx_stats, netdev_rx_stat) = { 0, };
 
-
+/**
+ * 计算平均队列长度和拥塞级别
+ * 每次接收到一个新的帧时，或者在在周期性的定时器中进行计算。
+ * 要每次接收到一个新的帧时进行计算，需要定义OFFLINE_SAMPLE。这就是为什么在netif_rx中，执行get_sample_stats依赖于OFFLINE_SAMPLE。默认这是被禁止的
+ */
 static void get_sample_stats(int cpu)
 {
 #ifdef RAND_LIE
@@ -1362,11 +1536,18 @@ static void get_sample_stats(int cpu)
 	int blog = sd->input_pkt_queue.qlen;
 	int avg_blog = sd->avg_blog;
 
+	/**
+	 * 由于本函数经常被调用，因此，利用下面这个简单的公式计算平均长度。
+	 */
 	avg_blog = (avg_blog >> 1) + (blog >> 1);
 
 	if (avg_blog > mod_cong) {
 		/* Above moderate congestion levels. */
 		sd->cng_level = NET_RX_CN_HIGH;
+		/**
+		 * RAND_LIE可以将拥塞级别随机的调高。这样可以随机的丢弃一些入包。
+		 * 在多网卡共享输入队列的情况下，可以防止个别网卡将队列阻塞后，导致网卡间的不公平性。
+		 */
 #ifdef RAND_LIE
 		rd = net_random();
 		rq = rd % netdev_max_backlog;
@@ -1420,7 +1601,11 @@ static void sample_queue(unsigned long dummy)
  *	NET_RX_DROP     (packet was dropped)
  *
  */
-
+/**
+ * 在中断中处理多个帧的方法。用于非NAPI驱动。一般运行在中断上下文。
+ * 		skb:	接收到的缓冲区。
+ * 返回值:		拥塞级别。
+ */
 int netif_rx(struct sk_buff *skb)
 {
 	int this_cpu;
@@ -1428,59 +1613,115 @@ int netif_rx(struct sk_buff *skb)
 	unsigned long flags;
 
 #ifdef CONFIG_NETPOLL
+	/**
+	 * 如果netpoll截获此包，则退出。
+	 */
 	if (skb->dev->netpoll_rx && netpoll_rx(skb)) {
 		kfree_skb(skb);
 		return NET_RX_DROP;
 	}
 #endif
-	
+	/**
+	 * 还没有设置包的接收时间，则设置它。
+	 */
 	if (!skb->stamp.tv_sec)
+		/**
+		 * net_enable_timestamp表示对有人对时间戳感兴趣，只有这样，才更新stamp。
+		 * 这是在net_timestamp中判断的。
+		 * 驱动中设置的时间，是针对设备的，并且保存的是tick.
+		 */
 		net_timestamp(&skb->stamp);
 
 	/*
 	 * The code is rearranged so that the path is the most
 	 * short when CPU is congested, but is still operating.
 	 */
+	/**
+	 * netif_rx通常由驱动在中断上下文中调用。
+	 * 但是也有例外，特别是当回环设备调用这个函数时。
+	 * 由于这个原因，netif_rx在运行时禁止本地CPU中断，当它结束时，再重新打开中断。
+	 */
 	local_irq_save(flags);
+	/**
+	 * 获取每CPU softnet_data数据结构，并设置计数。
+	 */
 	this_cpu = smp_processor_id();
 	queue = &__get_cpu_var(softnet_data);
 
 	__get_cpu_var(netdev_rx_stat).total++;
+	/**
+	 * 判断CPU的输入队列是否满了。
+	 */
 	if (queue->input_pkt_queue.qlen <= netdev_max_backlog) {
+		/**
+		 * 如果输入队列已经变为拥塞状态了，就丢弃包。
+		 */
 		if (queue->input_pkt_queue.qlen) {
 			if (queue->throttle)
 				goto drop;
 
 enqueue:
+			/**
+			 * 队列还没有拥塞，将包挂入输入队列的尾部。
+			 * dev_hold(skb->dev)调用增加设备的引用计数，因此设备不能被删除，直到缓冲被处理。递减计数由dev_put完成，这发生在net_rx_action
+			 */
 			dev_hold(skb->dev);
 			__skb_queue_tail(&queue->input_pkt_queue, skb);
 #ifndef OFFLINE_SAMPLE
+			/**
+			 * Avg_blog和cng_level在get_sample_status中更新
+			 */
 			get_sample_stats(this_cpu);
 #endif
 			local_irq_restore(flags);
+			/**
+			 * 返回当前拥塞级别，外层驱动可以根据此值确定是否在驱动中丢包。
+			 */
 			return queue->cng_level;
 		}
 
+		/**
+		 * 当前列队为空，并且当前状态为拥塞状态，则应当将拥塞状态设置为FALSE。
+		 * 实际上这基本上不可能发生，因为throttle状态应该在之前就已经设置了。
+		 * 第一个帧进入一个空队列时被清除。它也可能在process_backlog中发生。
+		 */
 		if (queue->throttle)
 			queue->throttle = 0;
 
+		/**
+		 * 这里会触发软中断处理报文。
+		 * 注意：仅当新缓冲区添加到一个空的队列中时，netif_rx_schedule才会被调用。这是因为如果队列非空，NET_RX_SOFTIRQ已经被调度，没有必要再调度它了。
+		 */
 		netif_rx_schedule(&queue->backlog_dev);
 		goto enqueue;
 	}
 
+	/**
+	 * CPU输入队列已经满了，并且当前状态不是拥塞状态，则设置该状态。
+	 * 并将拥塞次数统计加一。然后丢弃包。
+	 */
 	if (!queue->throttle) {
 		queue->throttle = 1;
 		__get_cpu_var(netdev_rx_stat).throttled++;
 	}
 
 drop:
+	/**
+	 * 设置丢包数并退出。
+	 */
 	__get_cpu_var(netdev_rx_stat).dropped++;
 	local_irq_restore(flags);
 
+	/**
+	 * 释放skb
+	 */
 	kfree_skb(skb);
 	return NET_RX_DROP;
 }
 
+/**
+ * netif_rx的姊妹函数，它被用于非中断上下文。大多数情况下，它由TUN驱动使用。
+ */
 int netif_rx_ni(struct sk_buff *skb)
 {
 	int err;
@@ -1506,18 +1747,35 @@ static __inline__ void skb_bond(struct sk_buff *skb)
 	}
 }
 
+/**
+ * 网络包发送软中断。它被设备驱动触发（特定条件下由自己触发）.
+ */
 static void net_tx_action(struct softirq_action *h)
 {
 	struct softnet_data *sd = &__get_cpu_var(softnet_data);
 
+	/**
+	 * 释放缓冲区。这些缓冲区由驱动通过调用dev_kfree_skb_irq添加到completion_queue链表。
+	 */
 	if (sd->completion_queue) {
 		struct sk_buff *clist;
 
+		/**
+		 * 由于net_tx_action运行在非中断上下文，设备驱动可以在任何时间将结点加到链表中，因此在访问softnet_data结构时，net_tx_action必须禁止中断。
+		 */
 		local_irq_disable();
+		/**
+		 * 禁止中断的时间应当尽可能的短，它通过设置completion_queue为空来清除链表，并且保存链表指针到一个局部变量clist中。
+		 * 这样，没有谁能够访问链表（注意：每个CPU都有它自己的链表）。
+		 * 它就能够遍历链表并且通过__kfree_skb释放每个元素，而此时，驱动可以继续向completion_queue中添加新结点。
+		 */
 		clist = sd->completion_queue;
 		sd->completion_queue = NULL;
 		local_irq_enable();
 
+		/**
+		 * 遍历临时链表中的所有元素，并将sk_buff释放掉。
+		 */
 		while (clist) {
 			struct sk_buff *skb = clist;
 			clist = clist->next;
@@ -1527,6 +1785,9 @@ static void net_tx_action(struct softirq_action *h)
 		}
 	}
 
+	/**
+	 * 发送帧，它与第一部分类似：也使用一个局部变量。
+	 */
 	if (sd->output_queue) {
 		struct net_device *head;
 
@@ -1535,6 +1796,9 @@ static void net_tx_action(struct softirq_action *h)
 		sd->output_queue = NULL;
 		local_irq_enable();
 
+		/**
+		 * 遍历链表中的所有设备。
+		 */
 		while (head) {
 			struct net_device *dev = head;
 			head = head->next_sched;
@@ -1542,6 +1806,10 @@ static void net_tx_action(struct softirq_action *h)
 			smp_mb__before_clear_bit();
 			clear_bit(__LINK_STATE_SCHED, &dev->state);
 
+			/**
+			 * 注意：对每个设备来说，在开始发送前，函数都需要获得设备队列锁（dev->queue_lock）。
+			 * 如果函数不能获得锁（由于其他CPU获得了），它简单的使用netif_schedule重新调度设备发送需求。
+			 */
 			if (spin_trylock(&dev->queue_lock)) {
 				qdisc_run(dev);
 				spin_unlock(&dev->queue_lock);
@@ -1562,11 +1830,17 @@ static __inline__ int deliver_skb(struct sk_buff *skb,
 #if defined(CONFIG_BRIDGE) || defined (CONFIG_BRIDGE_MODULE)
 int (*br_handle_frame_hook)(struct net_bridge_port *p, struct sk_buff **pskb);
 
+/**
+ * 当接收到包时，处理桥接事情。
+ */
 static __inline__ int handle_bridge(struct sk_buff **pskb,
 				    struct packet_type **pt_prev, int *ret)
 {
 	struct net_bridge_port *port;
 
+	/**
+	 * 发往本地的包，或者接收设备不是网桥设备，则退出。
+	 */
 	if ((*pskb)->pkt_type == PACKET_LOOPBACK ||
 	    (port = rcu_dereference((*pskb)->dev->br_port)) == NULL)
 		return 0;
@@ -1575,7 +1849,10 @@ static __inline__ int handle_bridge(struct sk_buff **pskb,
 		*ret = deliver_skb(*pskb, *pt_prev);
 		*pt_prev = NULL;
 	} 
-	
+
+	/**
+	 * br_handle_frame_hook钩子用于处理网桥相关的包。它被初始化为br_handle_frame。
+	 */
 	return br_handle_frame_hook(port, pskb);
 }
 #else
@@ -1623,6 +1900,9 @@ static int ing_filter(struct sk_buff *skb)
 }
 #endif
 
+/**
+ * 软中断中处理报文的主函数。适用于NAPI和非NAPI。
+ */
 int netif_receive_skb(struct sk_buff *skb)
 {
 	struct packet_type *ptype, *pt_prev;
@@ -1636,14 +1916,30 @@ int netif_receive_skb(struct sk_buff *skb)
 	}
 #endif
 
+	/**
+	 * 这里的处理似乎是多余的，也许是为了与老驱动兼容，但是去掉应该没有问题。
+	 */
 	if (!skb->stamp.tv_sec)
 		net_timestamp(&skb->stamp);
 
+	/**
+	 * 绑定功能允许一组网卡能够被组合在一起，并被当成一个单一的网卡进行处理。
+	 * 如果接收帧的网卡属于这样的组，sk_buff数据结构中的接口必须必须在netif_receive_skb分发包到L3层处理接口前变成组设备。
+	 */
 	skb_bond(skb);
 
+	/**
+	 * 入帧计数。
+	 */
 	__get_cpu_var(netdev_rx_stat).total++;
 
+	/**
+	 * 初始化L2、L3、L4层协议起始地址。
+	 */
 	skb->h.raw = skb->nh.raw = skb->data;
+	/**
+	 * mac长度，L3地址减去L2地址即可。
+	 */
 	skb->mac_len = skb->nh.raw - skb->mac.raw;
 
 	pt_prev = NULL;
@@ -1651,12 +1947,19 @@ int netif_receive_skb(struct sk_buff *skb)
 	rcu_read_lock();
 
 #ifdef CONFIG_NET_CLS_ACT
+	/**
+	 * 这里处理流量控制。
+	 */
 	if (skb->tc_verd & TC_NCLS) {
 		skb->tc_verd = CLR_TC_NCLS(skb->tc_verd);
 		goto ncls;
 	}
 #endif
 
+	/**
+	 * ptype_all中的协议处理所有协议类型，一般是嗅探器这类协议。
+	 * 这里将包交给它们处理。
+	 */
 	list_for_each_entry_rcu(ptype, &ptype_all, list) {
 		if (!ptype->dev || ptype->dev == skb->dev) {
 			if (pt_prev) 
@@ -1673,6 +1976,9 @@ int netif_receive_skb(struct sk_buff *skb)
 		skb->tc_verd = SET_TC_OK2MUNGE(skb->tc_verd);
 	}
 
+	/**
+	 * ing_filter用于处理流量控制。
+	 */
 	ret = ing_filter(skb);
 
 	if (ret == TC_ACT_SHOT || (ret == TC_ACT_STOLEN)) {
@@ -1684,11 +1990,29 @@ int netif_receive_skb(struct sk_buff *skb)
 ncls:
 #endif
 
+	/**
+	 * 分流允许内核改变帧的L2层原始目标地址，这些帧的目标地址指向其他主机，这样，帧能够被转到本机。内核可以被配置它的标准用法，以决定是否转移帧。它的标准用法有：
+ 	 * 		所有IP包（不管L4层协议）
+ 	 *		所有TCP包
+ 	 *		特定端口上的TCP包。
+ 	 *		所有UDP包
+ 	 *		特定端口上的UDP包。
+	 * 调用handle_diverter以决定是否改变MAC目的地址。另外，如果改变目标MAC地址的话，skb->pkt_type也必须改变为PACKET_HOST。
+	 */
 	handle_diverter(skb);
 
+	/**
+	 * 处理网桥。
+	 * 每一个net_device数据结构有一个指向net_bridge_port的数据结构。
+	 * 这被用来存储表示桥接端口的扩展信息。当接口不允许桥接时，它的值为空。
+	 * 当一个端口被配置成桥接端口时，内核仅仅关注L2头。
+	 */
 	if (handle_bridge(&skb, &pt_prev, &ret))
 		goto out;
 
+	/**
+	 * 将包分发给L3层协议处理。
+	 */
 	type = skb->protocol;
 	list_for_each_entry_rcu(ptype, &ptype_base[ntohs(type)&15], list) {
 		if (ptype->type == type &&
@@ -1714,6 +2038,11 @@ out:
 	return ret;
 }
 
+/**
+ * 在NAPI架构下，一些旧设备驱动不支持NAPI，仍然将入包放到每CPU多设备共享输入队列中。
+ * process_backlog函数作为默认的poll函数，处理共享输入队列中的包。
+ * 由于在运行此函数时，中断被打开，所以网卡中断可能打断本函数，而本函数需要访问softnet_data，因此在访问此结构时，需要关中断保护。
+ */
 static int process_backlog(struct net_device *backlog_dev, int *budget)
 {
 	int work = 0;
@@ -1721,11 +2050,24 @@ static int process_backlog(struct net_device *backlog_dev, int *budget)
 	struct softnet_data *queue = &__get_cpu_var(softnet_data);
 	unsigned long start_time = jiffies;
 
+	/**
+	 * 开始主循环，试图从入队列中取出缓冲区并在以下条件之一得到满足时中止循环：
+ 	*		队列已经为空。
+ 	*		设备配额已经用完。
+ 	*		函数运行了足够长的时间。
+	 */
 	for (;;) {
 		struct sk_buff *skb;
 		struct net_device *dev;
 
+		/**
+		 * 由于要操作共享入包队列，并且多个设备可能产生中断向入队列写包，因此，在操作时，需要关闭中断。
+		 * 这是本函数与NAPI设备的poll方法不同之处。
+		 */
 		local_irq_disable();
+		/**
+		 * 取出待处理的包。
+		 */
 		skb = __skb_dequeue(&queue->input_pkt_queue);
 		if (!skb)
 			goto job_done;
@@ -1733,6 +2075,9 @@ static int process_backlog(struct net_device *backlog_dev, int *budget)
 
 		dev = skb->dev;
 
+		/**
+		 * 处理帧的主函数，不论是NAPI还是非NAPI，都会调用此函数将包传递给上层协议栈处理。
+		 */
 		netif_receive_skb(skb);
 
 		dev_put(dev);
@@ -1744,24 +2089,42 @@ static int process_backlog(struct net_device *backlog_dev, int *budget)
 
 	}
 
+	/**
+	 * 根据本次处理的包数量，修改设备配额。
+	 */
 	backlog_dev->quota -= work;
 	*budget -= work;
 	return -1;
 
+/**
+ * 如果入队列已经变空了，主循环跳转到job_done。
+ */
 job_done:
 	backlog_dev->quota -= work;
 	*budget -= work;
 
+	/**
+	 * 设备将从poll_list中移除。一旦设备入队列中没有任何缓冲需要处理，__LINK_STATE_RX_SCHED标志也被清除，因此它不再被backlog处理过程调度。
+	 */
 	list_del(&backlog_dev->poll_list);
 	smp_mb__before_clear_bit();
 	netif_poll_enable(backlog_dev);
 
+	/**
+	 * 如果函数运行到这个点，throttle状态将被清除（如果它被设置了）
+	 */
 	if (queue->throttle)
 		queue->throttle = 0;
 	local_irq_enable();
 	return 0;
 }
 
+/**
+ * 接收帧的软中断处理函数。
+ * 有两个地方的帧等待net_rx_action处理：
+ *		共享的特定CPU的队列：非NAPI设备的中断处理将调用netif_rx，将帧放到softnet_data->input_pkt_queue。
+ *		设备内存：被NAPI使用的设备poll方法直接从设备（或者驱动的接收缓冲区）中提取帧。
+ */
 static void net_rx_action(struct softirq_action *h)
 {
 	struct softnet_data *queue = &__get_cpu_var(softnet_data);
@@ -1771,27 +2134,54 @@ static void net_rx_action(struct softirq_action *h)
 	
 	local_irq_disable();
 
+	/**
+	 * 遍历等待轮询的设备链表。
+	 */
 	while (!list_empty(&queue->poll_list)) {
 		struct net_device *dev;
 
+		/**
+		 * 如果当前设备还没有用完它的全部配额，它给予设备一个机会，通过poll函数从队列中取出缓冲区
+		 */
 		if (budget <= 0 || jiffies - start_time > 1)
 			goto softnet_break;
 
 		local_irq_enable();
 
+		/**
+ 		 * 由于打开中断后，设备驱动只会在poll_list中增加设备，而不会删除。
+ 		 * 因此，这里取第一个设备是没有问题的。
+		 */
 		dev = list_entry(queue->poll_list.next,
 				 struct net_device, poll_list);
 
+		/**
+		 * 如果dev_poll因为设备配置不足以取出所有入队列中的所有缓冲而返回（这种情况下，它返回非0值），设备被移到poll_list的末尾
+		 * 它在net_dev_init中被默认的初始化为process_backlog，因为这些设备不使用NAPI。
+		 */
 		if (dev->quota <= 0 || dev->poll(dev, &budget)) {
 			local_irq_disable();
+			/**
+			 * 将设备移到链表尾部。
+			 */
 			list_del(&dev->poll_list);
 			list_add_tail(&dev->poll_list, &queue->poll_list);
+			/**
+			 * 重置设备配额。
+			 */
 			if (dev->quota < 0)
 				dev->quota += dev->weight;
 			else
 				dev->quota = dev->weight;
 		} else {
+			/**
+			 * 当poll代替net_rx_action管理空队列，net_rx_action不从poll_list中移除设备：假定poll已经用netif_rx_complete这样做了
+			 * 在软中断中，减少对设备的引用计数。
+			 */
 			dev_put(dev);
+			/**
+			 * 需要对链表进行判断了，此处需要关中断。
+			 */
 			local_irq_disable();
 		}
 	}
@@ -1800,7 +2190,13 @@ out:
 	return;
 
 softnet_break:
+	/**
+	 * 此计数表示用完一次总配额，或者超时收包的次数。
+	 */
 	__get_cpu_var(netdev_rx_stat).time_squeeze++;
+	/**
+	 * 由于还有设备需要收包，因此触发下一次软中断收包。
+	 */
 	__raise_softirq_irqoff(NET_RX_SOFTIRQ);
 	goto out;
 }
@@ -2185,7 +2581,9 @@ void dev_set_promiscuity(struct net_device *dev, int inc)
  *	filtering operation. A negative @inc value is used to drop the counter
  *	when releasing a resource needing all multicasts.
  */
-
+/**
+ * 通知设备开始或者停止监听所有的多播地址
+ */
 void dev_set_allmulti(struct net_device *dev, int inc)
 {
 	unsigned short old_flags = dev->flags;
@@ -2212,7 +2610,9 @@ unsigned dev_get_flags(const struct net_device *dev)
 
 	return flags;
 }
-
+/**
+ * 通过dev_change_flags函数修改网络设备的标记。
+ */
 int dev_change_flags(struct net_device *dev, unsigned flags)
 {
 	int ret;
@@ -2672,6 +3072,9 @@ static int dev_new_index(void)
 	}
 }
 
+/**
+ * net_dev_init子系统函数是否已经执行。
+ */
 static int dev_boot_phase = 1;
 
 /* Delayed registration/unregisteration */
@@ -2701,7 +3104,9 @@ static inline void net_set_todo(struct net_device *dev)
  *	The locking appears insufficient to guarantee two parallel registers
  *	will not get the same name.
  */
-
+/**
+ * 网络设备注册
+ */
 int register_netdevice(struct net_device *dev)
 {
 	struct hlist_head *head;
@@ -2714,6 +3119,9 @@ int register_netdevice(struct net_device *dev)
 	/* When net_device's are persistent, this will be fatal. */
 	BUG_ON(dev->reg_state != NETREG_UNINITIALIZED);
 
+	/**
+	 * net_device的部分域的初始化，包括用于锁操作的域
+	 */
 	spin_lock_init(&dev->queue_lock);
 	spin_lock_init(&dev->xmit_lock);
 	dev->xmit_lock_owner = -1;
@@ -2721,6 +3129,9 @@ int register_netdevice(struct net_device *dev)
 	spin_lock_init(&dev->ingress_lock);
 #endif
 
+	/**
+	 * 当内核支持转向特性时，分配一个特性需要的配置块，并连接到dev->divert，这是由alloc_divert_blk函数来实现的。
+	 */
 	ret = alloc_divert_blk(dev);
 	if (ret)
 		goto out;
@@ -2728,6 +3139,9 @@ int register_netdevice(struct net_device *dev)
 	dev->iflink = -1;
 
 	/* Init, if this function is available */
+	/**
+	 * 如果设备驱动程序提供了初始化函数(dev->init!=NULL)，则执行次函数。可参考"虚拟设备"一节。
+	 */
 	if (dev->init) {
 		ret = dev->init(dev);
 		if (ret) {
@@ -2742,6 +3156,10 @@ int register_netdevice(struct net_device *dev)
 		goto out_err;
 	}
 
+	/**
+	 * 用dev_new_index函数给设备分配一个唯一标识符。标识符由一个计数器生产，每次一个新设备加到系统中计数器就会递增。
+	 * 计数器是32位变量，所以dev_new_index函数中有一个if子句用于回绕，还有一个if子句处理变量赋值为已经指派的值。
+	 */
 	dev->ifindex = dev_new_index();
 	if (dev->iflink == -1)
 		dev->iflink = dev->ifindex;
@@ -2758,6 +3176,11 @@ int register_netdevice(struct net_device *dev)
  	}
 
 	/* Fix illegal SG+CSUM combinations. */
+	/**
+	 * 检测特性标志是否是有效的组合,例如: 
+	 *		1.  Scather/Gather-DMA没有L4(传输层)硬件校验和支持则是无用的,所以在这种情况下被禁止。
+	 *		2.  TCP Segmentation Offload (TSO)需要Scather/Gather-DMA，所以在后者不支持时也被禁止
+	 */
 	if ((dev->features & NETIF_F_SG) &&
 	    !(dev->features & (NETIF_F_IP_CSUM |
 			       NETIF_F_NO_CSUM |
@@ -2787,11 +3210,22 @@ int register_netdevice(struct net_device *dev)
 	 *	Default initial state at registry is that the
 	 *	device is present.
 	 */
-
+	/**
+	 * 设置dev->state中的__LINK_STATE_PRESENT 标志使设备对系统使可用的(可见和可用)。
+	 * 例如，当一个热拔插设备被拔出，或者当支持电源管理的系统进入挂起模式时，这个设备标志被清除。
+	 */
 	set_bit(__LINK_STATE_PRESENT, &dev->state);
 
 	dev->next = NULL;
+	/**
+	 * 初始化设备队列规则，用流量控制通过dev_init_scheduler实现QoS，队列规则定义了出口包如何入队列和从出口队列出队列，还定义了各种包在开始丢弃它们之前如何排队
+	 */
 	dev_init_scheduler(dev);
+	/**
+	 * 追加net_device到全局链表dev_base,并把它插入到两个哈希表中。
+	 * 虽然把结构加到dev_base链表头很快,但内核偶尔也会扫描整个链表来检测相同的设备名。
+	 * 设备名由dev_valid_name函数检测是否是有效的名字。
+	 */
 	write_lock_bh(&dev_base_lock);
 	*dev_tail = dev;
 	dev_tail = &dev->next;
@@ -2802,9 +3236,15 @@ int register_netdevice(struct net_device *dev)
 	write_unlock_bh(&dev_base_lock);
 
 	/* Notify protocols, that a new device appeared. */
+	/**
+	 * 由netdev_chain通知链通知所有对设备注册感兴趣的子系统
+	 */
 	notifier_call_chain(&netdev_chain, NETDEV_REGISTER, dev);
 
 	/* Finish registration after unlock */
+	/**
+	 * 当netdev_run_todo被调用以结束注册时，它仅更新dev->reg_state并在sysfs文件系统注册设备。
+	 */
 	net_set_todo(dev);
 	ret = 0;
 
@@ -2827,6 +3267,9 @@ out_err:
  *	This is a wrapper around register_netdev that takes the rtnl semaphore
  *	and expands the device name if you passed a format string to
  *	alloc_netdev.
+ */
+/**
+ * 注册网络设备。
  */
 int register_netdev(struct net_device *dev)
 {
@@ -2871,12 +3314,23 @@ EXPORT_SYMBOL(register_netdev);
  * We can get stuck here if buggy protocols don't correctly
  * call dev_put. 
  */
+/**
+ * unregister_netdevice启动注销处理过程，并让netdev_run_todo结束它。
+ * netdev_run_todo调用netdev_wait_allrefs函数等待所有对net_device 结构的引用释放
+ */
 static void netdev_wait_allrefs(struct net_device *dev)
 {
 	unsigned long rebroadcast_time, warning_time;
 
 	rebroadcast_time = warning_time = jiffies;
+	/**
+	 * 循环等待，仅当dev->refcnt 值减到0时结束。
+	 * 这里需要等待，主要是考虑到有些定时器中会释放对结构的引用。
+	 */
 	while (atomic_read(&dev->refcnt) != 0) {
+		/**
+		 * 每秒发送一个NETDEV_UNREGISTER通知。
+		 */
 		if (time_after(jiffies, rebroadcast_time + 1 * HZ)) {
 			rtnl_shlock();
 
@@ -2902,6 +3356,9 @@ static void netdev_wait_allrefs(struct net_device *dev)
 
 		msleep(250);
 
+		/**
+		 * 每10秒朝控制台发送一个警告。
+		 */
 		if (time_after(jiffies, warning_time + 10 * HZ)) {
 			printk(KERN_EMERG "unregister_netdevice: "
 			       "waiting for %s to become free. Usage "
@@ -3010,6 +3467,13 @@ out:
  *	Allocates a struct net_device with private data area for driver use
  *	and performs basic initialization.
  */
+/**
+ * 为net_device分配空间。
+ *		 	sizeof_priv:	私有数据结构大小
+ *			name:			设备名
+ *			setup:		 	配置函数,这个函数用于初始化net_device结构的部分域
+ * 返回值是alloc_netdev函数分配的net_device的结构指针，如果出错就返回NULL。
+ */
 struct net_device *alloc_netdev(int sizeof_priv, const char *name,
 		void (*setup)(struct net_device *))
 {
@@ -3086,7 +3550,9 @@ void synchronize_net(void)
  *	Callers must hold the rtnl semaphore.  You may want
  *	unregister_netdev() instead of this.
  */
-
+/**
+ * 注销网络设备
+ */
 int unregister_netdevice(struct net_device *dev)
 {
 	struct net_device *d, **dp;
@@ -3104,10 +3570,18 @@ int unregister_netdevice(struct net_device *dev)
 	BUG_ON(dev->reg_state != NETREG_REGISTERED);
 
 	/* If device is running, close it first. */
+	/**
+	 * 如果设备没有被禁止，则首先由dev_close禁止它
+	 */
 	if (dev->flags & IFF_UP)
 		dev_close(dev);
 
 	/* And unlink it from device chain. */
+	/**
+	 * net_device实例从全局链表dev_base中移除，同时，"net_device结构组织"一节中介绍的两个哈希表也被移除。
+	 * 注意这样并不能阻止内核子系统使用设备：它们仍然拥有指向net_device结构的指针。
+	 * 这就是net_device结构使用引用计数以获取结构还有多少引用的原因
+	 */
 	for (dp = &dev_base; (d = *dp) != NULL; dp = &d->next) {
 		if (d == dev) {
 			write_lock_bh(&dev_base_lock);
@@ -3131,32 +3605,58 @@ int unregister_netdevice(struct net_device *dev)
 	synchronize_net();
 
 	/* Shutdown queueing discipline. */
+	/**
+	 * 由dev_shutdown函数释放所有与设备相关的队列规则实例。
+	 */
 	dev_shutdown(dev);
 
 	
 	/* Notify protocols, that we are about to destroy
 	   this device. They should clean all the things.
 	*/
+	/**
+	 * NETDEV_UNREGISTER通知被送到netdev_chain通知链使其它内核组件知道此事件发生了
+	 * 用户空间收到注销通知，例如，在一个用于访问internet网的双网卡的系统中，这个通知可用于启动第二块网卡。
+	 */
 	notifier_call_chain(&netdev_chain, NETDEV_UNREGISTER, dev);
 	
 	/*
 	 *	Flush the multicast chain
 	 */
+	/**
+	 * 释放所有链接到net_device结构的数据块。
+	 * 例如，dev_mc_discard函数释放多播数据dev->mc_list，free_divert_blk函数释放转发块，等等。
+	 */
 	dev_mc_discard(dev);
 
+	/**
+	 * 在register_netdevice中的dev->init处理的任何事情在此都不被dev->uninit处理。
+	 */
 	if (dev->uninit)
 		dev->uninit(dev);
 
 	/* Notifier chain MUST detach us from master device. */
+	/**
+	 * 绑定的特性允许组合一组设备以欺骗它们作为一个单独的具有特殊功能的虚拟设备。
+	 * 在这些设备之间，其中之一常被选择作为主设备，因为它扮演着组内的特殊角色。
+	 * 由于这个明显的原因，被移除的设备应当释放所有的对主设备的引用：在这种情况下，dev->master 非空将是一个 bug。
+	 */
 	BUG_TRAP(!dev->master);
 
 	free_divert_blk(dev);
 
 	/* Finish processing unregister after unlock */
+	/**
+	 * net_set_todo被调用以使net_run_todo结束注销过程
+	 * net_run_todo函数从sysfs中注销设备，并设置dev->reg_state 为NETREG_UNREGISTERED，等到所有的引用都释放后，调用dev->destructor结束注销过程。
+	 */
 	net_set_todo(dev);
 
 	synchronize_net();
 
+	/**
+	 * dev_put函数减少引用计数
+	 */
 	dev_put(dev);
 	return 0;
 }
@@ -3240,21 +3740,39 @@ static int dev_cpu_callback(struct notifier_block *nfb,
  *       This is called single threaded during boot, so no need
  *       to take the rtnl semaphore.
  */
+/**
+ * 网络设备层初始化，网络代码中一些很重要的功能，比如流量控制，每个CPU的输入队列等功能的初始化。
+ * 它在所有设备驱动处理前执行。
+ */
 static int __init net_dev_init(void)
 {
 	int i, rc = -ENOMEM;
 
 	BUG_ON(!dev_boot_phase);
 
+	/**
+	 * net_random_init初始化每个cpu的种子数组，这些数组在 net_random 生成随机数时使用。
+	 */
 	net_random_init();
 
+	/**
+	 * 如果内核编译选项中包含了/proc文件系统（这是缺省配置），dev_proc_init和dev_mcast_init就会在/proc目录下增加一些文件
+	 */
 	if (dev_proc_init())
 		goto out;
 
+	/**
+	 * netdev_sysfs_init注册了网络代码的sysfs。
+	 * 它创建了/sys/class/net目录，在这个目录下，你会看到每个已注册网络设备的子目录。
+	 * 这些目录下包含很多文件，有些文件原来是放在/proc目录下。
+	 */
 	if (netdev_sysfs_init())
 		goto out;
 
 	INIT_LIST_HEAD(&ptype_all);
+	/**
+	 * 初始化网络处理函数数组 ptype_base。这些处理函数用来多路分解接收到的包。
+	 */
 	for (i = 0; i < 16; i++) 
 		INIT_LIST_HEAD(&ptype_base[i]);
 
@@ -3267,7 +3785,9 @@ static int __init net_dev_init(void)
 	/*
 	 *	Initialise the packet receive queues.
 	 */
-
+	/**
+	 * 初始化cpu相关的数据结构，这些结构被两个网络软中断使用。
+	 */
 	for (i = 0; i < NR_CPUS; i++) {
 		struct softnet_data *queue;
 
@@ -3279,29 +3799,51 @@ static int __init net_dev_init(void)
 		queue->completion_queue = NULL;
 		INIT_LIST_HEAD(&queue->poll_list);
 		set_bit(__LINK_STATE_START, &queue->backlog_dev.state);
+		/**
+		 * backlog_dev是特殊的非NAPI设备。
+		 */
 		queue->backlog_dev.weight = weight_p;
 		queue->backlog_dev.poll = process_backlog;
 		atomic_set(&queue->backlog_dev.refcnt, 1);
 	}
 
 #ifdef OFFLINE_SAMPLE
+	/**
+	 * 如果定义了OFFLINE_SAMPLE标记，内核会定期运行一个函数收集设备队列长度的统计信息。
+	 * 在这种情况下，net_dev_init需要为函数创建一个定时器，使它可以定期运行。
+	 */
 	samp_timer.expires = jiffies + (10 * HZ);
 	add_timer(&samp_timer);
 #endif
 
+	/**
+	 * 修改dev_boot_phase的值为0，表示本函数已经执行过了。
+	 * 每次注册设备时，需要检查这个值是否为0.以确保本函数确实已经执行过了。
+	 * 这主要是为了兼容旧的驱动代码。在2.6中，其实可以确保本函数先于驱动执行。
+	 */
 	dev_boot_phase = 0;
 
 	open_softirq(NET_TX_SOFTIRQ, net_tx_action, NULL);
 	open_softirq(NET_RX_SOFTIRQ, net_rx_action, NULL);
 
+	/**
+	 * 在通知链表上注册一个回调函数，用于接收 CPU 的热插拔事件。
+	 * 这里的回调函数是dev_cpu_callback。当前唯一处理的事件是CPU关闭事件。
+	 * 如果收到通知，CPU输入队列中的包被取下来并交个netif_rx。
+	 */
 	hotcpu_notifier(dev_cpu_callback, 0);
+	/**
+	 * dst_init初始化协议无关的目的缓存（DST）
+	 */
 	dst_init();
 	dev_mcast_init();
 	rc = 0;
 out:
 	return rc;
 }
-
+/**
+ * subsys_initcall确保了该函数是子系统初始化函数，先于设备驱动之前运行。
+ */
 subsys_initcall(net_dev_init);
 
 EXPORT_SYMBOL(__dev_get_by_index);

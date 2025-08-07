@@ -133,7 +133,13 @@ u32 ic_gateway = INADDR_NONE;	/* Gateway IP address */
 
 u32 ic_servaddr = INADDR_NONE;	/* Boot server IP address */
 
+/**
+ * NFS根文件系统服务器地址。
+ */
 u32 root_server_addr = INADDR_NONE;	/* Address of NFS server */
+/**
+ * NFS root文件系统服务器的nfs目录
+ */
 u8 root_server_path[256] = { 0, };	/* Path to mount as root */
 
 /* Persistent data: */
@@ -1210,6 +1216,10 @@ static struct file_operations pnp_seq_fops = {
  *  Extract IP address from the parameter string if needed. Note that we
  *  need to have root_server_addr set _before_ IPConfig gets called as it
  *  can override it.
+ */
+/**
+ * 从作为输入的nfs_root_name中取出字符串，经语法分析，获得作为根文件系统的NFS服务器的IP地址。
+ * 放入在ipconfig.h下定义好的变量root_server_addr中。
  */
 u32 __init root_nfs_parse_addr(char *name)
 {
