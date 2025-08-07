@@ -37,8 +37,13 @@ enum scsi_eh_timer_return {
 };
 
 
+/**
+ * SCSI主机模板，相同型号的主机适配器的公共内容，如队列深度、SCSI命令处理回调、错误恢复回调函数。
+ */
 struct scsi_host_template {
+	/* 所属模块 */
 	struct module *module;
+	/* HBA驱动的名字 */
 	const char *name;
 
 	/*
@@ -47,6 +52,7 @@ struct scsi_host_template {
 	 *
 	 * Status:  OBSOLETE
 	 */
+	/* 被老式驱动用来检测主机适配器 */
 	int (* detect)(struct scsi_host_template *);
 
 	/*
@@ -54,6 +60,7 @@ struct scsi_host_template {
 	 *
 	 * Status: OBSOLETE
 	 */
+	/* 被老式驱动用来释放主机适配器 */
 	int (* release)(struct Scsi_Host *);
 
 	/*
@@ -63,6 +70,7 @@ struct scsi_host_template {
 	 *
 	 * Status: OPTIONAL
 	 */
+	/* 返回适当的信息 */
 	const char *(* info)(struct Scsi_Host *);
 
 	/*
@@ -70,6 +78,7 @@ struct scsi_host_template {
 	 *
 	 * Status: OPTIONAL
 	 */
+	/* ioctl接口 */
 	int (* ioctl)(struct scsi_device *dev, int cmd, void __user *arg);
 
 
@@ -80,6 +89,7 @@ struct scsi_host_template {
 	 *
 	 * Status: OPTIONAL
 	 */
+	/* 兼容的ioctl，在64位上处理32位ioctl调用 */
 	int (* compat_ioctl)(struct scsi_device *dev, int cmd, void __user *arg);
 #endif
 
@@ -115,6 +125,9 @@ struct scsi_host_template {
 	 *
 	 * STATUS: REQUIRED
 	 */
+	/**
+	 * 将SCSI命令排入LLDD队列，SCSI中间层调用该回调函数向HBA发送SCSI命令
+	 */
 	int (* queuecommand)(struct scsi_cmnd *,
 			     void (*done)(struct scsi_cmnd *));
 
@@ -137,9 +150,13 @@ struct scsi_host_template {
 	 * Status: REQUIRED	(at least one of them)
 	 */
 	int (* eh_strategy_handler)(struct Scsi_Host *);
+	/* 错误恢复处理，放弃特定的命令 */
 	int (* eh_abort_handler)(struct scsi_cmnd *);
+	/* 目标节点复位 */
 	int (* eh_device_reset_handler)(struct scsi_cmnd *);
+	/* SCSI总线复位 */
 	int (* eh_bus_reset_handler)(struct scsi_cmnd *);
+	/* 主机适配器复位 */
 	int (* eh_host_reset_handler)(struct scsi_cmnd *);
 
 	/*
@@ -154,6 +171,7 @@ struct scsi_host_template {
 	 *
 	 * Status: OPTIONAL
 	 */
+	/* 当中间层发现SCSI命令超时，将调用低层驱动的这个回调函数。 */
 	enum scsi_eh_timer_return (* eh_timed_out)(struct scsi_cmnd *);
 
 	/*
@@ -182,6 +200,7 @@ struct scsi_host_template {
 	 *
 	 * Status: OPTIONAL
 	 */
+	/* 扫描到一个新的SCSI设备后调用，可以在这个函数中分配么有device结构 */
 	int (* slave_alloc)(struct scsi_device *);
 
 	/*
@@ -213,6 +232,7 @@ struct scsi_host_template {
 	 *
 	 * Status: OPTIONAL
 	 */
+	/* 接收到SCSI设备的INQUIRY命令后调用，可进行特定的设置 */
 	int (* slave_configure)(struct scsi_device *);
 
 	/*
@@ -224,6 +244,7 @@ struct scsi_host_template {
 	 *
 	 * Status: OPTIONAL
 	 */
+	/* 在销毁SCSI设备之前调用，释放关联的数据结构 */
 	void (* slave_destroy)(struct scsi_device *);
 
 	/*
@@ -236,6 +257,7 @@ struct scsi_host_template {
 	 * driver should set and return the closest legal queue depth.
 	 *
 	 */
+	/* 用于改变主机适配器队列深度的回调函数 */
 	int (* change_queue_depth)(struct scsi_device *, int);
 
 	/*
@@ -247,6 +269,7 @@ struct scsi_host_template {
 	 * it should set the closest type it does support without
 	 * returning an error.  Returns the actual tag type set.
 	 */
+	/* 改变主机适配器tag类型的回调函数 */
 	int (* change_queue_type)(struct scsi_device *, int);
 
 	/*
@@ -256,6 +279,7 @@ struct scsi_host_template {
 	 * size, device, list (heads, sectors, cylinders)
 	 *
 	 * Status: OPTIONAL */
+	/* 返回磁盘的BIOS参数，如柱面数，磁盘数和扇区数 */
 	int (* bios_param)(struct scsi_device *, struct block_device *,
 			sector_t, int []);
 
@@ -266,17 +290,20 @@ struct scsi_host_template {
 	 *
 	 * Status: OBSOLETE
 	 */
+	/* 通过proc输出统计信息到用户空间，如可以向驱动中写入信息 */
 	int (*proc_info)(struct Scsi_Host *, char *, char **, off_t, int, int);
 
 	/*
 	 * Name of proc directory
 	 */
+	/* proc目录名 */
 	char *proc_name;
 
 	/*
 	 * Used to store the procfs directory if a driver implements the
 	 * proc_info method.
 	 */
+	/* 如果实现了proc_info方法，本字段保存procfs目录 */
 	struct proc_dir_entry *proc_dir;
 
 	/*
@@ -284,6 +311,7 @@ struct scsi_host_template {
 	 * or an interrupt driven scheme,  It is set to the maximum number
 	 * of simultaneous commands a given host adapter will accept.
 	 */
+	/* 主机适配器可以同时接受的命令数，必须大于0 */
 	int can_queue;
 
 	/*
@@ -293,23 +321,27 @@ struct scsi_host_template {
 	 * your setup is in single initiator mode, and the host lacks an
 	 * ID.
 	 */
+	/* 预留的ID? */
 	int this_id;
 
 	/*
 	 * This determines the degree to which the host adapter is capable
 	 * of scatter-gather.
 	 */
+	/* 主机适配器支持分散/聚集的能力 */
 	unsigned short sg_tablesize;
 
 	/*
 	 * If the host adapter has limitations beside segment count
 	 */
+	/* 主机适配器单个SCSI命令能访问的扇区最大数目 */
 	unsigned short max_sectors;
 
 	/*
 	 * dma scatter gather segment boundary limit. a segment crossing this
 	 * boundary will be split in two.
 	 */
+	/* DMA分散/聚集段边界限制，超过这个边界的段将被分割 */
 	unsigned long dma_boundary;
 
 	/*
@@ -329,17 +361,20 @@ struct scsi_host_template {
 	 * You should make sure that the host adapter will do the right thing
 	 * before you try setting this above 1.
 	 */
+	/* 允许排入连接到这个主机适配器的SCSI设备的最大命令数目，即队列深度。 */
 	short cmd_per_lun;
 
 	/*
 	 * present contains counter indicating how many boards of this
 	 * type were found when we did the scan.
 	 */
+	/* 计数器，表示在扫描过程中发现了多少个这种类型的适配器 */
 	unsigned char present;
 
 	/*
 	 * true if this host adapter uses unchecked DMA onto an ISA bus.
 	 */
+	/* 如果为1，表示只能使用RAM的低16M作为DMA地址空间 */
 	unsigned unchecked_isa_dma:1;
 
 	/*
@@ -350,21 +385,25 @@ struct scsi_host_template {
 	 * number of segments (i.e. use clustering).  I guess it is
 	 * inefficient.
 	 */
+	/* 如果为1，表示在SCSI策略例程中构建SCSI命令的分散/聚集链表时，可以合并内存连续的IO请求 */
 	unsigned use_clustering:1;
 
 	/*
 	 * True for emulated SCSI host adapters (e.g. ATAPI)
 	 */
+	/* 如果为1，表示是仿真的主机适配器如ATAPI */
 	unsigned emulated:1;
 
 	/*
 	 * True if the low-level driver performs its own reset-settle delays.
 	 */
+	/* 如果为1，在主机适配器复位和总线复位后，低层驱动自行执行reset_settle延迟 */
 	unsigned skip_settle_delay:1;
 
 	/*
 	 * Countdown for host blocking with no commands outstanding
 	 */
+	/* 当主机适配器没有待处理命令时，则暂时阻塞它，等待累积足够多的命令再说。当此值为0时，恢复正常操作，将命令派发到低层驱动 */
 	unsigned int max_host_blocked;
 
 	/*
@@ -379,11 +418,13 @@ struct scsi_host_template {
 	/*
 	 * Pointer to the sysfs class properties for this host, NULL terminated.
 	 */
+	/* 主机适配器的公共属性及其操作方法 */
 	struct class_device_attribute **shost_attrs;
 
 	/*
 	 * Pointer to the SCSI device properties for this host, NULL terminated.
 	 */
+	/* 连接到这个模板的主机适配器上的SCSI设备的公共属性及操作方法 */
 	struct device_attribute **sdev_attrs;
 
 	/*
@@ -393,6 +434,7 @@ struct scsi_host_template {
 	 * For these access to it is synchronized implicitly by
 	 * module_init/module_exit.
 	 */
+	/* 老式驱动用于记录主机适配器链表的表头，已经过时 */
 	struct list_head legacy_hosts;
 };
 
@@ -406,6 +448,7 @@ enum {
 	SHOST_RECOVERY,
 };
 
+/* SCSI主机适配器描述符 */
 struct Scsi_Host {
 	/*
 	 * __devices is protected by the host_lock, but you should
@@ -415,36 +458,55 @@ struct Scsi_Host {
 	 * their __ prefixed variants with the lock held. NEVER
 	 * access this list directly from a driver.
 	 */
+	/* 指向这个主机适配器的SCSI设备链表 */
 	struct list_head	__devices;
-	
+
+	/* 分配SCSI命令的存储池 */
 	struct scsi_host_cmd_pool *cmd_pool;
+	/* 用于保护free_list链表的锁 */
 	spinlock_t		free_list_lock;
+	/* 预先准备的SCSI命令结构的链表，如果从缓冲池中分配结构失败，则从这里分配。 */
 	struct list_head	free_list; /* backup store of cmd structs */
+	/* 饥饿设备链表 */
 	struct list_head	starved_list;
 
+	/* 保护本结构的锁 */
 	spinlock_t		default_lock;
+	/* 指向default_lock */
 	spinlock_t		*host_lock;
 
+	/* 同步扫描过程的互斥量 */
 	struct semaphore	scan_mutex;/* serialize scanning activity */
 
+	/* 错误恢复的SCSI命令链表 */
 	struct list_head	eh_cmd_q;
+	/* 错误恢复线程 */
 	struct task_struct    * ehandler;  /* Error recovery thread. */
 	struct semaphore      * eh_wait;   /* The error recovery thread waits
 					      on this. */
 	struct completion     * eh_notify; /* wait for eh to begin or end */
+	/* 等待特定的操作完成 */
 	struct semaphore      * eh_action; /* Wait for specific actions on the
                                           host. */
 	unsigned int            eh_active:1; /* Indicates the eh thread is awake and active if
                                           this is true. */
 	unsigned int            eh_kill:1; /* set when killing the eh thread */
+	/* SCSI设备错误恢复等待队列 */
 	wait_queue_head_t       host_wait;
+	/* 创建此设备的模板指针 */
 	struct scsi_host_template *hostt;
+	/* 指向SCSI传输层模板的指针 */
 	struct scsi_transport_template *transportt;
+	/* 已经派发给主机适配器低层驱动的命令数  */
 	volatile unsigned short host_busy;   /* commands actually active on low-level */
+	/* 失败的命令数 */
 	volatile unsigned short host_failed; /* commands that failed. */
-    
+
+	/* 主机编号，用于标识这个主机适配器 */
 	unsigned short host_no;  /* Used for IOCTL_GET_IDLUN, /proc/scsi et al. */
+	/* 如果为1，表示last_reset值有效 */
 	int resetting; /* if set, it means that last_reset is a valid value */
+	/* 上次复位的时间，以jiffies为单位，在提交命令到主机适配前，必须确保上次复位时间超过2秒 */
 	unsigned long last_reset;
 
 	/*
@@ -453,8 +515,11 @@ struct Scsi_Host {
 	 * The first two should be set to 1 more than the actual max id
 	 * or lun (i.e. 8 for normal systems).
 	 */
+	/* 连接到本主机适配器的目标节点最大编号 */
 	unsigned int max_id;
+	/* 连接到本主机适配器的逻辑单元最大编号 */
 	unsigned int max_lun;
+	/* 最大通道编号 */
 	unsigned int max_channel;
 
 	/*
@@ -464,6 +529,7 @@ struct Scsi_Host {
 	 * in the system at one time, this does not need to be set.  It is
 	 * initialized to 0 in scsi_register.
 	 */
+	/* 用于主机适配器的唯一标识号 */
 	unsigned int unique_id;
 
 	/*
@@ -475,23 +541,34 @@ struct Scsi_Host {
 	 * (i.e. could there be a 20 byte or a 24-byte command a few years
 	 * down the road?).  
 	 */
+	/* 主机可以接受的最大SCSI命令长度 */
 	unsigned char max_cmd_len;
 
+	/* 主机的SCSI ID */
 	int this_id;
+	/* 可以同时接受的SCSI命令数，必须大于0 */
 	int can_queue;
+	/* 允许排入主机适配器的SCSI设备的最大命令数目，即队列深度 */
 	short cmd_per_lun;
+	/* 支持的S/G能力 */
 	short unsigned int sg_tablesize;
+	/* 单个命令所能访问的最大扇区数 */
 	short unsigned int max_sectors;
+	/* DMA S/G边界限制 */
 	unsigned long dma_boundary;
 
+	/* 为1表示只能使用16M的DMA空间 */
 	unsigned unchecked_isa_dma:1;
+	/* 为1表示可以合并连接的IO请求 */
 	unsigned use_clustering:1;
+	/* 未用 */
 	unsigned use_blk_tcq:1;
 
 	/*
 	 * Host has requested that no further requests come through for the
 	 * time being.
 	 */
+	/* 为1表示低层驱动要求阻塞该主机适配器，即SCSI中间层不要继续分发命令到队列中 */
 	unsigned host_self_blocked:1;
     
 	/*
@@ -499,29 +576,38 @@ struct Scsi_Host {
 	 * set for the minority of drivers whose authors actually read
 	 * the spec ;)
 	 */
+	/* 如果为1，表示按逆序扫描SCSI总线 */
 	unsigned reverse_ordering:1;
 
 	/*
 	 * Host has rejected a command because it was busy.
 	 */
+	/* 阻塞计数器 */
 	unsigned int host_blocked;
 
 	/*
 	 * Value host_blocked counts down from
 	 */
+	/* 最大阻塞命令数量 */
 	unsigned int max_host_blocked;
 
 	/* legacy crap */
+	/* 主机适配器的MMIO基地址 */
 	unsigned long base;
+	/* 主机适配器的IO端口编号 */
 	unsigned long io_port;
+	/* IO空间字节数 */
 	unsigned char n_io_port;
+	/* DMA通道，用于老式驱动 */
 	unsigned char dma_channel;
+	/* 该设备的IRQ号 */
 	unsigned int  irq;
 	
-
+	/* 主机适配器的状态 */
 	unsigned long shost_state;
 
 	/* ldm bits */
+	/* 内嵌通用设备 */
 	struct device		shost_gendev;
 	struct class_device	shost_classdev;
 
@@ -532,12 +618,14 @@ struct Scsi_Host {
 	 * For these access to it is synchronized implicitly by
 	 * module_init/module_exit.
 	 */
+	/* 老式驱动使用它链接入模板的legacy_hosts链表 */
 	struct list_head sht_legacy_list;
 
 	/*
 	 * Points to the transport data (if any) which is allocated
 	 * separately
 	 */
+	/* 分配的传输层数据结构 */
 	void *shost_data;
 
 	/*
@@ -545,6 +633,7 @@ struct Scsi_Host {
 	 * and also because some compilers (m68k) don't automatically force
 	 * alignment to a long boundary.
 	 */
+	/* 主机适配器的专有数据 */
 	unsigned long hostdata[0]  /* Used for storage of host specific stuff */
 		__attribute__ ((aligned (sizeof(unsigned long))));
 };

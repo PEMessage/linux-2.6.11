@@ -27,18 +27,23 @@ struct scsi_pointer {
 	volatile int phase;
 };
 
+/* SCSI命令描述符 */
 struct scsi_cmnd {
 	int     sc_magic;
 
+	/* 所属设备 */
 	struct scsi_device *device;
 	unsigned short state;
 	unsigned short owner;
 	struct scsi_request *sc_request;
 
+	/* 链入到所属SCSI设备的命令链表 */
 	struct list_head list;  /* scsi_cmnd participates in queue lists */
 
+	/* 链入到主机适配器的错误恢复链表 */
 	struct list_head eh_entry; /* entry for the host eh_cmd_q */
 	int eh_state;		/* Used for state tracking in error handlr */
+	/* 错误恢复处理的标志 */
 	int eh_eflags;		/* Used by error handlr */
 	void (*done) (struct scsi_cmnd *);	/* Mid-level done function */
 
@@ -55,10 +60,13 @@ struct scsi_cmnd {
 	 * for another command, so that we can avoid incorrectly aborting or
 	 * resetting the new command.
 	 */
+	/* 命令的序号，标识一个请求，用于错误恢复和调试目的 */
 	unsigned long serial_number;
 	unsigned long serial_number_at_timeout;
 
+	/* 已经重试的次数 */
 	int retries;
+	/* 可允许的重试次数 */
 	int allowed;
 	int timeout_per_command;
 	int timeout_total;
@@ -70,13 +78,16 @@ struct scsi_cmnd {
 	 */
 	unsigned volatile char internal_timeout;
 
+	/* SCSI命令的长度 */
 	unsigned char cmd_len;
 	unsigned char old_cmd_len;
+	/* 数据传输方向，读还是写 */
 	enum dma_data_direction sc_data_direction;
 	enum dma_data_direction sc_old_data_direction;
 
 	/* These elements define the operation we are about to perform */
 #define MAX_COMMAND_SIZE	16
+	/* SCSI规范格式的命令字符串指针 */
 	unsigned char cmnd[MAX_COMMAND_SIZE];
 	unsigned request_bufflen;	/* Actual request size */
 
@@ -94,11 +105,13 @@ struct scsi_cmnd {
 	unsigned bufflen;	/* Size of data buffer */
 	void *buffer;		/* Data buffer */
 
+	/* 如果传输的数据小于这个值，则返回错误 */
 	unsigned underflow;	/* Return error if less than
 				   this amount is transferred */
 	unsigned old_underflow;	/* save underflow here when reusing the
 				 * command for error handling */
 
+	/* 传输长度，应该等于扇区长度 */
 	unsigned transfersize;	/* How much we are guaranteed to
 				   transfer with each SCSI transfer
 				   (ie, between disconnect / 
@@ -109,10 +122,12 @@ struct scsi_cmnd {
 				   transferred less actual number
 				   transferred (0 if not supported) */
 
+	/* 对应的块设备层请求描述符 */
 	struct request *request;	/* The command we are
 				   	   working on */
 
 #define SCSI_SENSE_BUFFERSIZE 	96
+	/* SCSI命令的感测数据缓冲区 */
 	unsigned char sense_buffer[SCSI_SENSE_BUFFERSIZE];		/* obtained by REQUEST SENSE
 						 * when CHECK CONDITION is
 						 * received on original command 
@@ -120,14 +135,17 @@ struct scsi_cmnd {
 
 	/* Low-level done function - can be used by low-level driver to point
 	 *        to completion function.  Not used by mid/upper level code. */
+	/* 当底层驱动使用，指向完成函数，通常设置为queuecommnd函数中传入的done参数 */
 	void (*scsi_done) (struct scsi_cmnd *);
 
 	/*
 	 * The following fields can be written to by the host specific code. 
 	 * Everything else should be left alone. 
 	 */
+	/* 某些主机适配器需要使用的Scratchpad */
 	struct scsi_pointer SCp;	/* Scratchpad used by some host adapters */
 
+	/* 底层驱动使用 */
 	unsigned char *host_scribble;	/* The host adapter is allowed to
 					   * call scsi_malloc and get some memory
 					   * and hang it here.     The host adapter
@@ -136,8 +154,10 @@ struct scsi_cmnd {
 					   * obtained by scsi_malloc is guaranteed
 					   * to be at an address < 16Mb). */
 
+	/* 底层驱动返回的状态码 */
 	int result;		/* Status code from lower level driver */
 
+	/* 命令标签 */
 	unsigned char tag;	/* SCSI-II queued command tag */
 	unsigned long pid;	/* Process ID, starts at 0 */
 };
