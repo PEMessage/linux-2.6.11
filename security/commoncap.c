@@ -315,7 +315,9 @@ int cap_syslog (int type)
 		return -EPERM;
 	return 0;
 }
-
+/**
+ * 检查是否有足够的空闲页框把交换区上存放的所有页换入。
+ */
 int cap_vm_enough_memory(long pages)
 {
 	int cap_sys_admin = 0;

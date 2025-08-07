@@ -2968,6 +2968,9 @@ static void selinux_socket_post_create(struct socket *sock, int family,
 /* Range of port numbers used to automatically bind.
    Need to determine whether we should perform a name_bind
    permission check between the socket and the port number. */
+/**
+ * 可用于向外连接的端口范围。
+ */
 #define ip_local_port_range_0 sysctl_local_port_range[0]
 #define ip_local_port_range_1 sysctl_local_port_range[1]
 

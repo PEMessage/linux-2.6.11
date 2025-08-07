@@ -834,6 +834,10 @@ static int dummy_setprocattr(struct task_struct *p, char *name, void *value, siz
 }
 
 
+/**
+ * 安全挂钩。
+ * 比如，settime和settimeofday函数会调用settime挂钩，来检查当前进程是否有CAP_SYS_TIME权限。
+ */
 struct security_operations dummy_security_ops;
 
 #define set_to_dummy_if_null(ops, function)				\
