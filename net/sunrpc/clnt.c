@@ -516,7 +516,7 @@ call_reserve(struct rpc_task *task)
 {
 	dprintk("RPC: %4d call_reserve\n", task->tk_pid);
 
-	if (!rpcauth_uptodxatecred(task)) {
+	if (!rpcauth_uptodatecred(task)) {
 		task->tk_action = call_refresh;
 		return;
 	}

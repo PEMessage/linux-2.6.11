@@ -546,7 +546,7 @@ int udp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 		 * There are pending frames.
 	 	 * The socket lock must be held while it's corked.
 		 */
-		lock_sock(sk)/* 获取套接口的锁 */
+		lock_sock(sk);/* 获取套接口的锁 */
 		if (likely(up->pending)) {
 			if (unlikely(up->pending != AF_INET)) {/* 标志无效?? */
 				release_sock(sk);
