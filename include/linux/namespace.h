@@ -22,6 +22,10 @@ static inline void put_namespace(struct namespace *namespace)
 		__put_namespace(namespace);
 }
 
+/**
+ * 从进程描述符中分离出与命名空间相关的数据结构。
+ * 如果没有其他进程共享该结构，还删除所有这些数据结构。
+ */
 static inline void exit_namespace(struct task_struct *p)
 {
 	struct namespace *namespace = p->namespace;

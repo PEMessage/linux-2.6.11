@@ -37,8 +37,20 @@ struct	rusage {
 	long	ru_nivcsw;		/* involuntary " */
 };
 
+/**
+ * 进程资源限制。current->signal->rlim是一个数组，每个元素对应一个rlimit描述符。
+ */
 struct rlimit {
+	/**
+	 * 资源的当前限制值。
+	 */
 	unsigned long	rlim_cur;
+	/**
+	 * 资源限制所允许的最大值。
+	 * 用户能够利用getrlimit和setrlimit系统调用，将一些资源的rlim_cur限制值增加到rlim_max。
+	 * 但是，只有超级用户或者具有CAP_SYS_RESOURCE权限的用户才能改变rlim_max字段、或者将rlim_cur
+	 * 设置成大于rlim_max字段的值。
+	 */
 	unsigned long	rlim_max;
 };
 

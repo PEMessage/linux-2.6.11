@@ -18,6 +18,9 @@
 typedef __u32 __kernel_dev_t;
 
 typedef __kernel_fd_set		fd_set;
+/**
+ * 设备号。MAJOR和MINOR宏分别提取主设备号和次设备号
+ */
 typedef __kernel_dev_t		dev_t;
 typedef __kernel_ino_t		ino_t;
 typedef __kernel_mode_t		mode_t;
@@ -104,11 +107,29 @@ typedef unsigned long		ulong;
 #ifndef __BIT_TYPES_DEFINED__
 #define __BIT_TYPES_DEFINED__
 
+/**
+ * 长度为8的无符号数
+ */
 typedef		__u8		u_int8_t;
+/**
+ * 长度为8的有符号数
+ */
 typedef		__s8		int8_t;
+/**
+ * 长度为16的无符号数
+ */
 typedef		__u16		u_int16_t;
+/**
+ * 长度为16的有符号数
+ */
 typedef		__s16		int16_t;
+/**
+ * 长度为32的无符号数
+ */
 typedef		__u32		u_int32_t;
+/**
+ * 长度为32的有符号数
+ */
 typedef		__s32		int32_t;
 
 #endif /* !(__BIT_TYPES_DEFINED__) */
@@ -152,10 +173,21 @@ typedef unsigned long sector_t;
 #else
 #define __bitwise
 #endif
-
+/**
+ * 长度为16的无符号数，低位在前
+ */
 typedef __u16 __bitwise __le16;
+/**
+ * 长度为16的无符号数，高位在前
+ */
 typedef __u16 __bitwise __be16;
+/**
+ * 长度为32的无符号数，低位在前
+ */
 typedef __u32 __bitwise __le32;
+/**
+ * 长度为32的无符号数，高位在前
+ */
 typedef __u32 __bitwise __be32;
 #if defined(__GNUC__) && !defined(__STRICT_ANSI__)
 typedef __u64 __bitwise __le64;

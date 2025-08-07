@@ -116,7 +116,13 @@ enum
 
 struct softirq_action
 {
+	/**
+	 * 软中断处理函数
+	 */
 	void	(*action)(struct softirq_action *);
+	/**
+	 * 回传给软中断处理函数的数据。
+	 */
 	void	*data;
 };
 
@@ -148,12 +154,31 @@ extern void FASTCALL(raise_softirq(unsigned int nr));
      he makes it with spinlocks.
  */
 
+/**
+ * taskletra描述符
+ */
 struct tasklet_struct
 {
+	/**
+	 * 指向下一个描述符
+	 */
 	struct tasklet_struct *next;
+	/**
+	 * tasklet的状态。
+	 * 
+	 */
 	unsigned long state;
+	/**
+	 * 锁计数器。
+	 */
 	atomic_t count;
+	/**
+	 * tasklet功能函数
+	 */
 	void (*func)(unsigned long);
+	/**
+	 * 传给功能函数的参数。
+	 */
 	unsigned long data;
 };
 
@@ -164,9 +189,20 @@ struct tasklet_struct name = { NULL, 0, ATOMIC_INIT(0), func, data }
 struct tasklet_struct name = { NULL, 0, ATOMIC_INIT(1), func, data }
 
 
+/**
+ * tasklet状态
+ */
 enum
 {
+	/**
+	 * 该标志被设置时，表示tasklet是挂起的（曾被调度执行）。
+	 * 也意味着它被插入到tasklet_vec或者tasklet_hi_vec中
+	 */
 	TASKLET_STATE_SCHED,	/* Tasklet is scheduled for execution */
+	/**
+	 * 该标志被设置时，表示tasklet正在被执行。在UP上不使用它。
+	 * 它被用来确保tasklet不会在多个CPU上同时执行。
+	 */
 	TASKLET_STATE_RUN	/* Tasklet is running (SMP only) */
 };
 
@@ -194,8 +230,19 @@ static inline void tasklet_unlock_wait(struct tasklet_struct *t)
 
 extern void FASTCALL(__tasklet_schedule(struct tasklet_struct *t));
 
+/**
+ * 调度tasklet，将其挂到软中断中。
+ */
 static inline void tasklet_schedule(struct tasklet_struct *t)
 {
+	/**
+	 * 检查任务的TASKLET_STATE_SCHED标志，如果已经设置，就退出。
+	 * 设置了TASKLET_STATE_SCHED，表示它已经被调度到软中断上了，现在处于挂起状态
+	 * 不能(也不用)再调度了。
+	 *
+	 * 既然TASKLET_STATE_SCHED标志已经保证一个tasklet不会在多个CPU上同时被插入到链表中，为什么还需要TASKLET_STATE_RUN标志呢？
+	 * 这是因为在调用回调函数前，TASKLET_STATE_SCHED可能被清除，如果只有TASKLET_STATE_SCHED这个标志的话，可能还是会造成过程重入。
+	 */
 	if (!test_and_set_bit(TASKLET_STATE_SCHED, &t->state))
 		__tasklet_schedule(t);
 }
@@ -209,12 +256,18 @@ static inline void tasklet_hi_schedule(struct tasklet_struct *t)
 }
 
 
+/**
+ * 禁止tasklet，并不等待被禁止的tasklet运行结束
+ */
 static inline void tasklet_disable_nosync(struct tasklet_struct *t)
 {
 	atomic_inc(&t->count);
 	smp_mb__after_atomic_inc();
 }
 
+/**
+ * 禁止tasklet，并且等待被禁止的tasklet运行结束
+ */
 static inline void tasklet_disable(struct tasklet_struct *t)
 {
 	tasklet_disable_nosync(t);
@@ -222,6 +275,9 @@ static inline void tasklet_disable(struct tasklet_struct *t)
 	smp_mb();
 }
 
+/**
+ * 激活tasklet
+ */
 static inline void tasklet_enable(struct tasklet_struct *t)
 {
 	smp_mb__before_atomic_dec();

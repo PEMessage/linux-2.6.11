@@ -17,6 +17,9 @@ struct raw_prio_tree_node {
 	struct prio_tree_node	*parent;
 };
 
+/**
+ * 优先树节点
+ */
 struct prio_tree_node {
 	struct prio_tree_node	*left;
 	struct prio_tree_node	*right;

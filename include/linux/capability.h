@@ -74,24 +74,36 @@ typedef __u32 kernel_cap_t;
    overrides the restriction of changing file ownership and group
    ownership. */
 
+/**
+ * 忽略对文件和组的拥有者进行改变的限制
+ */
 #define CAP_CHOWN            0
 
 /* Override all DAC access, including ACL execute access if
    [_POSIX_ACL] is defined. Excluding DAC access covered by
    CAP_LINUX_IMMUTABLE. */
 
+/**
+ * 忽略文件的访问许可权
+ */
 #define CAP_DAC_OVERRIDE     1
 
 /* Overrides all DAC restrictions regarding read and search on files
    and directories, including ACL restrictions if [_POSIX_ACL] is
    defined. Excluding DAC access covered by CAP_LINUX_IMMUTABLE. */
 
+/**
+ * 忽略文件/目录读和搜索的许可权
+ */
 #define CAP_DAC_READ_SEARCH  2
     
 /* Overrides all restrictions about allowed operations on files, where
    file owner ID must be equal to the user ID, except where CAP_FSETID
    is applicable. It doesn't override MAC and DAC restrictions. */
 
+/**
+ * 一般是忽略对文件拥有者的权限检查
+ */
 #define CAP_FOWNER           3
 
 /* Overrides the following restrictions that the effective user ID
@@ -101,6 +113,9 @@ typedef __u32 kernel_cap_t;
    the S_ISGID bit on that file; that the S_ISUID and S_ISGID bits are
    cleared on successful return from chown(2) (not implemented). */
 
+/**
+ * 忽略对文件setid和setgid标志设置的限制
+ */
 #define CAP_FSETID           4
 
 /* Used to decide between falling back on the old suser() or fsuser(). */
@@ -111,17 +126,26 @@ typedef __u32 kernel_cap_t;
    process sending a signal must match the real or effective user ID
    of the process receiving the signal. */
 
+/**
+ * 产生信号时绕过权限检查
+ */
 #define CAP_KILL             5
 
 /* Allows setgid(2) manipulation */
 /* Allows setgroups(2) */
 /* Allows forged gids on socket credentials passing. */
 
+/**
+ * 忽略对组进程操作的限制
+ */
 #define CAP_SETGID           6
 
 /* Allows set*uid(2) manipulation (including fsuid). */
 /* Allows forged pids on socket credentials passing. */
 
+/**
+ * 忽略对用户进程操作的限制
+ */
 #define CAP_SETUID           7
 
 
@@ -132,19 +156,31 @@ typedef __u32 kernel_cap_t;
 /* Transfer any capability in your permitted set to any pid,
    remove any capability in your permitted set from any pid */
 
+/**
+ * 允许对其他进程进行权能操作
+ */
 #define CAP_SETPCAP          8
 
 /* Allow modification of S_IMMUTABLE and S_APPEND file attributes */
 
+/**
+ * 允许修改仅追加和不可变的Ext2/Ext3文件
+ */
 #define CAP_LINUX_IMMUTABLE  9
 
 /* Allows binding to TCP/UDP sockets below 1024 */
 /* Allows binding to ATM VCIs below 32 */
 
+/**
+ * 允许绑定到低于1024的TCP/UDP套接字
+ */
 #define CAP_NET_BIND_SERVICE 10
 
 /* Allow broadcasting, listen to multicast */
 
+/**
+ * 允许广播与组播
+ */
 #define CAP_NET_BROADCAST    11
 
 /* Allow interface configuration */
@@ -161,42 +197,69 @@ typedef __u32 kernel_cap_t;
 /* Allow read/write of device-specific registers */
 /* Allow activation of ATM control sockets */
 
+/**
+ * 允许一般的联网管理
+ */
 #define CAP_NET_ADMIN        12
 
 /* Allow use of RAW sockets */
 /* Allow use of PACKET sockets */
 
+/**
+ * 允许使用RAW和PACKET套接字
+ */
 #define CAP_NET_RAW          13
 
 /* Allow locking of shared memory segments */
 /* Allow mlock and mlockall (which doesn't really have anything to do
    with IPC) */
 
+/**
+ * 允许页加锁和共享内存段加锁
+ */
 #define CAP_IPC_LOCK         14
 
 /* Override IPC ownership checks */
 
+/**
+ * 跳过IPC拥有者检查
+ */
 #define CAP_IPC_OWNER        15
 
 /* Insert and remove kernel modules - modify kernel without limit */
 /* Modify cap_bset */
+/**
+ * 允许插入和卸载模块
+ */
 #define CAP_SYS_MODULE       16
 
 /* Allow ioperm/iopl access */
 /* Allow sending USB messages to any device via /proc/bus/usb */
 
+/**
+ * 允许通过ioperm和iopl访问IO端口
+ */
 #define CAP_SYS_RAWIO        17
 
 /* Allow use of chroot() */
 
+/**
+ * 允许使用chroot
+ */
 #define CAP_SYS_CHROOT       18
 
 /* Allow ptrace() of any process */
 
+/**
+ * 允许对任何进程使用ptrace
+ */
 #define CAP_SYS_PTRACE       19
 
 /* Allow configuration of process accounting */
 
+/**
+ * 允许配置进程记帐
+ */
 #define CAP_SYS_PACCT        20
 
 /* Allow configuration of the secure attention key */
@@ -236,10 +299,16 @@ typedef __u32 kernel_cap_t;
    arbitrary SCSI commands */
 /* Allow setting encryption key on loopback filesystem */
 
+/**
+ * 允许一般的系统管理
+ */
 #define CAP_SYS_ADMIN        21
 
 /* Allow use of reboot() */
 
+/**
+ * 允许使用reboot
+ */
 #define CAP_SYS_BOOT         22
 
 /* Allow raising priority and setting priority on other (different
@@ -249,6 +318,9 @@ typedef __u32 kernel_cap_t;
    process. */
 /* Allow setting cpu affinity on other processes */
 
+/**
+ * 跳过nice和setpriority系统调用的权限检查，并允许创建实时进程。
+ */
 #define CAP_SYS_NICE         23
 
 /* Override resource limits. Set resource limits. */
@@ -263,29 +335,50 @@ typedef __u32 kernel_cap_t;
 /* Override max number of consoles on console allocation */
 /* Override max number of keymaps */
 
+/**
+ * 允许增加资源限制
+ */
 #define CAP_SYS_RESOURCE     24
 
 /* Allow manipulation of system clock */
 /* Allow irix_stime on mips */
 /* Allow setting the real-time clock */
 
+/**
+ * 允许系统时钟和实时时钟的操作
+ */
 #define CAP_SYS_TIME         25
 
 /* Allow configuration of tty devices */
 /* Allow vhangup() of tty */
 
+/**
+ * 允许配置终端并执行vhangup系统调用。
+ */
 #define CAP_SYS_TTY_CONFIG   26
 
 /* Allow the privileged aspects of mknod() */
 
+/**
+ * 允许有特权的mknod操作
+ */
 #define CAP_MKNOD            27
 
 /* Allow taking of leases on files */
 
+/**
+ * 允许对文件进行租借。
+ */
 #define CAP_LEASE            28
 
+/**
+ * 通过在netlink套接字进行写入而产生审计消息
+ */
 #define CAP_AUDIT_WRITE      29
 
+/**
+ * 通过netlink套接字控制内核审计操作
+ */
 #define CAP_AUDIT_CONTROL    30
 
 #ifdef __KERNEL__

@@ -27,6 +27,9 @@
 #include <linux/compiler.h>
 
 /* This structure gets passed by the SIOCADDRT and SIOCDELRT calls. */
+/**
+ * 当使用route命令，向内核发送添加或删除路由表项的请求时所用的数据结构。
+ */
 struct rtentry 
 {
 	unsigned long	rt_pad1;

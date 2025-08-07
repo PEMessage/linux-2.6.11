@@ -138,6 +138,10 @@ static inline void smp_send_reschedule(int cpu) { }
 # define _smp_processor_id() smp_processor_id()
 #endif
 
+/**
+ * 与preempt_disable相似，但是还要返回本地CPU的ID
+ * 其实它的主要目的是为了返回CPU的ID
+ */
 #define get_cpu()		({ preempt_disable(); smp_processor_id(); })
 #define put_cpu()		preempt_enable()
 #define put_cpu_no_resched()	preempt_enable_no_resched()

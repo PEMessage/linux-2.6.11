@@ -8,14 +8,33 @@
 
 struct tvec_t_base_s;
 
+/**
+ * 动态定时器结构
+ */
 struct timer_list {
+	/**
+	 * 用于将定时器插入双向循环链表中。
+	 * 链表根据定时器expires字段进行分组存放。
+	 */
 	struct list_head entry;
+	/**
+	 * 定时器到期时间。用节拍数表示。
+	 * 当它的值小于等于jiffies的值时，表示计时器到期。
+	 */
 	unsigned long expires;
 
 	spinlock_t lock;
 	unsigned long magic;
 
+	/**
+	 * 定时器到期时执行函数的地址。
+	 */
 	void (*function)(unsigned long);
+	/**
+	 * 传递给定时器函数的参数。
+	 * 由于此参数，使得可以定义一个单独的通用函数来处理多个设备驱动程序的超时问题。
+	 * 可以用它来存放设备ID，或者其他数据，这样定时函数可以根据这些数据区分不同的设备。
+	 */
 	unsigned long data;
 
 	struct tvec_t_base_s *base;
@@ -38,6 +57,9 @@ struct timer_list {
  *
  * init_timer() must be done to a timer prior calling *any* of the
  * other timer functions.
+ */
+/**
+ * 初始化动态定时器对象。
  */
 static inline void init_timer(struct timer_list * timer)
 {
@@ -81,6 +103,9 @@ extern unsigned long next_timer_interrupt(void);
  *
  * Timers with an ->expired field in the past will be executed in the next
  * timer tick.
+ */
+/**
+ * 将动态定时器插入到合适的链表中。
  */
 static inline void add_timer(struct timer_list * timer)
 {

@@ -42,41 +42,105 @@ struct kioctx;
 #define kiocbIsLocked(iocb)	test_bit(KIF_LOCKED, &(iocb)->ki_flags)
 #define kiocbIsKicked(iocb)	test_bit(KIF_KICKED, &(iocb)->ki_flags)
 #define kiocbIsCancelled(iocb)	test_bit(KIF_CANCELLED, &(iocb)->ki_flags)
-
+/**
+ * 同步和异步Io操作的完成状态。
+ */
 struct kiocb {
+	/**
+	 * 要重新操作的IO链表指针。
+	 */
 	struct list_head	ki_run_list;
+	/**
+	 * 描述符标志
+	 */
 	long			ki_flags;
+	/**
+	 * 描述符的引用计数器。
+	 */
 	int			ki_users;
+	/**
+	 * 异步IO操作标识符。同步IO操作标识符为0xffffffff
+	 */
 	unsigned		ki_key;		/* id of this request */
 
+	/**
+	 * IO操作相关的文件对象指针
+	 */
 	struct file		*ki_filp;
+	/**
+	 * 异步IO环境描述符指针
+	 */
 	struct kioctx		*ki_ctx;	/* may be NULL for sync ops */
+	/**
+	 * 取消异步Io操作时的回调方法。
+	 */
 	int			(*ki_cancel)(struct kiocb *, struct io_event *);
+	/**
+	 * 重试异步IO时的回调方法。
+	 */
 	ssize_t			(*ki_retry)(struct kiocb *);
+	/**
+	 * 清除kiocb描述符时的回调方法。
+	 */
 	void			(*ki_dtor)(struct kiocb *);
 
+	/**
+	 * 在异步操作环境下，当前进行的IO操作链表的指针。
+	 */
 	struct list_head	ki_list;	/* the aio core uses this
 						 * for cancellation */
 
+	/**
+	 * 对于同步操作，这旨指向发出该操作的进程描述符的指针。
+	 * 对于异步操作，它是指向用户态数据结构iocb的指针。
+	 */
 	union {
 		void __user		*user;
 		struct task_struct	*tsk;
 	} ki_obj;
+	/**
+	 * 给用户态进程返回的值。
+	 */
 	__u64			ki_user_data;	/* user's data for completion */
+	/**
+	 * 正在进行IO操作的当前文件位置。
+	 */
 	loff_t			ki_pos;
 	/* State that we remember to be able to restart/retry  */
+	/**
+	 * 操作类型:read,write,sync
+	 */
 	unsigned short		ki_opcode;
+	/**
+	 * 被传输的字节数。
+	 */
 	size_t			ki_nbytes; 	/* copy of iocb->aio_nbytes */
+	/**
+	 * 用户态缓冲区的当前位置。
+	 */
 	char 			__user *ki_buf;	/* remaining iocb->aio_buf */
+	/**
+	 * 待传输的字节数。
+	 */
 	size_t			ki_left; 	/* remaining bytes */
+	/**
+	 * 异步IO操作等待队列。
+	 */
 	wait_queue_t		ki_wait;
 	long			ki_retried; 	/* just for testing */
 	long			ki_kicked; 	/* just for testing */
 	long			ki_queued; 	/* just for testing */
 
+	/**
+	 * 由文件系统层自由使用。
+	 */
 	void			*private;
 };
 
+/**
+ * 文件读写控制块是否为同步读写。
+ * 如果是，那么，即使在异步读写函数(如aio_read)中，也必须等待读写任务完成。
+ */
 #define is_sync_kiocb(iocb)	((iocb)->ki_key == KIOCB_SYNC_KEY)
 #define init_sync_kiocb(x, filp)			\
 	do {						\

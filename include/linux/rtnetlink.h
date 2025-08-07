@@ -21,9 +21,14 @@ enum {
 #define RTM_GETLINK	RTM_GETLINK
 	RTM_SETLINK,
 #define RTM_SETLINK	RTM_SETLINK
-
+/**
+ * RTMGRP_IPV4_IFADDR多播群组事件，一个设备上已配置了一个新地址。
+ */
 	RTM_NEWADDR	= 20,
 #define RTM_NEWADDR	RTM_NEWADDR
+/**
+ * RTMGRP_IPV4_IFADDR多播群组事件，一个设备上已删除了一个地址。
+ */
 	RTM_DELADDR,
 #define RTM_DELADDR	RTM_DELADDR
 	RTM_GETADDR,
@@ -145,19 +150,49 @@ struct rtmsg
 
 enum
 {
+	/**
+	 * 定义一个未初始化的值。
+	 * 例如，当从路由表中删除一个表项时使用该值，这是因为删除操作不需要指定路由表项的类型。
+	 */
 	RTN_UNSPEC,
+	/**
+	 * 该路由是一条到单播地址的直连或非直连（通过一个网关）路由。
+	 * 当用户通过ip route命令添加路由但没有指定其它路由类型时，路由类型缺省被设置为RTN_UNICAST。
+	 */
 	RTN_UNICAST,		/* Gateway or direct route	*/
+	/**
+	 * 目的地址被配置为一个本地接口的地址。
+	 */
 	RTN_LOCAL,		/* Accept locally		*/
+	/**
+	 * 目的地址是一个广播地址。
+	 * 匹配的ingress报文以广播方式送往本地，匹配的egress报文以广播方式发送出去。
+	 */
 	RTN_BROADCAST,		/* Accept locally as broadcast,
 				   send as broadcast */
+	/**
+	 * 匹配的ingress报文以广播方式送往本地，匹配的egress报文以单播发送出去。不被IPv4使用。
+	 */
 	RTN_ANYCAST,		/* Accept locally as broadcast,
 				   but send as unicast */
+	/**
+	 * 目的地址是一个多播地址。
+	 */
 	RTN_MULTICAST,		/* Multicast route		*/
+	/**
+	 * 这些值与特定的管理配置而不是与目的地址类型相关联。
+	 */
 	RTN_BLACKHOLE,		/* Drop				*/
 	RTN_UNREACHABLE,	/* Destination is unreachable   */
 	RTN_PROHIBIT,		/* Administratively prohibited	*/
 	RTN_THROW,		/* Not in this table		*/
+	/**
+	 * 源IP地址和/或目的IP地址必须被转换。因为相关的特性FastNAT已经在2.6内核中被废弃，所以该类型不再被使用。
+	 */
 	RTN_NAT,		/* Translate this address	*/
+	/**
+	 * 有一个外部解析器来处理该路由。目前尚未实现该功能。
+	 */
 	RTN_XRESOLVE,		/* Use external resolver	*/
 	__RTN_MAX
 };
@@ -398,6 +433,9 @@ enum
 
 /* ifa_flags */
 
+/**
+ * 如果in_ifaddr数据结构内带有IFA_F_SECONDARY标志，则表示它是一个设备的次地址。否则为主地址。
+ */
 #define IFA_F_SECONDARY		0x01
 #define IFA_F_TEMPORARY		IFA_F_SECONDARY
 
@@ -457,8 +495,15 @@ enum
 /*
  *	Neighbor Cache Entry Flags
  */
-
+/**
+ * 当使用用户空间命令ip neigh添加邻居项到代理表中时（例如，使用命令ip neigh add proxy 10.0.0.2 dev eth0），传送给内核的数据结构中会设置这个标识，内核的处理函数neigh_add就会知道，有新邻居项要加到代理表中。
+ */
 #define NTF_PROXY	0x08	/* == ATF_PUBL */
+/**
+ * 这个标识由IPV6使用。当设置后，它表示邻居是一个路由器。
+ * 这个标识和NTF_PROXY标志不同，它不能由用户空间工具设置。
+ * 当IPV6邻居发现程序收到来自邻居的信息时，它就会更新这个标志的值。
+ */
 #define NTF_ROUTER	0x80
 
 /*
@@ -710,7 +755,12 @@ enum
 
 
 /* RTnetlink multicast groups */
-
+/**
+ * 当设备状态或配置有些改变时，通知被发送到连接多播组RTMGRP_LINK(带有 rtmsg_ifinfo接口信息)。有几个通知如下： 
+ *	当netdev_chain通知链收到一个通知时，RTnetlink登记给前面介绍的netdev_chain链并重它收到的通知。 
+ *	当禁止的设备使能时，反之亦然(参考netdev_state_change) 
+ *	当 net_device->flags 的一个标志位改变时，例如，由用户配置命令(参考dev_change_flags)
+ */
 #define RTMGRP_LINK		1
 #define RTMGRP_NOTIFY		2
 #define RTMGRP_NEIGH		4

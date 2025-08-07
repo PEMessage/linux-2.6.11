@@ -7,25 +7,49 @@
 /*
  * NFS client parameters stored in the superblock.
  */
+/**
+ * NFS的客户端信息，它放在super_block结构中
+ */
 struct nfs_server {
+	/**
+	 * RPC客户端结构指针
+	 */
 	struct rpc_clnt *	client;		/* RPC client handle */
 	struct rpc_clnt *	client_sys;	/* 2nd handle for FSINFO */
 	struct nfs_rpc_ops *	rpc_ops;	/* NFS protocol vector */
 	struct backing_dev_info	backing_dev_info;
+	/**
+	 * 属性信息 
+	 */
 	int			flags;		/* various flags */
 	unsigned int		caps;		/* server capabilities */
+	/**
+	 * 每次读的字节数 
+	 */
 	unsigned int		rsize;		/* read size */
 	unsigned int		rpages;		/* read size (in pages) */
+	/**
+	 * 每次写的字节数 
+	 */
 	unsigned int		wsize;		/* write size */
 	unsigned int		wpages;		/* write size (in pages) */
 	unsigned int		wtmult;		/* server disk block size */
 	unsigned int		dtsize;		/* readdir size */
+	/**
+	 * 服务器块的大小 
+	 */
 	unsigned int		bsize;		/* server block size */
+	/**
+	 * 缓存超时时间信息 
+	 */
 	unsigned int		acregmin;	/* attr cache timeouts */
 	unsigned int		acregmax;
 	unsigned int		acdirmin;
 	unsigned int		acdirmax;
 	unsigned int		namelen;
+	/**
+	 * 远方服务器名称 
+	 */
 	char *			hostname;	/* remote hostname */
 	struct nfs_fh		fh;
 	struct sockaddr_in	addr;

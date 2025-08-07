@@ -51,6 +51,9 @@
 
 /* Private (from user) interface flags (netdevice->priv_flags). */
 #define IFF_802_1Q_VLAN 0x1             /* 802.1Q VLAN device.          */
+/**
+ * 网桥设备。
+ */
 #define IFF_EBRIDGE	0x2		/* Ethernet bridging device.	*/
 
 #define IF_GET_IFACE	0x0001		/* for querying only */

@@ -53,9 +53,22 @@
 /*
  * was unsigned short, but we might as well be ready for > 64kB I/O pages
  */
+/**
+ * bio中的每个段由bio_vec表示。
+ * bio中的bi_io_vec字段指向boi_vec数据结构的第一个元素。bi_vcnt字段则存放了bio_vec数组中当前的元素个数
+ */
 struct bio_vec {
+	/**
+	 * 指向段的页框中页描述符的指针
+	 */
 	struct page	*bv_page;
+	/**
+	 * 段的字节长度
+	 */
 	unsigned int	bv_len;
+	/**
+	 * 页框中段数据的偏移量
+	 */
 	unsigned int	bv_offset;
 };
 
@@ -67,28 +80,65 @@ typedef void (bio_destructor_t) (struct bio *);
  * main unit of I/O for the block layer and lower layers (ie drivers and
  * stacking drivers)
  */
+/**
+ * 通用块的核心数据结构。它描述了块设备的IO操作。
+ * 通用块层是一个内核组件，它处理来自系统中的所有块设备发出的请求。
+ * 每个bio都饮食一个磁盘存储区标识符（存储区中的起始扇区号和扇区数）。
+ * 和一个或者多个描述与IO操作相关的内存区的段。
+ */
 struct bio {
+	/**
+	 * 块IO操作的第一个磁盘扇区
+	 */
 	sector_t		bi_sector;
+	/**
+	 * 链接到请求队列中的下一个bio
+	 */
 	struct bio		*bi_next;	/* request queue link */
+	/**
+	 * 指向块设备描述符的指针
+	 */
 	struct block_device	*bi_bdev;
+	/**
+	 * bio的状态标志。 
+	 * 如果是写请求，最低有效位将被设置。需要使用bio_data_dir宏来确定读写标志。
+	 */
 	unsigned long		bi_flags;	/* status, command, etc */
+	/**
+	 * io操作标志。 
+	 */
 	unsigned long		bi_rw;		/* bottom bits READ/WRITE,
 						 * top bits priority
 						 */
 
+	/**
+	 * bio的bio_vec数组中的数目。
+	 */
 	unsigned short		bi_vcnt;	/* how many bio_vec's */
+	/**
+	 * bio的bio_vec数组中段的当前索引值
+	 */
 	unsigned short		bi_idx;		/* current index into bvl_vec */
 
 	/* Number of segments in this BIO after
 	 * physical address coalescing is performed.
+	 */
+	/**
+	 * 合并之后bio中物理段的数目
 	 */
 	unsigned short		bi_phys_segments;
 
 	/* Number of segments after physical and DMA remapping
 	 * hardware coalescing is performed.
 	 */
+	/**
+	 * 合并之后硬件段的数目。
+	 */
 	unsigned short		bi_hw_segments;
 
+	/**
+	 * 需要传送的字节数
+	 */
 	unsigned int		bi_size;	/* residual I/O count */
 
 	/*
@@ -96,18 +146,42 @@ struct bio {
 	 * sizes of the first and last virtually mergeable segments
 	 * in this bio
 	 */
+	/**
+	 * 硬件段合并算法使用
+	 */
 	unsigned int		bi_hw_front_size;
+	/**
+	 * 硬件段合并算法使用
+	 */
 	unsigned int		bi_hw_back_size;
 
+	/**
+	 * bio的bio_vec数组中允许的最大段数
+	 */
 	unsigned int		bi_max_vecs;	/* max bvl_vecs we can hold */
 
+	/**
+	 * 指向bio的bio_vec数组的指针，它描述了要传送的数据缓冲区。
+	 */
 	struct bio_vec		*bi_io_vec;	/* the actual vec list */
 
+	/**
+	 * bio的IO操作结束时调用的方法
+	 */
 	bio_end_io_t		*bi_end_io;
+	/**
+	 * bio的引用计数器
+	 */
 	atomic_t		bi_cnt;		/* pin count */
 
+	/**
+	 * 通用块层和块设备驱动程序的IO完成方法使用的指针
+	 */
 	void			*bi_private;
 
+	/**
+	 * 释放bio时调用的析构方法（通常是bio_destructor方法）
+	 */
 	bio_destructor_t	*bi_destructor;	/* destructor */
 };
 
@@ -116,6 +190,10 @@ struct bio {
  */
 #define BIO_UPTODATE	0	/* ok after I/O completion */
 #define BIO_RW_BLOCK	1	/* RW_AHEAD set, and read/write would block */
+/**
+ * 如果请求的块操作超过了块设备的扇区数，bio->bi_flags就会被置上该标志。
+ * 然后内核打印一条出错标志。并调用bio_endio函数后终止。
+ */
 #define BIO_EOF		2	/* out-out-bounds error */
 #define BIO_SEG_VALID	3	/* nr_hw_seg valid */
 #define BIO_CLONED	4	/* doesn't own data */
@@ -142,9 +220,17 @@ struct bio {
  * bit 4 -- synchronous I/O hint: the block layer will unplug immediately
  */
 #define BIO_RW		0
+/**
+ * bio->bi_rw的标志值之一。表示本次IO操作是一次预读。
+ * 当一个bio是预读，并且没有足够的内存时，就会直接退出并调用bio_endio.
+ */
 #define BIO_RW_AHEAD	1
 #define BIO_RW_BARRIER	2
 #define BIO_RW_FAILFAST	3
+/**
+ * 同步读写标志。
+ * 如果设置了本标志，那么__make_request退出，就会从请求队列中摘除
+ */
 #define BIO_RW_SYNC	4
 
 /*
@@ -153,11 +239,27 @@ struct bio {
  */
 #define bio_iovec_idx(bio, idx)	(&((bio)->bi_io_vec[(idx)]))
 #define bio_iovec(bio)		bio_iovec_idx((bio), (bio)->bi_idx)
+/**
+ * 指向下一个传输页的page结构的指针。
+ */
 #define bio_page(bio)		bio_iovec((bio))->bv_page
+/**
+ * 页中被传输数据的偏移量。
+ */
 #define bio_offset(bio)		bio_iovec((bio))->bv_offset
 #define bio_segments(bio)	((bio)->bi_vcnt - (bio)->bi_idx)
+/**
+ * 得到BIO请求要传输的扇区数。
+ */
 #define bio_sectors(bio)	((bio)->bi_size >> 9)
+/**
+ * 在当前页中传输的扇区数量。
+ */
 #define bio_cur_sectors(bio)	(bio_iovec(bio)->bv_len >> 9)
+/**
+ * 被传输数据的内核逻辑地址。只有正在处理的页不在高端内存时，该地址才有效。
+ * 默认情况下，块设备子系统不会把高端内存中的缓冲区传递给驱动程序，但是如果使用blk_queue_bounce_limit改变了这一设置，就不应该再使用bio_data了。
+ */
 #define bio_data(bio)		(page_address(bio_page((bio))) + bio_offset((bio)))
 #define bio_barrier(bio)	((bio)->bi_rw & (1 << BIO_RW_BARRIER))
 #define bio_sync(bio)		((bio)->bi_rw & (1 << BIO_RW_SYNC))
@@ -175,6 +277,9 @@ struct bio {
  * PIO transfers occasionally and thus map high pages temporarily. For
  * permanent PIO fall back, user is probably better off disabling highmem
  * I/O completely on that queue (see ide-dma for example)
+ */
+/**
+ * 映射bio中的待传输页。
  */
 #define __bio_kmap_atomic(bio, idx, kmtype)				\
 	(kmap_atomic(bio_iovec_idx((bio), (idx))->bv_page, kmtype) +	\
@@ -217,6 +322,10 @@ struct bio {
 	     i < (bio)->bi_vcnt;					\
 	     bvl++, i++)
 
+/**
+ * 为了从索引bi_idx指向的当前段开始不断重复bio中的段，
+ * 驱动程序可以执行宏bio_for_each_segment
+ */
 #define bio_for_each_segment(bvl, bio, i)				\
 	__bio_for_each_segment(bvl, bio, i, (bio)->bi_idx)
 
@@ -288,6 +397,9 @@ extern int bio_uncopy_user(struct bio *);
  *
  * This function MUST be inlined - it plays with the CPU interrupt flags.
  * Hence the `extern inline'.
+ */
+/**
+ * 为任何缓冲区返回内存虚拟地址。
  */
 extern inline char *bvec_kmap_irq(struct bio_vec *bvec, unsigned long *flags)
 {

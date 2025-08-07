@@ -30,11 +30,28 @@ typedef struct __wait_queue wait_queue_t;
 typedef int (*wait_queue_func_t)(wait_queue_t *wait, unsigned mode, int sync, void *key);
 int default_wake_function(wait_queue_t *wait, unsigned mode, int sync, void *key);
 
+/**
+ * 等待队列中的元素，每个元素代表一个睡眠的进程。
+ * 该进程等待某一个事件的发生。
+ */
 struct __wait_queue {
+	/**
+	 * 如果flags为1,表示等待进程是互斥的。等待访问临界资源的进程就是典型的互斥进程。
+	 * 如果flags为0，表示等待进程是非互斥的。等待相关事件的进程是非互斥的。
+	 */
 	unsigned int flags;
 #define WQ_FLAG_EXCLUSIVE	0x01
+	/**
+	 * 睡眠在队列上的进程描述符。
+	 */
 	struct task_struct * task;
+	/**
+	 * 等待队列中的睡眠进程以何种方式唤醒。
+	 */
 	wait_queue_func_t func;
+	/**
+	 * 通过此指针将睡眠进程链接起来。
+	 */
 	struct list_head task_list;
 };
 
@@ -48,8 +65,18 @@ struct wait_bit_queue {
 	wait_queue_t wait;
 };
 
+/**
+ * 等待队列的头
+ */
 struct __wait_queue_head {
+	/**
+	 * 由于等待队列可能由中断处理程序和内核函数修改，所以必须对双向链表进行保护，以免对其进行同时访问。
+	 * 其同步是由lock自旋锁达到的。
+	 */
 	spinlock_t lock;
+	/**
+	 * 等待进程链表的头。
+	 */
 	struct list_head task_list;
 };
 typedef struct __wait_queue_head wait_queue_head_t;
@@ -71,18 +98,27 @@ typedef struct __wait_queue_head wait_queue_head_t;
 	.lock		= SPIN_LOCK_UNLOCKED,				\
 	.task_list	= { &(name).task_list, &(name).task_list } }
 
+/**
+ * 该宏定义一个新等待队列的头，它静态的声明一个叫name的等待队列的头变量并对该变量的lock和task_list字段进行初始化
+ */
 #define DECLARE_WAIT_QUEUE_HEAD(name) \
 	wait_queue_head_t name = __WAIT_QUEUE_HEAD_INITIALIZER(name)
 
 #define __WAIT_BIT_KEY_INITIALIZER(word, bit)				\
 	{ .flags = word, .bit_nr = bit, }
 
+/**
+ * 用来初始化动态分配的等待队列的头变量
+ */
 static inline void init_waitqueue_head(wait_queue_head_t *q)
 {
 	q->lock = SPIN_LOCK_UNLOCKED;
 	INIT_LIST_HEAD(&q->task_list);
 }
 
+/**
+ * 初始化wait_queue_t结构的变量
+ */
 static inline void init_waitqueue_entry(wait_queue_t *q, struct task_struct *p)
 {
 	q->flags = 0;
@@ -90,6 +126,9 @@ static inline void init_waitqueue_entry(wait_queue_t *q, struct task_struct *p)
 	q->func = default_wake_function;
 }
 
+/**
+ * 自定义等待队列上的唤醒函数。并初始化等待队列的其他元素。
+ */
 static inline void init_waitqueue_func_entry(wait_queue_t *q,
 					wait_queue_func_t func)
 {
@@ -98,6 +137,9 @@ static inline void init_waitqueue_func_entry(wait_queue_t *q,
 	q->func = func;
 }
 
+/**
+ * 检查一个给定的等待队列是否为空。
+ */
 static inline int waitqueue_active(wait_queue_head_t *q)
 {
 	return !list_empty(&q->task_list);
@@ -169,6 +211,9 @@ do {									\
 	finish_wait(&wq, &__wait);					\
 } while (0)
 
+/**
+ * 使调用进程在等待队列上睡眠，直到修改了给定条件为止。
+ */
 #define wait_event(wq, condition) 					\
 do {									\
 	if (condition)	 						\
@@ -322,6 +367,9 @@ void FASTCALL(finish_wait(wait_queue_head_t *q, wait_queue_t *wait));
 int autoremove_wake_function(wait_queue_t *wait, unsigned mode, int sync, void *key);
 int wake_bit_function(wait_queue_t *wait, unsigned mode, int sync, void *key);
 
+/**
+ * 声明一个wait_queue_t类型的新变量
+ */
 #define DEFINE_WAIT(name)						\
 	wait_queue_t name = {						\
 		.task		= current,				\

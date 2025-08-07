@@ -12,7 +12,13 @@
 #endif
 
 /* Must be an lvalue. */
+/**
+ * 先禁用内核抢占，然后在每CPU数组name中，为本地CPU选择元素。
+ */
 #define get_cpu_var(var) (*({ preempt_disable(); &__get_cpu_var(var); }))
+/**
+ * 启用内核抢占（name参数无用）
+ */
 #define put_cpu_var(var) preempt_enable()
 
 #ifdef CONFIG_SMP
@@ -27,6 +33,9 @@ struct percpu_data {
  * alloc_percpu.  Non-atomic access to the current CPU's version should
  * probably be combined with get_cpu()/put_cpu().
  */ 
+/**
+ * 返回每CPU数组中，与参数cpu对应的cpu元素地址，参数pointer给出数组的地址。
+ */
 #define per_cpu_ptr(ptr, cpu)                   \
 ({                                              \
         struct percpu_data *__p = (struct percpu_data *)~(unsigned long)(ptr); \
@@ -47,6 +56,10 @@ static inline void *__alloc_percpu(size_t size, size_t align)
 		memset(ret, 0, size);
 	return ret;
 }
+
+/**
+ * 释放被动态分配的每CPU数组。
+ */
 static inline void free_percpu(const void *ptr)
 {	
 	kfree(ptr);
@@ -55,6 +68,9 @@ static inline void free_percpu(const void *ptr)
 #endif /* CONFIG_SMP */
 
 /* Simple wrapper for the common case: zeros memory. */
+/**
+ * 动态分配type类型数据结构的每CPU数组。并返回它的地址。
+ */
 #define alloc_percpu(type) \
 	((type *)(__alloc_percpu(sizeof(type), __alignof__(type))))
 

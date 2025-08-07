@@ -50,13 +50,20 @@ struct linger {
  *	belong in an obscure libc emulation or the bin.
  */
  
+/**
+ * 描述socket输入输出缓冲区
+ */
 struct msghdr {
+	/* 指向sock_addr结构的指针及其长度 */
 	void	*	msg_name;	/* Socket name			*/
 	int		msg_namelen;	/* Length of name		*/
+	/* 发送、接收缓冲区数组指针及其长度 */
 	struct iovec *	msg_iov;	/* Data blocks			*/
 	__kernel_size_t	msg_iovlen;	/* Number of blocks		*/
+	/* 指向cmsghdr结构类型的数组及其长度 */
 	void 	*	msg_control;	/* Per protocol magic (eg BSD file descriptor passing) */
 	__kernel_size_t	msg_controllen;	/* Length of cmsg list */
+	/* 接收标志如MSG_OOB */
 	unsigned	msg_flags;
 };
 
@@ -67,8 +74,11 @@ struct msghdr {
  */
 
 struct cmsghdr {
+	/* 控制消息长度，包含本结构的长度。 */
 	__kernel_size_t	cmsg_len;	/* data byte count, including hdr */
+	/* 控制消息的级别，如SOL_SOCKET */
         int		cmsg_level;	/* originating protocol */
+	/* 控制消息的类型如IP_TTL */
         int		cmsg_type;	/* protocol-specific type */
 };
 
@@ -222,22 +232,34 @@ struct ucred {
    Added those for 1003.1g not all are supported yet
  */
  
+/* 接收或者发送带外数据 */
 #define MSG_OOB		1
+/* 查看而不取走数据 */
 #define MSG_PEEK	2
+/* 目的网络位于本地子网，无需路由 */
 #define MSG_DONTROUTE	4
 #define MSG_TRYHARD     4       /* Synonym for MSG_DONTROUTE for DECnet */
+/* 由于缓冲区不足，一些数据已经被丢弃 */
 #define MSG_CTRUNC	8
+/* 不真正传递数据，仅仅进行MTU的探测 */
 #define MSG_PROBE	0x10	/* Do not send. Only probe path f.e. for MTU */
+/* 返回包的真实长度，并截断包的数据 */
 #define MSG_TRUNC	0x20
+/* 非阻塞IO */
 #define MSG_DONTWAIT	0x40	/* Nonblocking io		 */
 #define MSG_EOR         0x80	/* End of record */
+/* 一直等待，直到所有数据接收完毕 */
 #define MSG_WAITALL	0x100	/* Wait for a full request */
 #define MSG_FIN         0x200
 #define MSG_SYN		0x400
+/* 表示网关有效 */
 #define MSG_CONFIRM	0x800	/* Confirm path validity */
 #define MSG_RST		0x1000
+/* 接收错误队列中的错误 */
 #define MSG_ERRQUEUE	0x2000	/* Fetch message from error queue */
+/* 当另一端终止连接时，在套接字上不要发送SIGPIPE信号 */
 #define MSG_NOSIGNAL	0x4000	/* Do not generate SIGPIPE */
+/* 后续还有数据要发送 */
 #define MSG_MORE	0x8000	/* Sender will send more */
 
 #define MSG_EOF         MSG_FIN

@@ -14,13 +14,34 @@
 /*
  * RPC server socket.
  */
+/**
+ * RPC服务器套接字，是对SOCKET的一个封装。
+ */
 struct svc_sock {
+	/**
+	 * 准备好的svc_socket的链表
+	 */
 	struct list_head	sk_ready;	/* list of ready sockets */
+	/**
+	 * 所有的svc_socket
+	 */
 	struct list_head	sk_list;	/* list of all sockets */
+	/** 
+	 * berkeley socket 层套接字。
+	 */
 	struct socket *		sk_sock;	/* berkeley socket layer */
+	/** 
+	 * INET层 
+	 */
 	struct sock *		sk_sk;		/* INET layer */
 
+	/** 
+	 * 对应这个socket的serv结构 
+	 */
 	struct svc_serv *	sk_server;	/* service for this socket */
+	/**
+	 * 使用计数 
+	 */
 	unsigned int		sk_inuse;	/* use count */
 	unsigned long		sk_flags;
 #define	SK_BUSY		0			/* enqueued/receiving */
@@ -47,8 +68,17 @@ struct svc_sock {
 	void			(*sk_owspace)(struct sock *);
 
 	/* private TCP part */
+	/** 
+	 * 记录长度 
+	 */
 	int			sk_reclen;	/* length of record */
+	/**
+	 * 现在读长度 
+	 */
 	int			sk_tcplen;	/* current read length */
+	/**
+	 * 最后一次接收时间。
+	 */
 	time_t			sk_lastrecv;	/* time of last received request */
 };
 

@@ -30,12 +30,33 @@
  * The xino and xdev fields are currently used to transport the
  * ino/dev of the exported inode.
  */
+/**
+ * NFS服务器提供给客户端的文件句柄。
+ */
 struct nfs_fhbase_old {
+	/**
+	 * dentry魔饼 
+	 */
 	__u32		fb_dcookie;	/* dentry cookie - always 0xfeebbaca */
+	/**
+	 * inode号 
+	 */
 	__u32		fb_ino;		/* our inode number */
+	/**
+	 * 目录inode号 
+	 */
 	__u32		fb_dirino;	/* dir inode number, 0 for directories */
+	/**
+	 * 设备号 
+	 */
 	__u32		fb_dev;		/* our device */
+	/**
+	 * export表的设备号 
+	 */
 	__u32		fb_xdev;
+	/**
+	 * export表的inode号 
+	 */
 	__u32		fb_xino;
 	__u32		fb_generation;
 };
@@ -133,12 +154,27 @@ static inline ino_t u32_to_ino_t(__u32 uino)
  * This is the internal representation of an NFS handle used in knfsd.
  * pre_mtime/post_version will be used to support wcc_attr's in NFSv3.
  */
+/**
+ * 服务器端表示一个打开的NFS文件句柄
+ */
 typedef struct svc_fh {
+	/**
+	 * 传给客户机的文件句柄
+	 */
 	struct knfsd_fh		fh_handle;	/* FH data */
+	/**
+	 * 验证过的dentry 
+	 */
 	struct dentry *		fh_dentry;	/* validated dentry */
+	/**
+	 * export表指针 
+	 */
 	struct svc_export *	fh_export;	/* export pointer */
 	int			fh_maxsize;	/* max size for fh_handle */
 
+	/**
+	 * 加锁的inode 
+	 */
 	unsigned char		fh_locked;	/* inode locked by us */
 
 #ifdef CONFIG_NFSD_V3
@@ -146,8 +182,17 @@ typedef struct svc_fh {
 	unsigned char		fh_pre_saved;	/* pre-op attrs saved */
 
 	/* Pre-op attributes saved during fh_lock */
+	/**
+	 * 操作前大小 
+	 */
 	__u64			fh_pre_size;	/* size before operation */
+	/**
+	 * 操作前的mtime 
+	 */
 	struct timespec		fh_pre_mtime;	/* mtime before oper */
+	/**
+	 * 操作前的ctime 
+	 */
 	struct timespec		fh_pre_ctime;	/* ctime before oper */
 
 	/* Post-op attributes saved in fh_unlock */

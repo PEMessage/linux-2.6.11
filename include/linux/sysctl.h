@@ -860,14 +860,37 @@ extern ctl_handler sysctl_ms_jiffies;
 struct ctl_table 
 {
 	int ctl_name;			/* Binary ID */
+	/**
+	 * /proc/sys中的文件名。
+	 */
 	const char *procname;		/* Text ID for /proc/sys, or zero */
 	void *data;
+	/**
+	 * 内核变量的大小
+	 */
 	int maxlen;
+	/**
+	 * 文件或目录的权限 
+	 */
 	mode_t mode;
+	/**
+	 * 在目录和文件之间创建父子关系。
+	 */
 	ctl_table *child;
+	/**
+	 * 这是用户在读写/proc/sys 目录中的文件时，内核调用的函数。
+	 * 与文件相关的ctl_instances 必须初始化这个函数指针。与目录相关的函数指针由内核赋一个缺省的函数。
+	 */
 	proc_handler *proc_handler;	/* Callback for text formatting */
+	/**
+	 * 内核可以初始化这个函数（可选），用于在显示或存储相应数据前，先格式化数据。
+	 * 这个函数在使用sysctl系统调用访问/proc/sys目录下的相应文件时被调用。
+	 */
 	ctl_handler *strategy;		/* Callback function for all r/w */
 	struct proc_dir_entry *de;	/* /proc control block */
+	/**
+	 * 两个可选的变量。用于定义参数的最小，最大值。
+	 */
 	void *extra1;
 	void *extra2;
 };

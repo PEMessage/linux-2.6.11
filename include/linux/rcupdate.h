@@ -183,12 +183,18 @@ static inline int rcu_pending(int cpu)
  *
  * It is illegal to block while in an RCU read-side critical section.
  */
+/**
+ * rcu的读锁，简单的禁用抢占即可。
+ */
 #define rcu_read_lock()		preempt_disable()
 
 /**
  * rcu_read_unlock - marks the end of an RCU read-side critical section.
  *
  * See rcu_read_lock() for more information.
+ */
+/**
+ * 释放rcu的读锁，简单的打开抢占即可。
  */
 #define rcu_read_unlock()	preempt_enable()
 

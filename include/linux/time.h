@@ -9,8 +9,17 @@
 
 #ifndef _STRUCT_TIMESPEC
 #define _STRUCT_TIMESPEC
+/**
+ * 日期和时间
+ */
 struct timespec {
+	/**
+	 * 自1970/01/01午夜以来经过的秒数。
+	 */
 	time_t	tv_sec;		/* seconds */
+	/**
+	 * 上一秒以来，经过的纳秒数。
+	 */
 	long	tv_nsec;	/* nanoseconds */
 };
 #endif /* _STRUCT_TIMESPEC */
@@ -78,7 +87,14 @@ mktime (unsigned int year, unsigned int mon,
 	)*60 + sec; /* finally seconds */
 }
 
+/**
+ * 存放当前时间和日期
+ */
 extern struct timespec xtime;
+/**
+ * 墙上时间。存放将被加到xtime上的秒数和纳秒数。以此来获得单的时间流。
+ * 避免闰秒和同步时突发改变xtime的值，使得xtime的增长不是单向的。
+ */
 extern struct timespec wall_to_monotonic;
 extern seqlock_t xtime_lock;
 
@@ -153,7 +169,15 @@ struct	itimerval {
 /*
  * The IDs of the various system clocks (for POSIX.1b interval timers).
  */
+/**
+ * 该虚拟时钟表示系统的实时时钟-本质上是xtime变量的值。
+ */
 #define CLOCK_REALTIME		  0
+/**
+ * 该虚拟时钟表示由于与外部时间源同步，每次回到初值的系统实时时钟。
+ * 实际上，该时钟由xtime和wall_to_monotonic两个变量的和表示。
+ * 该时钟的分辨度由clock_getres()返回，返回值为999,848ns
+ */
 #define CLOCK_MONOTONIC	  1
 #define CLOCK_PROCESS_CPUTIME_ID 2
 #define CLOCK_THREAD_CPUTIME_ID	 3

@@ -88,6 +88,7 @@
  * lookup (eg. for a DM_INFO) will be done on that, *not* the
  * name.
  */
+/* 用户态向内核态DM模块传递IOCTL命令的参数 */
 struct dm_ioctl {
 	/*
 	 * The version number is made up of three parts:

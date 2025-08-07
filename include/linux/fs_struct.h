@@ -4,11 +4,33 @@
 struct dentry;
 struct vfsmount;
 
+/**
+ * 进程的fs字段指向的内容。
+ */
 struct fs_struct {
+	/**
+	 * 共享fs结构的进程个数。
+	 */
 	atomic_t count;
+	/**
+	 * 保护该结构的读写锁。
+	 */
 	rwlock_t lock;
+	/**
+	 * 当打开文件设置文件权限时使用的位掩码。
+	 */
 	int umask;
+	/**
+	 * root			根目录的目录项。
+	 * pwd			当前工作目录的目录项。
+	 * altroot		模拟根目录的目录项。x86上未用。
+	 */
 	struct dentry * root, * pwd, * altroot;
+	/**
+	 * rootmnt		根目录所安装的文件系统对象。
+	 * pwdmnt		当前工作目录所安装的文件系统对象。
+	 * altrootmnt	模拟根目录所安装的文件系统对象。
+	 */
 	struct vfsmount * rootmnt, * pwdmnt, * altrootmnt;
 };
 

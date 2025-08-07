@@ -89,12 +89,24 @@ typedef struct {
 	uint16_t v16;
 } __attribute__((packed)) jint16_t;
 
+/**
+ * jffs2_raw_dirent和jffs2_raw_inode数据实体的“头”
+ */
 struct jffs2_unknown_node
 {
 	/* All start like this */
 	jint16_t magic;
+	/**
+	 * 数据结点的具体类型JFFS_NODETYPE_DIRENT或者JFFS2_NODETYPE_INODE
+	 */
 	jint16_t nodetype;
+	/**
+	 * 后继数据的整个数据实体的总长度
+	 */
 	jint32_t totlen; /* So we can skip over nodes we don't grok */
+	/**
+	 * 头部中其它域的CRC校验值
+	 */
 	jint32_t hdr_crc;
 } __attribute__((packed));
 

@@ -107,9 +107,21 @@ extern char saved_command_line[];
 	static initcall_t __initcall_##fn \
 	__attribute_used__ __attribute__((__section__(".security_initcall.init"))) = fn
 
+/**
+ * 对应于__setup和early_param宏定义在启动时选项。
+ */
 struct obs_kernel_param {
+	/**
+	 * 选项名称，如"netdev="
+	 */
 	const char *str;
+	/**
+	 * 启动选项对应的处理函数。
+	 */
 	int (*setup_func)(char *);
+	/**
+	 * 是否为第一次处理的选项。
+	 */
 	int early;
 };
 
@@ -130,6 +142,11 @@ struct obs_kernel_param {
 #define __setup_null_param(str, unique_id)			\
 	__setup_param(str, unique_id, NULL, 0)
 
+/**
+ * str 是关键字，fn 是关联处理函数。
+ * __setup 只是告诉内核在启动时输入串中含有 str 时，内核要去执行 fn。
+ * str 必须以"="符结束以使parse_args更方便解析。紧随"="后的任何文本都会作为输入传给fn
+ */
 #define __setup(str, fn)					\
 	__setup_param(str, fn, fn, 0)
 
@@ -138,6 +155,10 @@ struct obs_kernel_param {
 
 /* NOTE: fn is as per module_param, not __setup!  Emits warning if fn
  * returns non-zero. */
+/**
+ * 与__setup不同之处，在于设置一个特殊标记，以表示它是一个先期处理的选项。
+ * parse_args第一次处理这些标记。第二次处理__setup标记。
+ */
 #define early_param(str, fn)					\
 	__setup_param(str, fn, fn, 1)
 

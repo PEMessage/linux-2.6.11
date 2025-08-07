@@ -149,20 +149,31 @@ static inline void mark_disk_nonsync(mdp_disk_t * d)
 /*
  * MD's 'extended' device
  */
+/* SCSI设备中的磁盘描述符 */
 struct mdk_rdev_s
 {
+	/* 通过此字段链接到SCSI设备的磁盘链表中 */
 	struct list_head same_set;	/* RAID devices within the same set */
 
+	/* 设备的磁盘扇区长度 */
 	sector_t size;			/* Device size (in blocks) */
+	/* 所属SCSI设备 */
 	mddev_t *mddev;			/* RAID array if running */
+	/* IO事件时间戳，用于判断SCSI设备最近是否空闲 */
 	unsigned long last_events;	/* IO event timestamp */
 
+	/* 磁盘的块设备描述符 */
 	struct block_device *bdev;	/* block device handle */
 
+	/* 保存磁盘超级块的页面 */
 	struct page	*sb_page;
+	/* 如果为1，表示该磁盘的RAID超级块已经读入内存 */
 	int		sb_loaded;
+	/* 磁盘阵列数据的起始位置 */
 	sector_t	data_offset;	/* start of data in array */
+	/* 超级块在磁盘上的起始扇区号 */
 	sector_t	sb_offset;
+	/* 次设备号 */
 	int		preferred_minor;	/* autorun support */
 
 	/* A device can be in one of three states based on two flags:
@@ -178,9 +189,12 @@ struct mdk_rdev_s
 	int faulty;			/* if faulty do not issue IO requests */
 	int in_sync;			/* device is a full member of the array */
 
+	/* 本磁盘在MS超级块中的描述符索引 */
 	int desc_nr;			/* descriptor index in the superblock */
+	/* 在磁盘阵列中的角色 */
 	int raid_disk;			/* role of device in array */
 
+	/* 正在处理的请求数目  */
 	atomic_t	nr_pending;	/* number of pending requests.
 					 * only maintained for arrays that
 					 * support hot removal
@@ -189,40 +203,65 @@ struct mdk_rdev_s
 
 typedef struct mdk_personality_s mdk_personality_t;
 
+/* RAID设备描述符 */
 struct mddev_s
 {
+	/* 不同RAID级别的个性化设置 */
 	void				*private;
+	/* 个性化回调函数 */
 	mdk_personality_t		*pers;
+	/* 设备号 */
 	dev_t				unit;
+	/* 次设备号 */
 	int				md_minor;
+	/* 这个设备的所有成员设备链表 */
 	struct list_head 		disks;
 	int				sb_dirty;
+	/* 0表示可写，1表示只读，2表示只读，但是在第一次写时自动转换为可写 */
 	int				ro;
 
+	/* 通用磁盘描述符 */
 	struct gendisk			*gendisk;
 
 	/* Superblock information */
+	/* 超级块的主版本号、次版本号、补丁号 */
 	int				major_version,
 					minor_version,
 					patch_version;
+	/* 是否有持久化的超级块 */
 	int				persistent;
+	/* 条带长度 */
 	int				chunk_size;
+	/* MD设备的创建时间、超级块的修改时间 */
 	time_t				ctime, utime;
+	/* MD设备的级别、布局(仅适用于某些RAID级别) */
 	int				level, layout;
+	/* 成员磁盘个数 */
 	int				raid_disks;
+	/* 最大的磁盘成员个数 */
 	int				max_disks;
+	/* 长度 */
 	sector_t			size; /* used size of component devices */
+	/* 导出的阵列长度 */
 	sector_t			array_size; /* exported array size */
+	/* MD设备的更新计数器，在创建时设置为0，每发生一次重要事件加1 */
 	__u64				events;
 
+	/* 设备标识 */
 	char				uuid[16];
 
+	/* 管理线程描述符，仅对某些级别的RAID有用 */
 	struct mdk_thread_s		*thread;	/* management thread */
+	/* 同步线程描述符 */
 	struct mdk_thread_s		*sync_thread;	/* doing resync or reconstruct */
+	/* 最近已经调度的块 */
 	sector_t			curr_resync;	/* blocks scheduled */
+	/* 最近采集点的时间戳，用于计算同步速度 */
 	unsigned long			resync_mark;	/* a recent timestamp */
+	/* 最近采集点的已同步块数 */
 	sector_t			resync_mark_cnt;/* blocks written at resync_mark */
 
+	/* 所需要同步的最大扇区数 */
 	sector_t			resync_max_sectors; /* may be set by personality */
 	/* recovery/resync flags 
 	 * NEEDED:   we might need to start a resync/recover
@@ -238,28 +277,43 @@ struct mddev_s
 #define	MD_RECOVERY_INTR	3
 #define	MD_RECOVERY_DONE	4
 #define	MD_RECOVERY_NEEDED	5
+	/* 同步/恢复标志 */
 	unsigned long			recovery;
 
+	/* 如果为1，表示这个RAID处于同步状态，不需要同步。当开始写时将其设置为0，所有单元都成功写入后设置为1 */
 	int				in_sync;	/* know to not need resync */
+	/* 配置时使用的信号量 */
 	struct semaphore		reconfig_sem;
+	/* 引用计数 */
 	atomic_t			active;
 
+	/* 如果为1，表示需要重新读入分区信息 */
 	int				changed;	/* true if we might need to reread partition info */
+	/* 有故障的磁盘数 */
 	int				degraded;	/* whether md should consider
 							 * adding a spare
 							 */
 
+	/* 已经调度，但没有写入的块数。在提交同步请求时增加，完成回调中减少 */
 	atomic_t			recovery_active; /* blocks scheduled, but not written */
+	/* 同步等待队列 */
 	wait_queue_head_t		recovery_wait;
+	/* 上次同步的位置，下次启动时可以从这个位置开始继续同步。 */
 	sector_t			recovery_cp;
+	/* 安全模式，在没有写入操作时总是更新超级块 */
 	unsigned int			safemode;	/* if set, update "clean" superblock
 							 * when no writes pending.
 							 */ 
+	/* 用于安全模式的超时时间 */
 	unsigned int			safemode_delay;
+	/* 安全模式的定时器 */
 	struct timer_list		safemode_timer;
+	/* 目前正在处理的写请求数目。 */
 	atomic_t			writes_pending; 
+	/* 请求队列 */
 	request_queue_t			*queue;	/* for plugging ... */
 
+	/* 通过此字段链接到所有SCSI设备的链表 */
 	struct list_head		all_mddevs;
 };
 
@@ -276,22 +330,35 @@ static inline void md_sync_acct(struct block_device *bdev, unsigned long nr_sect
         atomic_add(nr_sectors, &bdev->bd_contains->bd_disk->sync_io);
 }
 
+/* RAID级别描述符 */
 struct mdk_personality_s
 {
+	/* 级别名称 */
 	char *name;
+	/* 所属模块 */
 	struct module *owner;
+	/* 在将请求传递给MD设备时调用，执行特有的逻辑 */
 	int (*make_request)(request_queue_t *q, struct bio *bio);
+	/* 在启动该RAID级别时使用 */
 	int (*run)(mddev_t *mddev);
+	/* 停止该RAID级别时使用 */
 	int (*stop)(mddev_t *mddev);
+	/* 查询状态时回调 */
 	void (*status)(struct seq_file *seq, mddev_t *mddev);
 	/* error_handler must set ->faulty and clear ->in_sync
 	 * if appropriate, and should abort recovery if needed 
 	 */
+	/* MD设备检测到某个磁盘发生故障时调用，如果没有容错能力的，则该指针为NULL */
 	void (*error_handler)(mddev_t *mddev, mdk_rdev_t *rdev);
+	/* 动态添加磁盘时调用 */
 	int (*hot_add_disk) (mddev_t *mddev, mdk_rdev_t *rdev);
+	/* 动态移除磁盘时调用 */
 	int (*hot_remove_disk) (mddev_t *mddev, int number);
+	/* 设备从故障中恢复，需要激活备用盘时调用 */
 	int (*spare_active) (mddev_t *mddev);
+	/* 同步时调用，如果不支持冗余，则为NULL */
 	int (*sync_request)(mddev_t *mddev, sector_t sector_nr, int go_faster);
+	/* 变量设备容量时调用 */
 	int (*resize) (mddev_t *mddev, sector_t sectors);
 	int (*reshape) (mddev_t *mddev, int raid_disks);
 	int (*reconfig) (mddev_t *mddev, int layout, int chunk_size);
@@ -327,12 +394,18 @@ extern mdk_rdev_t * find_rdev_nr(mddev_t *mddev, int nr);
 #define ITERATE_RDEV_PENDING(rdev,tmp)					\
 	ITERATE_RDEV_GENERIC(pending_raid_disks,rdev,tmp)
 
+/* RAID守护线程描述符 */
 typedef struct mdk_thread_s {
+	/* 线程处理函数指针 */
 	void			(*run) (mddev_t *mddev);
+	/* MD设备描述符的指针 */
 	mddev_t			*mddev;
+	/* 守护线程每执行一次，就将自己挂到该队列上，等待下一次唤醒或超时 */
 	wait_queue_head_t	wqueue;
+	/* 标志，当前仅支持THREAD_WAKEUP */
 	unsigned long           flags;
 	struct completion	*event;
+	/* 进程描述符 */
 	struct task_struct	*tsk;
 	const char		*name;
 } mdk_thread_t;

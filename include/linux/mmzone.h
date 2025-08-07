@@ -42,15 +42,39 @@ struct zone_padding {
 #define ZONE_PADDING(name)
 #endif
 
+/**
+ * 内存管理区页框高速缓存描述符
+ */
 struct per_cpu_pages {
+	/**
+	 * 高速缓存中的页框个数
+	 */
 	int count;		/* number of pages in the list */
+	/**
+	 * 下界，低于此就需要补充高速缓存。
+	 */
 	int low;		/* low watermark, refill needed */
+	/**
+	 * 上界，高于此则向伙伴系统释放页框。
+	 */
 	int high;		/* high watermark, emptying needed */
+	/**
+	 * 当需要增加或者减少高速缓存页框时，操作的页框个数。
+	 */
 	int batch;		/* chunk size for buddy add/remove */
+	/**
+	 * 高速缓存中包含的页框描述符链表。
+	 */
 	struct list_head list;	/* the list of pages */
 };
 
+/**
+ * 管理区每CPU页框高速缓存描述符
+ */
 struct per_cpu_pageset {
+	/**
+	 * 热高速缓存和冷高速缓存。
+	 */
 	struct per_cpu_pages pcp[2];	/* 0: hot.  1: cold */
 #ifdef CONFIG_NUMA
 	unsigned long numa_hit;		/* allocated in intended node */
@@ -62,8 +86,17 @@ struct per_cpu_pageset {
 #endif
 } ____cacheline_aligned_in_smp;
 
+/**
+ * 包含低16MB的内存页框。
+ */
 #define ZONE_DMA		0
+/**
+ * 包含高于16MB且低于896MB的内存页框。
+ */
 #define ZONE_NORMAL		1
+/**
+ * 包含从896MB开始高于896MB的内存页框。
+ */
 #define ZONE_HIGHMEM		2
 
 #define MAX_NR_ZONES		3	/* Sync this with ZONES_SHIFT */
@@ -107,9 +140,20 @@ struct per_cpu_pageset {
  * ZONE_HIGHMEM	 > 896 MB	only page cache and user processes
  */
 
+/**
+ * 内存管理区描述符
+ */
 struct zone {
 	/* Fields commonly accessed by the page allocator */
+	/**
+	 * 管理区中空闲页的数目
+	 */
 	unsigned long		free_pages;
+	/**
+	 * Pages_min-管理区中保留页的数目
+	 * Page_low-回收页框使用的下界。同时也被管理区分配器为作为阈值使用。
+	 * pages_high-回收页框使用的上界，同时也被管理区分配器作为阈值使用。
+	 */
 	unsigned long		pages_min, pages_low, pages_high;
 	/*
 	 * We don't know if the memory that we're going to allocate will be freeable
@@ -119,28 +163,69 @@ struct zone {
 	 * on the higher zones). This array is recalculated at runtime if the
 	 * sysctl_lowmem_reserve_ratio sysctl changes.
 	 */
+	/**
+	 * 为内存不足保留的页框
+	 */
 	unsigned long		lowmem_reserve[MAX_NR_ZONES];
-
+	/**
+	 * 用于实现单一页框的特殊高速缓存。
+	 * 每CPU、每内存管理区都有一个。包含热高速缓存和冷高速缓存。
+	 */
 	struct per_cpu_pageset	pageset[NR_CPUS];
 
 	/*
 	 * free areas of different sizes
 	 */
+	/**
+	 * 保护该描述符的自旋锁
+	 */
 	spinlock_t		lock;
+	/**
+	 * 标识出管理区中的空闲页框块。
+	 * 包含11个元素，被伙伴系统使用。分别对应大小的1,2,4,8,16,32,128,256,512,1024连续空闲块的链表。
+	 * 第k个元素标识所有大小为2^k的空闲块。free_list字段指向双向循环链表的头。
+	 */
 	struct free_area	free_area[MAX_ORDER];
 
 
 	ZONE_PADDING(_pad1_)
 
 	/* Fields commonly accessed by the page reclaim scanner */
+	/**
+	 * 活动以及非活动链表使用的自旋锁。
+	 */
 	spinlock_t		lru_lock;	
+	/**
+	 * 管理区中的活动页链表
+	 */
 	struct list_head	active_list;
+	/**
+	 * 管理区中的非活动页链表。
+	 */
 	struct list_head	inactive_list;
+	/**
+	 * 回收内存时需要扫描的活动页数。
+	 */
 	unsigned long		nr_scan_active;
+	/**
+	 * 回收内存时需要扫描的非活动页数目
+	 */
 	unsigned long		nr_scan_inactive;
+	/**
+	 * 管理区的活动链表上的页数目。
+	 */
 	unsigned long		nr_active;
+	/**
+	 * 管理区的非活动链表上的页数目。
+	 */
 	unsigned long		nr_inactive;
+	/**
+	 * 管理区内回收页框时使用的计数器。
+	 */
 	unsigned long		pages_scanned;	   /* since last reclaim */
+	/**
+	 * 在管理区中填满不可回收页时此标志被置位
+	 */
 	int			all_unreclaimable; /* All pages pinned */
 
 	/*
@@ -159,7 +244,13 @@ struct zone {
 	 * Access to both these fields is quite racy even on uniprocessor.  But
 	 * it is expected to average out OK.
 	 */
+	/**
+	 * 临时管理区的优先级。
+	 */
 	int temp_priority;
+	/**
+	 * 管理区优先级，范围在12和0之间。
+	 */
 	int prev_priority;
 
 
@@ -190,23 +281,50 @@ struct zone {
 	 * primary users of these fields, and in mm/page_alloc.c
 	 * free_area_init_core() performs the initialization of them.
 	 */
+	/**
+	 * 进程等待队列的散列表。这些进程正在等待管理区中的某页。
+	 */
 	wait_queue_head_t	* wait_table;
+	/**
+	 * 等待队列散列表的大小。
+	 */
 	unsigned long		wait_table_size;
+	/**
+	 * 等待队列散列表数组的大小。值为2^order
+	 */
 	unsigned long		wait_table_bits;
 
 	/*
 	 * Discontig memory support fields.
 	 */
+	/**
+	 * 内存节点。
+	 */
 	struct pglist_data	*zone_pgdat;
+	/** 
+	 * 指向管理区的第一个页描述符的指针。这个指针是数组mem_map的一个元素。
+	 */
 	struct page		*zone_mem_map;
 	/* zone_start_pfn == zone_start_paddr >> PAGE_SHIFT */
+	/**
+	 * 管理区的第一个页框的下标。
+	 */
 	unsigned long		zone_start_pfn;
 
+	/**
+	 * 以页为单位的管理区的总大小，包含空洞。
+	 */
 	unsigned long		spanned_pages;	/* total size, including holes */
+	/**
+	 * 以页为单位的管理区的总大小，不包含空洞。
+	 */
 	unsigned long		present_pages;	/* amount of memory (excluding holes) */
 
 	/*
 	 * rarely used fields:
+	 */
+	/**
+	 * 指针指向管理区的传统名称：DMA、NORMAL、HighMem
 	 */
 	char			*name;
 } ____cacheline_maxaligned_in_smp;
@@ -247,20 +365,63 @@ struct zonelist {
  * per-zone basis.
  */
 struct bootmem_data;
+/**
+ * 内存管理结点描述符。每个描述符中的物理内存，对CPU来说，访问是一致的。
+ * 但是每个管理结点又包含了不同的管理区。
+ */
 typedef struct pglist_data {
+	/**
+	 * 节点管理区描述符数组
+	 */
 	struct zone node_zones[MAX_NR_ZONES];
+	/**
+	 * 页分配器使用的zonelist数据结构的数组。
+	 */
 	struct zonelist node_zonelists[GFP_ZONETYPES];
+	/**
+	 * 节点中管理区的个数
+	 */
 	int nr_zones;
+	/**
+	 * 节点中页描述符的数组
+	 */
 	struct page *node_mem_map;
+	/**
+	 * 用在内核初始化阶段
+	 */
 	struct bootmem_data *bdata;
+	/**
+	 * 节点中第一个页框的下标。
+	 */
 	unsigned long node_start_pfn;
+	/**
+	 * 内存结点的大小，不包含空洞（以页为单位）
+	 */
 	unsigned long node_present_pages; /* total number of physical pages */
+	/**
+	 * 节点的大小，包括空洞
+	 */
 	unsigned long node_spanned_pages; /* total size of physical page
 					     range, including holes */
+	/**
+	 * 节点标识符
+	 */
 	int node_id;
+	/**
+	 * 内存节点链表的下一项。
+	 */
 	struct pglist_data *pgdat_next;
+	/**
+	 * Kswapd页换出守护进程使用的等待队列
+	 */
 	wait_queue_head_t kswapd_wait;
+	/**
+	 * 指针指向kswapd内核线程的进程描述符。
+	 */
 	struct task_struct *kswapd;
+	/**
+	 * Kswapd将要创建的空闲块大小取对数的值。
+	 */
 	int kswapd_max_order;
 } pg_data_t;
 

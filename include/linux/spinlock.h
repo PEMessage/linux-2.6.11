@@ -250,9 +250,18 @@ typedef struct {
 				_raw_spin_trylock(lock) ? \
 				1 : ({preempt_enable(); local_bh_enable(); 0;});})
 
+/**
+ * 当内核不可抢占时，spin_lock的实现过程。
+ */
 #define _spin_lock(lock)	\
 do { \
+	/**
+	 * 调用preempt_disable禁用抢占。
+	 */
 	preempt_disable(); \
+	/**
+	 * _raw_spin_lock对自旋锁的slock字段执行原子性的测试和设置操作。
+	 */
 	_raw_spin_lock(lock); \
 	__acquire(lock); \
 } while(0)
@@ -263,7 +272,8 @@ do { \
 	_raw_write_lock(lock); \
 	__acquire(lock); \
 } while(0)
- 
+
+
 #define _read_lock(lock)	\
 do { \
 	preempt_disable(); \
@@ -443,10 +453,16 @@ do { \
  * regardless of whether CONFIG_SMP or CONFIG_PREEMPT are set. The various
  * methods are defined as nops in the case they are not required.
  */
+/**
+ * 把自旋锁置为0（锁上），如果原来锁的值是1，则返回1，否则返回0
+ */
 #define spin_trylock(lock)	__cond_lock(_spin_trylock(lock))
 #define read_trylock(lock)	__cond_lock(_read_trylock(lock))
 #define write_trylock(lock)	__cond_lock(_write_trylock(lock))
 
+/**
+ * 循环，直到自旋锁变为1（未锁），然后把自旋锁置为0（锁上）
+ */
 #define spin_lock(lock)		_spin_lock(lock)
 #define write_lock(lock)	_write_lock(lock)
 #define read_lock(lock)		_read_lock(lock)
@@ -470,7 +486,13 @@ do { \
 #define write_lock_irq(lock)		_write_lock_irq(lock)
 #define write_lock_bh(lock)		_write_lock_bh(lock)
 
+/**
+ * 把自旋锁置为1（未锁）
+ */
 #define spin_unlock(lock)	_spin_unlock(lock)
+/**
+ * 释放写锁。
+ */
 #define write_unlock(lock)	_write_unlock(lock)
 #define read_unlock(lock)	_read_unlock(lock)
 

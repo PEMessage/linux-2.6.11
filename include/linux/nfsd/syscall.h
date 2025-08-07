@@ -29,12 +29,33 @@
 /*
  * These are the commands understood by nfsctl().
  */
+/**
+ * 启动Server
+ */
 #define NFSCTL_SVC		0	/* This is a server process. */
+/**
+ * 增加一个NFS client 
+ */
 #define NFSCTL_ADDCLIENT	1	/* Add an NFS client. */
+/**
+ * 删除一个NFS client. 
+ */
 #define NFSCTL_DELCLIENT	2	/* Remove an NFS client. */
+/**
+ * 输出一个文件系统 
+ */
 #define NFSCTL_EXPORT		3	/* export a file system. */
+/** 
+ * 删除一个已输出的文件系统. 
+ */
 #define NFSCTL_UNEXPORT		4	/* unexport a file system. */
+/**
+ * 更新一个客户的uid/gid 
+ */
 /*#define NFSCTL_UGIDUPDATE	5	/ * update a client's uid/gid map. DISCARDED */
+/**
+ * 得到一个文件句柄(mountd使用) 
+ */
 /*#define NFSCTL_GETFH		6	/ * get an fh by ino DISCARDED */
 #define NFSCTL_GETFD		7	/* get an fh by path (used by mountd) */
 #define	NFSCTL_GETFS		8	/* get an fh by path with max FH len */
@@ -82,6 +103,9 @@ struct nfsctl_fsparm {
 
 /*
  * This is the argument union.
+ */
+/**
+ * 对nfsservctl系统调用的各种命令，本结构表示每种命令的参数。
  */
 struct nfsctl_arg {
 	int			ca_version;	/* safeguard */

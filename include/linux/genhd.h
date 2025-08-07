@@ -74,11 +74,30 @@ struct partition {
 	__le32 nr_sects;		/* nr of sectors in partition */
 } __attribute__((packed));
 
+/**
+ * 表示磁盘中的分区。
+ */
 struct hd_struct {
+	/**
+	 * 分区的起始扇区。
+	 */
 	sector_t start_sect;
+	/**
+	 * 分区的扇区数。
+	 */
 	sector_t nr_sects;
+	/**
+	 * 内嵌的kobject
+	 */
 	struct kobject kobj;
+	/**
+	 * 对分区发出的读操作次数、读取的扇区数、写操作次数、写进分区的扇区数。
+	 */
 	unsigned reads, read_sectors, writes, write_sectors;
+	/**
+	 * policy:如果分区只读，则为1，否则为0.
+	 * partno:磁盘中分区的相对索引。
+	 */
 	int policy, partno;
 };
 
@@ -96,28 +115,64 @@ struct disk_stats {
 	unsigned io_ticks;
 	unsigned time_in_queue;
 };
-	
+
+/**
+ * 表示一个独立的磁盘设备。也用于表示一个分区。
+ */
 struct gendisk {
+	/**
+	 * 这些字段用于描述设备号。一个驱动器至少使用一个次设备号。
+	 * 如果驱动器可被分区，将为每个可能的分区都分配一个次设备号。
+	 * minors通常取值为16，这样一个磁盘可以包含15个分区。某些驱动程序允许多达64个分区。
+	 */
 	int major;			/* major number of driver */
+	/* 第一个次设备号 */
 	int first_minor;
+	/* 次设备号数目 */
 	int minors;                     /* maximum number of minors, =1 for
                                          * disks that can't be partitioned. */
+	/**
+	 * 磁盘设备的名字，将显示在sysfs中。
+	 */
 	char disk_name[32];		/* name of major driver */
+	/* 磁盘包含的分区 */
 	struct hd_struct **part;	/* [indexed by minor] */
+	/**
+	 * 磁盘操作回调函数。
+	 */
 	struct block_device_operations *fops;
+	/**
+	 * 内核使用该结构为设备管理IO请求。
+	 */
 	struct request_queue *queue;
+	/**
+	 * 块设备驱动程序可能使用该成员保存指向其内部数据的指针。
+	 */
 	void *private_data;
+	/**
+	 * 以512字节为一个扇区时，该驱动器可包含的扇区数。
+	 * 可以是64位长度，驱动程序不能直接设置该成员，而要将扇区数传递给set_capacity。
+	 */
 	sector_t capacity;
 
+	/**
+	 * 用来描述驱动器状态的标志(很少使用)。
+	 * 如果用户设备包含了可移动介质，将设置GENHD_FL_REMOVABLE。
+	 * CD－ROM设备被设置为GENHD_FL_CD。
+	 * 如果不想在proc中显示分区信息，则可以设置GENHD_FL_SUPPRESS_PARTITION_INFO。
+	 */
 	int flags;
 	char devfs_name[64];		/* devfs crap */
 	int number;			/* more of the same */
+	/* 对于SCSI磁盘，指向的是对应SCSI设备描述符的内嵌通用设备。 */
 	struct device *driverfs_dev;
 	struct kobject kobj;
 
+	/* 帮助内核生成随机数 */
 	struct timer_rand_state *random;
 	int policy;
 
+	/* 写入磁盘的扇区计数器，仅用于RAID */
 	atomic_t sync_io;		/* RAID */
 	unsigned long stamp, stamp_idle;
 	int in_flight;

@@ -58,18 +58,42 @@ extern int sysctl_legacy_va_layout;
  * space that has a special rule for the page-fault handlers (ie a shared
  * library, the executable area etc).
  */
+/**
+ * 线性区描述符。
+ */
 struct vm_area_struct {
+	/**
+	 * 指向线性区所在的内存描述符。
+	 */
 	struct mm_struct * vm_mm;	/* The address space we belong to. */
+	/**
+	 * 线性区内的第一个线性地址。
+	 */
 	unsigned long vm_start;		/* Our start address within vm_mm. */
+	/**
+	 * 线性区之后的第一个线性地址。
+	 */
 	unsigned long vm_end;		/* The first byte after our end address
 					   within vm_mm. */
 
 	/* linked list of VM areas per task, sorted by address */
+	/**
+	 * 进程链表中的下一个线性区。
+	 */
 	struct vm_area_struct *vm_next;
 
+	/**
+	 * 线性区中页框的访问许可权。
+	 */
 	pgprot_t vm_page_prot;		/* Access permissions of this VMA. */
+	/**
+	 * 线性区的标志。
+	 */
 	unsigned long vm_flags;		/* Flags, listed below. */
 
+	/**
+	 * 用于红黑树的数据。
+	 */
 	struct rb_node vm_rb;
 
 	/*
@@ -78,13 +102,22 @@ struct vm_area_struct {
 	 * linkage to the list of like vmas hanging off its node, or
 	 * linkage of vma in the address_space->i_mmap_nonlinear list.
 	 */
+	/**
+	 * 链接到反映射所使用的数据结构。
+	 */
 	union {
+		/**
+		 * 如果在优先搜索树中，存在两个节点的基索引、堆索引、大小索引完全相同，那么这些相同的节点会被链接到一个链表，而vm_set就是这个链表的元素。
+		 */
 		struct {
 			struct list_head list;
 			void *parent;	/* aligns with prio_tree_node parent */
 			struct vm_area_struct *head;
 		} vm_set;
 
+		/**
+		 * 如果是文件映射，那么prio_tree_node用于将线性区插入到优先搜索树中。作为搜索树的一个节点。
+		 */
 		struct raw_prio_tree_node prio_tree_node;
 	} shared;
 
@@ -94,17 +127,40 @@ struct vm_area_struct {
 	 * can only be in the i_mmap tree.  An anonymous MAP_PRIVATE, stack
 	 * or brk vma (with NULL file) can only be in an anon_vma list.
 	 */
+	/**
+	 * 指向匿名线性区链表的指针(参见"映射页的反映射")。
+	 * 页框结构有一个anon_vma指针，指向该页的第一个线性区，随后的线性区通过此字段链接起来。
+	 * 通过此字段，可以将线性区链接到此链表中。
+	 */
 	struct list_head anon_vma_node;	/* Serialized by anon_vma->lock */
+	/**
+	 * 指向anon_vma数据结构的指针(参见"映射页的反映射")。此指针也存放在页结构的mapping字段中。
+	 */
 	struct anon_vma *anon_vma;	/* Serialized by page_table_lock */
 
 	/* Function pointers to deal with this struct. */
+	/**
+	 * 指向线性区的方法。
+	 */
 	struct vm_operations_struct * vm_ops;
 
 	/* Information about our backing store: */
+	/**
+	 * 在映射文件中的偏移量(以页为单位)。对匿名页，它等于0或vm_start/PAGE_SIZE
+	 */
 	unsigned long vm_pgoff;		/* Offset (within vm_file) in PAGE_SIZE
 					   units, *not* PAGE_CACHE_SIZE */
+	/**
+	 * 指向映射文件的文件对象(如果有的话)
+	 */
 	struct file * vm_file;		/* File we map to (can be NULL). */
+	/**
+	 * 指向内存区的私有数据。
+	 */
 	void * vm_private_data;		/* was vm_pte (shared mem) */
+	/**
+	 * 释放非线性文件内存映射中的一个线性地址区间时使用。
+	 */
 	unsigned long vm_truncate_count;/* truncate_count or restart_addr */
 
 #ifndef CONFIG_MMU
@@ -135,34 +191,102 @@ extern unsigned int kobjsize(const void *objp);
 /*
  * vm_flags..
  */
+/**
+ * 线性区中页是可读的。
+ */
 #define VM_READ		0x00000001	/* currently active flags */
+/**
+ * 线性区中页是可写的。
+ */
 #define VM_WRITE	0x00000002
+/**
+ * 线性区中页是可执行的。
+ */
 #define VM_EXEC		0x00000004
+/**
+ * 线性区中页可以由几个进程共享。
+ */
 #define VM_SHARED	0x00000008
 
+/**
+ * 可以设置VM_READ标志。
+ */
 #define VM_MAYREAD	0x00000010	/* limits for mprotect() etc */
+/**
+ * 可以设置VM_WRITE标志。
+ */
 #define VM_MAYWRITE	0x00000020
+/**
+ * 可以设置VM_EXEC标志。
+ */
 #define VM_MAYEXEC	0x00000040
+/**
+ * 可以设置VM_SHARED标志。
+ */
 #define VM_MAYSHARE	0x00000080
 
+/**
+ * 线性区可以向低地址扩展
+ */
 #define VM_GROWSDOWN	0x00000100	/* general info on the segment */
+/**
+ * 线性区可以向高地址扩展
+ */
 #define VM_GROWSUP	0x00000200
+/**
+ * 线性区用于IPC共享内存。
+ */
 #define VM_SHM		0x00000400	/* shared memory area, don't swap out */
+/**
+ * 线性区映射一个不能打开用于写的文件。
+ */
 #define VM_DENYWRITE	0x00000800	/* ETXTBSY on write attempts.. */
 
+/**
+ * 线性区映射一个可执行文件。
+ */
 #define VM_EXECUTABLE	0x00001000
+/**
+ * 线性区中的页被锁住，且不能换出。
+ */
 #define VM_LOCKED	0x00002000
+/**
+ * 线性区映射设备的IO地址空间。
+ */
 #define VM_IO           0x00004000	/* Memory mapped I/O or similar */
 
 					/* Used by sys_madvise() */
+/**
+ * 应用程序顺序的访问页。
+ */
 #define VM_SEQ_READ	0x00008000	/* App will access data sequentially */
+/**
+ * 应用程序以真正的随机顺序访问页。
+ */
 #define VM_RAND_READ	0x00010000	/* App will not benefit from clustered reads */
-
+/**
+ * 当创建一个新进程时不拷贝线性区。
+ */
 #define VM_DONTCOPY	0x00020000      /* Do not copy this vma on fork */
+/**
+ * 通过mremap系统调用禁止线性区扩展。
+ */
 #define VM_DONTEXPAND	0x00040000	/* Cannot expand with mremap() */
+/**
+ * 线性区是特殊的(如它映射某个设备的IO地址空间)，因此它的页不能被交换出去。
+ */
 #define VM_RESERVED	0x00080000	/* Don't unmap it from swap_out */
+/**
+ * 创建IPC共享线性区时检查是否有足够的空闲内存用于映射。
+ */
 #define VM_ACCOUNT	0x00100000	/* Is a VM accounted object */
+/**
+ * 通过扩展分页机制处理线性区中的页。
+ */
 #define VM_HUGETLB	0x00400000	/* Huge TLB Page VM */
+/**
+ * 线性区实现非线性文件映射。
+ */
 #define VM_NONLINEAR	0x00800000	/* Is non-linear (remap_file_pages) */
 
 #ifndef VM_STACK_DEFAULT_FLAGS		/* arch can override this */
@@ -193,10 +317,25 @@ extern pgprot_t protection_map[16];
  * unmapping it (needed to keep files on disk up-to-date etc), pointer
  * to the functions called when a no-page or a wp-page exception occurs. 
  */
+/**
+ * 线性区的方法。
+ */
 struct vm_operations_struct {
+	/**
+	 * 当把线性区增加到进程所拥有的线性区集合时调用。
+	 */
 	void (*open)(struct vm_area_struct * area);
+	/**
+	 * 当从进程所拥有的线性区集合删除线性区时调用。
+	 */
 	void (*close)(struct vm_area_struct * area);
+	/**
+	 * 当进程试图访问RAM中不存在的一个页，但该页的线性地址属于线性区时，由缺页异常处理程序调用。
+	 */
 	struct page * (*nopage)(struct vm_area_struct * area, unsigned long address, int *type);
+	/**
+	 * 设置线性区的线性地址(预缺页)所对应的页表项时调用。主要用于非线性文件内存映射。
+	 */
 	int (*populate)(struct vm_area_struct * area, unsigned long address, unsigned long len, pgprot_t prot, unsigned long pgoff, int nonblock);
 #ifdef CONFIG_NUMA
 	int (*set_policy)(struct vm_area_struct *vma, struct mempolicy *new);
@@ -221,13 +360,35 @@ typedef unsigned long page_flags_t;
  * a page.
  */
 struct page {
+	/**
+	 * 一组标志，也对页框所在的管理区进行编号
+	 * 在不支持NUMA的机器上，flags中字段中管理索引占两位，节点索引占一位。
+	 * 在支持NUMA的32位机器上，flags中管理索引占用两位。节点数目占6位。
+	 * 在支持NUMA的64位机器上，64位的flags字段中，管理区索引占用两位，节点数目占用10位。
+	 */
 	page_flags_t flags;		/* Atomic flags, some possibly
 					 * updated asynchronously */
+	/**
+	 * 页框的引用计数。当小于0表示没有人使用。
+	 * Page_count返回_count+1表示正在使用的人数。
+	 */
 	atomic_t _count;		/* Usage count, see below. */
+	/**
+	 * 页框中的页表项数目（没有则为-1）
+	 *		-1:		表示没有页表项引用该页框。
+	 *		0:		表明页是非共享的。
+	 *		>0:		表示而是共享共享的。
+	 */
 	atomic_t _mapcount;		/* Count of ptes mapped in mms,
 					 * to show when page is mapped
 					 * & limit reverse map searches.
 					 */
+	/**
+	 * 可用于正在使用页的内核成分（如在缓冲页的情况下，它是一个缓冲器头指针。）
+	 * 如果页是空闲的，则该字段由伙伴系统使用。
+	 * 当用于伙伴系统时，如果该页是一个2^k的空闲页块的第一个页，那么它的值就是k.
+	 * 这样，伙伴系统可以查找相邻的伙伴，以确定是否可以将空闲块合并成2^(k+1)大小的空闲块。
+	 */
 	unsigned long private;		/* Mapping-private opaque data:
 					 * usually used for buffer_heads
 					 * if PagePrivate set; used for
@@ -235,6 +396,12 @@ struct page {
 					 * When page is free, this indicates
 					 * order in the buddy system.
 					 */
+	/**
+	 * 当页被插入页高速缓存时使用或者当页属于匿名页时使用）。
+	 * 		如果mapping字段为空，则该页属于交换高速缓存。
+	 *		如果mapping字段不为空，且最低位为1，表示该页为匿名页。同时该字段中存放的是指向anon_vma描述符的指针。
+	 *		如果mapping字段不为空，且最低位为0，表示该页为映射页。同时该字段指向对应文件的address_space对象。
+	 */
 	struct address_space *mapping;	/* If low bit clear, points to
 					 * inode address_space, or NULL.
 					 * If page mapped as anonymous
@@ -242,7 +409,15 @@ struct page {
 					 * it points to anon_vma object:
 					 * see PAGE_MAPPING_ANON below.
 					 */
+	/**
+	 * 作为不同的含义被几种内核成分使用。
+	 * 在页磁盘映象或匿名区中表示存放在页框中的数据的位置。
+	 * 或者它存放在一个换出页标志符。
+	 */
 	pgoff_t index;			/* Our offset within mapping. */
+	/**
+	 * 包含页的最近最少使用的双向链表的指针。
+	 */
 	struct list_head lru;		/* Pageout list, eg. active_list
 					 * protected by zone->lru_lock !
 					 */
@@ -257,6 +432,9 @@ struct page {
 	 * WANT_PAGE_VIRTUAL in asm/page.h
 	 */
 #if defined(WANT_PAGE_VIRTUAL)
+	/**
+	 * 如果进行了内存映射，就是虚拟地址。对存在高端内存的系统来说有意义。
+	 */
 	void *virtual;			/* Kernel virtual address (NULL if
 					   not kmapped, ie. highmem) */
 #endif /* WANT_PAGE_VIRTUAL */
@@ -331,6 +509,10 @@ void put_page(struct page *page);
 
 #else		/* CONFIG_HUGETLB_PAGE */
 
+/**
+ * 页框使用者数目。
+ * 注意_count为0表示有一个使用在使用该页框。
+ */
 #define page_count(p)		(atomic_read(&(p)->_count) + 1)
 
 static inline void get_page(struct page *page)
@@ -416,6 +598,9 @@ static inline unsigned long page_to_nid(struct page *page)
 struct zone;
 extern struct zone *zone_table[];
 
+/**
+ * 接收一个页描述符的地址作为它的参数，它读取页描述符的flags字段的高位，并通过zone_table数组来确定相应管理区描述符的地址
+ */
 static inline struct zone *page_zone(struct page *page)
 {
 	return zone_table[page->flags >> NODEZONE_SHIFT];
@@ -511,6 +696,10 @@ static inline void reset_page_mapcount(struct page *page)
 	atomic_set(&(page)->_mapcount, -1);
 }
 
+/**
+ * 接收页描述符地址，返回_mapcount+1
+ * 这样，如果返回为1，表明是某个进程的用户态址空间中存放的一个非共享页。
+ */
 static inline int page_mapcount(struct page *page)
 {
 	return atomic_read(&(page)->_mapcount) + 1;
@@ -699,6 +888,9 @@ void vma_prio_tree_remove(struct vm_area_struct *, struct prio_tree_root *);
 struct vm_area_struct *vma_prio_tree_next(struct vm_area_struct *vma,
 	struct prio_tree_iter *iter);
 
+/**
+ * 在优先搜索树中搜索线性区。用于页面反向映射。
+ */
 #define vma_prio_tree_foreach(vma, iter, root, begin, end)	\
 	for (prio_tree_iter_init(iter, root, begin, end), vma = NULL;	\
 		(vma = vma_prio_tree_next(vma, iter)); )
@@ -734,13 +926,28 @@ extern unsigned long do_mmap_pgoff(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,
 	unsigned long flag, unsigned long pgoff);
 
+/**
+ * 为当前进程创建并初始化一个新的线性区。
+ * 分配成功后，可以把这个新的线性区与进程已有的其他线性区进行合并。
+ * file,offset-如果新的线性区将把一个文件映射到内存，则使用文件描述符指针file和文件偏移量offset.当不需要内存映射时，file和offset都会为空
+ * addr-这个线性地址指定从休息开始查找一个空闲的区间。
+ * len-线性地址区间的长度。
+ * prot-这个参数指定这个线性区所包含页的访问权限。可能的标志有PROT_READ,PROT_WRITE,PROT_EXEC和PROT_NONE.前三个标志与VM_READ,VM_WRITE,WM_EXEC一样。PROT_NONE表示没有以上权限中的任意一个
+ * flag-这个参数指定线性区的其他标志。MAP_GROWSDOWN,MAP_LOCKED,MAP_DENYWRITE,MAP_EXECURABLE
+ */
 static inline unsigned long do_mmap(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,
 	unsigned long flag, unsigned long offset)
 {
 	unsigned long ret = -EINVAL;
+	/**
+	 * 首先检查是否溢出。
+	 */
 	if ((offset + PAGE_ALIGN(len)) < offset)
 		goto out;
+	/**
+	 * 检查是否对齐页。
+	 */
 	if (!(offset & ~PAGE_MASK))
 		ret = do_mmap_pgoff(file, addr, len, prot, flag, offset >> PAGE_SHIFT);
 out:
@@ -792,10 +999,20 @@ extern struct vm_area_struct * find_vma_prev(struct mm_struct * mm, unsigned lon
 
 /* Look up the first VMA which intersects the interval start_addr..end_addr-1,
    NULL if none.  Assume start_addr < end_addr. */
+/**
+ * find_vma_intersection函数查找与给定的线性地址区间相重叠的第一个线性区。
+ * mm-进程的内存描述符。
+ * start_addr-要查找的区间的起始地址。
+ * end_addr-要查找的区间的结束地址。
+ */
 static inline struct vm_area_struct * find_vma_intersection(struct mm_struct * mm, unsigned long start_addr, unsigned long end_addr)
 {
 	struct vm_area_struct * vma = find_vma(mm,start_addr);
 
+	/**
+	 * 如果没有这样的线性区存在就返回NULL。
+	 * 如果所找到的线性区是从地址区间的末尾开始的，也返回0.
+	 */
 	if (vma && end_addr <= vma->vm_start)
 		vma = NULL;
 	return vma;

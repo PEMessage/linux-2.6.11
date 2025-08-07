@@ -61,8 +61,11 @@ extern void __chk_io_ptr(void __iomem *);
 #define unlikely(x)	__builtin_expect(!!(x), 0)
 
 /* Optimization barrier */
+/**
+ * 优化屏障.展开为asm volatile("" ::: "memory")
+ */
 #ifndef barrier
-# define barrier() __memory_barrier()
+#define barrier() __memory_barrier()
 #endif
 
 #ifndef RELOC_HIDE

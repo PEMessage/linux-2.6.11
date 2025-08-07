@@ -550,6 +550,9 @@ struct	iw_thrspy
 /*
  * Wireless statistics (used for /proc/net/wireless)
  */
+/**
+ * 无线网络设备的统计信息
+ */
 struct	iw_statistics
 {
 	__u16		status;		/* Status

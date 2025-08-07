@@ -38,6 +38,9 @@ extern void FASTCALL(rwsemtrace(struct rw_semaphore *sem, const char *str));
 /*
  * lock for reading
  */
+/**
+ * 为读获得读写信号量。
+ */
 static inline void down_read(struct rw_semaphore *sem)
 {
 	might_sleep();
@@ -48,6 +51,9 @@ static inline void down_read(struct rw_semaphore *sem)
 
 /*
  * trylock for reading -- returns 1 if successful, 0 if contention
+ */
+/**
+ * 不阻塞的获得读信号量。
  */
 static inline int down_read_trylock(struct rw_semaphore *sem)
 {
@@ -61,6 +67,9 @@ static inline int down_read_trylock(struct rw_semaphore *sem)
 /*
  * lock for writing
  */
+/**
+ * 为写获得读写信号量。
+ */
 static inline void down_write(struct rw_semaphore *sem)
 {
 	might_sleep();
@@ -71,6 +80,9 @@ static inline void down_write(struct rw_semaphore *sem)
 
 /*
  * trylock for writing -- returns 1 if successful, 0 if contention
+ */
+/**
+ * 为写获得读写信号量，但是不引起阻塞。
  */
 static inline int down_write_trylock(struct rw_semaphore *sem)
 {
@@ -103,6 +115,9 @@ static inline void up_write(struct rw_semaphore *sem)
 
 /*
  * downgrade write lock to read lock
+ */
+/**
+ * 把写锁转换成读锁。
  */
 static inline void downgrade_write(struct rw_semaphore *sem)
 {

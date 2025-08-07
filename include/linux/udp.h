@@ -40,16 +40,30 @@ struct udphdr {
 #include <net/sock.h>
 #include <linux/ip.h>
 
+/**
+ * UDP传输控制块
+ */
 struct udp_sock {
 	/* inet_sock has to be the first member */
 	struct inet_sock inet;
+	/**
+	 * 0表示数据已经从UDP套接口发送到IP层，可以继续调用sendmsg发送数据。
+	 * AF_INET表示UDP正在处理调用sendmsg的发送数据，不需要处理目的地址、路由等信息，直接处理UDP数据
+	 */
 	int		 pending;	/* Any pending frames ? */
+	/**
+	 * 标识发送的UDP数据是否组成一个单独的IP数据报发送出去，由UDP的UDP_CORK选项设置。
+	 */
 	unsigned int	 corkflag;	/* Cork is required */
+	/**
+	 * 标识本套接口是否通过IPSEC封装，由UDP的UDP_ENCAP套接口选项设置。
+	 */
   	__u16		 encap_type;	/* Is this an Encapsulation socket? */
 	/*
 	 * Following member retains the infomation to create a UDP header
 	 * when the socket is uncorked.
 	 */
+	/* 标识待发送数据的长度 */
 	__u16		 len;		/* total length of pending frames */
 };
 

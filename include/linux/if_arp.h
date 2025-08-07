@@ -89,7 +89,16 @@
 #define ARPHRD_NONE	  0xFFFE	/* zero header length */
 
 /* ARP protocol opcodes. */
+/**
+ * 在试图将一个L3地址解析为L2地址时，这个消息用于发出一个solicitation。
+ * 对于一个新邻居项来说，主机会将该消息发到与设备硬件有关的广播地址。
+ * 如果要确认一个存在的neighbour项，主机会将该消息直接发送到该邻居的L2地址。
+ */
 #define	ARPOP_REQUEST	1		/* ARP request			*/
+/**
+ * 这个消息是ARPOP_REQUEST的应答。它通常直接发送到发出请求的主机。
+ * 但有时，它也被发送到广播地址。在一台主机改变其配置后，该主机就会这么做，来更新其邻居的缓存。
+ */
 #define	ARPOP_REPLY	2		/* ARP reply			*/
 #define	ARPOP_RREQUEST	3		/* RARP request			*/
 #define	ARPOP_RREPLY	4		/* RARP reply			*/
@@ -126,22 +135,53 @@ struct arpreq_old {
 /*
  *	This structure defines an ethernet arp header.
  */
-
+/**
+ * ARP包
+ */
 struct arphdr
 {
+	/**
+	 * 硬件类型：硬件类型标识符（例如，ethernet）。
+	 * 参见include/linux/if_arp.h文件中的ARPHDR_XXX值。
+	 */
 	unsigned short	ar_hrd;		/* format of hardware address	*/
+	/**
+	 * 协议类型：L3协议标识符（例如，IPV4）。
+	 * 参见include/linux/if_ether.h文件中的ETH_P_XXX值。
+	 */
 	unsigned short	ar_pro;		/* format of protocol address	*/
+	/**
+	 * 硬件地址长度：L2地址的长度（字节数）（例如，ethernet为6）。
+	 */
 	unsigned char	ar_hln;		/* length of hardware address	*/
+	/**
+	 * 协议地址长度：L3地址长度（字节数）（例如，IPV4为4）。
+	 */
 	unsigned char	ar_pln;		/* length of protocol address	*/
+	/**
+	 * 操作码
+	 */
 	unsigned short	ar_op;		/* ARP opcode (command)		*/
 
 #if 0
 	 /*
 	  *	 Ethernet looks like this : This bit is variable sized however...
 	  */
+	/**
+     * 发送方硬件地址
+     */
 	unsigned char		ar_sha[ETH_ALEN];	/* sender hardware address	*/
+	/**
+	 * 发送方协议地址
+	 */
 	unsigned char		ar_sip[4];		/* sender IP address		*/
+	/**
+	 * 目的地硬件地址
+	 */
 	unsigned char		ar_tha[ETH_ALEN];	/* target hardware address	*/
+	/**
+	 * 目的地协议地址
+	 */
 	unsigned char		ar_tip[4];		/* target IP address		*/
 #endif
 

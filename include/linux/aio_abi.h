@@ -64,7 +64,6 @@ struct io_event {
  * with userland.  its up to libraries to do the
  * proper padding and aio_error abstraction
  */
-
 struct iocb {
 	/* these are internal to the kernel/libc. */
 	__u64	aio_data;	/* data to be returned in event's data */

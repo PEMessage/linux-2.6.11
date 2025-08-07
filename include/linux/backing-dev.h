@@ -14,6 +14,11 @@
  * Bits in backing_dev_info.state
  */
 enum bdi_state {
+	/**
+	 * 当pdflash进程运行时，由于有多个pdflash可能会同时运行。并且是运行在不同的CPU上。
+	 * 当它们对脏页进行检查时，pdflash线程需要确定是否有其他CPU上的pdflash线程也在处理某一个脏页。
+	 * 这就需要同步，而同步是通过一个原子测试和对索引结点的backing_dev_info的BDI_pdflush标志的设置操作来完成的。
+	 */
 	BDI_pdflush,		/* A pdflush thread is working this device */
 	BDI_write_congested,	/* The write queue is getting full */
 	BDI_read_congested,	/* The read queue is getting full */
@@ -22,6 +27,9 @@ enum bdi_state {
 
 typedef int (congested_fn)(void *, int);
 
+/**
+ * 
+ */
 struct backing_dev_info {
 	unsigned long ra_pages;	/* max readahead in PAGE_CACHE_SIZE units */
 	unsigned long state;	/* Always use atomic bitops on this */

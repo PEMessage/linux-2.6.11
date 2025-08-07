@@ -46,11 +46,29 @@ struct inode;
 #define SYS_SENDMSG	16		/* sys_sendmsg(2)		*/
 #define SYS_RECVMSG	17		/* sys_recvmsg(2)		*/
 
+/**
+ * 套口状态
+ */
 typedef enum {
+	/**
+	 * 套口尚未分配，未使用
+	 */
 	SS_FREE = 0,			/* not allocated		*/
+	/**
+	 * 该套口未与任何一个对方端口连接
+	 */
 	SS_UNCONNECTED,			/* unconnected to any socket	*/
+	/**
+	 * 正在连接过程中
+	 */
 	SS_CONNECTING,			/* in process of connecting	*/
+	/**
+	 * 已经与对方端口连接
+	 */
 	SS_CONNECTED,			/* connected to socket		*/
+	/**
+	 * 正在断开连接的过程中
+	 */
 	SS_DISCONNECTING		/* in process of disconnecting	*/
 } socket_state;
 
@@ -58,8 +76,17 @@ typedef enum {
 
 #ifdef __KERNEL__
 
+/**
+ * 该套口发送队列是否已满
+ */
 #define SOCK_ASYNC_NOSPACE	0
+/**
+ * 标识应用程序通过recv调用时，是否在等待数据的接收
+ */
 #define SOCK_ASYNC_WAITDATA	1
+/**
+ * 非异步的情况下，发送队列是否已满
+ */
 #define SOCK_NOSPACE		2
 
 #ifndef ARCH_HAS_SOCKET_TYPES
@@ -77,13 +104,16 @@ typedef enum {
  * @SOCK_PACKET - linux specific way of getting packets at the dev level.
  *		  For writing rarp and other similar things on the user level.
  */
+/**
+ * 套口类型
+ */
 enum sock_type {
-	SOCK_STREAM	= 1,
-	SOCK_DGRAM	= 2,
-	SOCK_RAW	= 3,
-	SOCK_RDM	= 4,
-	SOCK_SEQPACKET	= 5,
-	SOCK_PACKET	= 10,
+	SOCK_STREAM	= 1,/* 基于连接的套口 */
+	SOCK_DGRAM	= 2,/* 基于数据报的套口 */
+	SOCK_RAW	= 3,/* 原始套接口 */
+	SOCK_RDM	= 4,/* 可靠传送报文套接口 */
+	SOCK_SEQPACKET	= 5,/* 顺序分组套接口 */
+	SOCK_PACKET	= 10,/* 混杂模式套接口 */
 };
 
 #define SOCK_MAX (SOCK_PACKET + 1)
@@ -102,15 +132,45 @@ enum sock_type {
  *  @type - socket type (%SOCK_STREAM, etc)
  *  @passcred - credentials (used only in Unix Sockets (aka PF_LOCAL))
  */
+/**
+ * socket套口结构
+ */
 struct socket {
+	/**
+	 * 套口状态，如SS_FREE
+	 */
 	socket_state		state;
+	/**
+	 * 套口标志位，如SOCK_ASYNC_NOSPACE
+	 */
 	unsigned long		flags;
+	/**
+	 * 传输层提供的接口方法。如inet_stream_ops，inet_dgram_ops，inet_sockraw_ops
+	 */
 	struct proto_ops	*ops;
+	/**
+	 * 异步通知队列。用于异步IO
+	 */
 	struct fasync_struct	*fasync_list;
+	/**
+	 * 与套口相关联的文件指针。
+	 */
 	struct file		*file;
+	/**
+	 * 与套口相关联的传输控制块。
+	 */
 	struct sock		*sk;
+	/**
+	 * 等待该套口的进程列表。
+	 */
 	wait_queue_head_t	wait;
+	/**
+	 * 套口类型，如SOCK_STREAM。
+	 */
 	short			type;
+	/**
+	 * 是否设置了SO_PASSCRED选项。
+	 */
 	unsigned char		passcred;
 };
 
@@ -121,8 +181,17 @@ struct sockaddr;
 struct msghdr;
 struct module;
 
+/**
+ * 传输层向套接口层提供的接口
+ */
 struct proto_ops {
+	/**
+	 * 协议族
+	 */
 	int		family;
+	/**
+	 * 所属模块
+	 */
 	struct module	*owner;
 	int		(*release)   (struct socket *sock);
 	int		(*bind)	     (struct socket *sock,

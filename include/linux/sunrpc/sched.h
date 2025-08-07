@@ -38,19 +38,38 @@ struct rpc_wait {
 /*
  * This is the RPC task struct
  */
+/**
+ * 为了同时支持同步和异步远程过程调用，Linux引入了rpc_task这个结构。
+ * 它有点类似于进程管理的task结构，系统采用一个有限状态自动机对它进行调度。
+ */
 struct rpc_task {
 #ifdef RPC_DEBUG
 	unsigned long		tk_magic;	/* 0xf00baa */
 #endif
+	/** 
+	 * 等待队列列表 
+	 */
 	struct list_head	tk_task;	/* global list of tasks */
+	/**
+	 * RPC客户结构指针
+	 */
 	struct rpc_clnt *	tk_client;	/* RPC client */
+	/**
+	 * RPC请求结构指针 
+	 */
 	struct rpc_rqst *	tk_rqstp;	/* RPC request */
+	/**
+	 * 最后一次操作结果 
+	 */
 	int			tk_status;	/* result of last operation */
 
 	/*
 	 * RPC call state
 	 */
 	struct rpc_message	tk_msg;		/* RPC call info */
+	/**
+	 * XDR缓存 
+	 */
 	__u32 *			tk_buffer;	/* XDR buffer */
 	size_t			tk_bufsize;
 	__u8			tk_garb_retry,
@@ -66,8 +85,17 @@ struct rpc_task {
 	 * exit		exit async task and report to caller
 	 */
 	void			(*tk_timeout_fn)(struct rpc_task *);
+	/**
+	 * 任务被唤醒时调用的回调函数
+	 */
 	void			(*tk_callback)(struct rpc_task *);
+	/**
+	 * 对异步任务来说，下一个过程指针
+	 */
 	void			(*tk_action)(struct rpc_task *);
+	/**
+	 * 结束异步过程并报告结果给调用过程
+	 */
 	void			(*tk_exit)(struct rpc_task *);
 	void			(*tk_release)(struct rpc_task *);
 	void *			tk_calldata;
@@ -77,8 +105,17 @@ struct rpc_task {
 	 * primitives. You should not access this directly unless
 	 * you have a pathological interest in kernel oopses.
 	 */
+	/**
+	 * 内部定时器 
+	 */
 	struct timer_list	tk_timer;	/* kernel timer */
+	/**
+	 * rpc_sleep()超时时间 
+	 */
 	unsigned long		tk_timeout;	/* timeout for rpc_sleep() */
+	/**
+	 * 各种属性
+	 */
 	unsigned short		tk_flags;	/* misc flags */
 	unsigned char		tk_active   : 1;/* Task has been activated */
 	unsigned char		tk_priority : 2;/* Task priority */

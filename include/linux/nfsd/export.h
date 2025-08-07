@@ -45,11 +45,23 @@
 
 #ifdef __KERNEL__
 
+/**
+ * NFS服务器端输出表项。
+ */
 struct svc_export {
 	struct cache_head	h;
+	/**
+	 * svc_client结构 
+	 */
 	struct auth_domain *	ex_client;
+	/**
+	 * 属性，如只读或读写 
+	 */
 	int			ex_flags;
 	struct vfsmount *	ex_mnt;
+	/**
+	 * 输出所在的目录的dentry 
+	 */
 	struct dentry *		ex_dentry;
 	uid_t			ex_anon_uid;
 	gid_t			ex_anon_gid;

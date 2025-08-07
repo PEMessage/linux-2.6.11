@@ -17,9 +17,21 @@
 #include <linux/hash.h>
 
 #define SVC_CRED_NGROUPS	32
+/**
+ * Linux的RPC鉴别机制实现
+ */
 struct svc_cred {
+	/**
+	 * 发出请求的用户的数值标识符
+	 */
 	uid_t			cr_uid;
+	/**
+	 * 用户的主数字组标识符
+	 */
 	gid_t			cr_gid;
+	/**
+	 * 辅助组标识符。是一个数组，用户的辅助组标识符放在数组的前几个位置，如果没有添满数组的话，则将以NOGROUP结束。
+	 */
 	struct group_info	*cr_group_info;
 };
 

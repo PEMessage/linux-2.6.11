@@ -15,9 +15,21 @@
 typedef u32	rpc_authflavor_t;
 
 enum rpc_auth_flavors {
+	/**
+	 * 没有鉴别信息
+	 */
 	RPC_AUTH_NULL  = 0,
+	/**
+	 * UNIX的鉴别机制
+	 */
 	RPC_AUTH_UNIX  = 1,
+	/**
+	 * 简单形式的鉴别
+	 */
 	RPC_AUTH_SHORT = 2,
+	/**
+	 * NTST的DES鉴别
+	 */
 	RPC_AUTH_DES   = 3,
 	RPC_AUTH_KRB   = 4,
 	RPC_AUTH_GSS   = 6,

@@ -83,36 +83,62 @@ struct rpc_rqst {
 	/*
 	 * This is the user-visible part
 	 */
+	/**
+	 * RPC客户传输接口 
+	 */
 	struct rpc_xprt *	rq_xprt;		/* RPC client */
+	/**
+	 * 发送缓存 
+	 */
 	struct xdr_buf		rq_snd_buf;		/* send buffer */
+	/** 
+	 * 接收缓存 
+	 */
 	struct xdr_buf		rq_rcv_buf;		/* recv buffer */
 
 	/*
 	 * This is the private part
 	 */
+	/**
+	 * RPC任务 
+	 */
 	struct rpc_task *	rq_task;	/* RPC task data */
+	/**
+	 * 请求ID 
+	 */
 	__u32			rq_xid;		/* request XID */
 	int			rq_cong;	/* has incremented xprt->cong */
 	int			rq_received;	/* receive completed */
 	u32			rq_seqno;	/* gss seq no. used on req. */
 
+	/**
+	 * 将请求链接到链表
+	 */
 	struct list_head	rq_list;
 
 	struct xdr_buf		rq_private_buf;		/* The receive buffer
 							 * used in the softirq.
 							 */
 	unsigned long		rq_majortimeo;	/* major timeout alarm */
+	/**
+	 * 超时参数 
+	 */
 	unsigned long		rq_timeout;	/* Current timeout value */
 	unsigned int		rq_retries;	/* # of retries */
 	/*
 	 * For authentication (e.g. auth_des)
+	 */
+	/**
+	 * 鉴别数据 
 	 */
 	u32			rq_creddata[2];
 	
 	/*
 	 * Partial send handling
 	 */
-	
+	/**
+	 * 已经传输的字节数 
+	 */
 	u32			rq_bytes_sent;	/* Bytes we have sent */
 
 	unsigned long		rq_xtime;	/* when transmitted */
@@ -126,31 +152,76 @@ struct rpc_rqst {
 #define XPRT_COPY_XID		(1 << 2)
 #define XPRT_COPY_DATA		(1 << 3)
 
+/**
+ * 这个结构定义了远程过程调用时实际进行网络传输所需要的数据。
+ */
 struct rpc_xprt {
+	/**
+	 * BSD socket层 
+	 */
 	struct socket *		sock;		/* BSD socket layer */
+	/**
+	 * INET层 
+	 */
 	struct sock *		inet;		/* INET layer */
 
+	/**
+	 * 超时接口。
+	 */
 	struct rpc_timeout	timeout;	/* timeout parms */
+	/**
+	 * 服务器地址 
+	 */
 	struct sockaddr_in	addr;		/* server address */
+	/**
+	 * IP协议 
+	 */
 	int			prot;		/* IP protocol */
 
+	/**
+	 * 拥塞状态
+	 */
 	unsigned long		cong;		/* current congestion */
+	/**
+	 * 拥塞窗口
+	 */
 	unsigned long		cwnd;		/* congestion window */
 
 	unsigned int		rcvsize,	/* socket receive buffer size */
 				sndsize;	/* socket send buffer size */
 
+	/**
+	 * 等待发送的请求 
+	 */
 	struct rpc_wait_queue	sending;	/* requests waiting to send */
 	struct rpc_wait_queue	resend;		/* requests waiting to resend */
+	/**
+	 * 正在发送的请求 
+	 */
 	struct rpc_wait_queue	pending;	/* requests in flight */
+	/** 
+	 * 等待请求槽的请求 
+	 */
 	struct rpc_wait_queue	backlog;	/* waiting for slot */
+	/**
+	 * 空闲请求槽 
+	 */
 	struct list_head	free;		/* free slots */
 	struct rpc_rqst *	slot;		/* slot table storage */
 	unsigned int		max_reqs;	/* total slots */
 	unsigned long		sockstate;	/* Socket state */
+	/**
+	 * 正在关闭
+	 */
 	unsigned char		shutdown   : 1,	/* being shut down */
+	/**
+	 * 没有拥塞控制
+	 */
 				nocong	   : 1,	/* no congestion control */
 				resvport   : 1, /* use a reserved port */
+	/**
+	 * 使用TCP
+	 */
 				stream     : 1;	/* TCP */
 
 	/*
@@ -160,6 +231,9 @@ struct rpc_xprt {
 
 	/*
 	 * State of TCP reply receive stuff
+	 */
+	/**
+	 * TCP答复接收状态 
 	 */
 	u32			tcp_recm,	/* Fragment header */
 				tcp_xid,	/* Current XID */

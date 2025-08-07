@@ -175,6 +175,9 @@ static inline struct proc_dir_entry *proc_net_create(const char *name,
 	return create_proc_info_entry(name,mode,proc_net,get_info);
 }
 
+/**
+ * 在/proc/net目录下创建文件。
+ */
 static inline struct proc_dir_entry *proc_net_fops_create(const char *name,
 	mode_t mode, struct file_operations *fops)
 {
@@ -184,6 +187,9 @@ static inline struct proc_dir_entry *proc_net_fops_create(const char *name,
 	return res;
 }
 
+/**
+ * 在/proc/net目录下删除文件。
+ */
 static inline void proc_net_remove(const char *name)
 {
 	remove_proc_entry(name,proc_net);

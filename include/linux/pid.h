@@ -13,9 +13,18 @@ enum pid_type
 struct pid
 {
 	/* Try to keep pid_chain in the same cacheline as nr for find_pid */
+	/**
+	 * PID值。
+	 */
 	int nr;
+	/**
+	 * 链接散列表中下一个和前一个元素。
+	 */
 	struct hlist_node pid_chain;
 	/* list of pids with the same nr, only one of them is in the hash */
+	/**
+	 * 每个PID的进程链表头。
+	 */
 	struct list_head pid_list;
 };
 
@@ -40,6 +49,10 @@ extern int alloc_pidmap(void);
 extern void FASTCALL(free_pidmap(int));
 extern void switch_exec_pids(struct task_struct *leader, struct task_struct *thread);
 
+/**
+ * 循环作用于链表上PID值等于who的PID链表上（进程链表上每个结点本身也是一个链表，包含了PID相同的线程组）
+ * 链表类型为type,task指向当前被扫描的元素的进程描述符。
+ */
 #define do_each_task_pid(who, type, task)				\
 	if ((task = find_task_by_pid_type(type, who))) {		\
 		prefetch((task)->pids[type].pid_list.next);		\

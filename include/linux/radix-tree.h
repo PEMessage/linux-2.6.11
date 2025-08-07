@@ -22,9 +22,21 @@
 #include <linux/preempt.h>
 #include <linux/types.h>
 
+/**
+ * 页高速缓存基树的根
+ */
 struct radix_tree_root {
+	/**
+	 * 树的当前深度。不包含叶子节点。
+	 */
 	unsigned int		height;
+	/**
+	 * 为新节点请求内存时所用的标志。
+	 */
 	int			gfp_mask;
+	/**
+	 * 指向与树中第一层节点相应的数据结构。
+	 */
 	struct radix_tree_node	*rnode;
 };
 

@@ -27,20 +27,47 @@
  *
  * We currently do not support more than one RPC program per daemon.
  */
+/**
+ * RPC服务。
+ */
 struct svc_serv {
+	/**
+	 * 空闲服务线程链表。
+	 */
 	struct list_head	sv_threads;	/* idle server threads */
+	/**
+	 * 挂起的套接字。
+	 */
 	struct list_head	sv_sockets;	/* pending sockets */
+	/**
+	 * RPC程序。
+	 */
 	struct svc_program *	sv_program;	/* RPC program */
+	/**
+	 * RPC统计数字 
+	 */
 	struct svc_stat *	sv_stats;	/* RPC statistics */
 	spinlock_t		sv_lock;
+	/**
+	 * 服务线程的个数 
+	 */
 	unsigned int		sv_nrthreads;	/* # of server threads */
+	/**
+	 * 数据报缓冲池大小 
+	 */
 	unsigned int		sv_bufsz;	/* datagram buffer size */
+	/**
+	 * XDR缓冲池大小 
+	 */
 	unsigned int		sv_xdrsize;	/* XDR buffer size */
 
 	struct list_head	sv_permsocks;	/* all permanent sockets */
 	struct list_head	sv_tempsocks;	/* all temporary sockets */
 	int			sv_tmpcnt;	/* count of temporary sockets */
 
+	/**
+	 * 服务名
+	 */
 	char *			sv_name;	/* service name */
 };
 
@@ -108,16 +135,40 @@ static inline void svc_putu32(struct kvec *iov, u32 val)
  * processed.
  * NOTE: First two items must be prev/next.
  */
+/**
+ * NFS服务线程上下文。
+ */
 struct svc_rqst {
+	/**
+	 * 空闲线程链表指针
+	 */
 	struct list_head	rq_list;	/* idle list */
+	/**
+	 * 套接字 
+	 */
 	struct svc_sock *	rq_sock;	/* socket */
+	/**
+	 * 地址 
+	 */
 	struct sockaddr_in	rq_addr;	/* peer address */
 	int			rq_addrlen;
 
+	/**
+	 * RPC服务结构指针 
+	 */
 	struct svc_serv *	rq_server;	/* RPC service definition */
+	/**
+	 * RPC过程信息 
+	 */
 	struct svc_procedure *	rq_procinfo;	/* procedure info */
 	struct auth_ops *	rq_authop;	/* authentication flavour */
+	/**
+	 * 鉴别信息 
+	 */
 	struct svc_cred		rq_cred;	/* auth info */
+	/** 
+	 * 高速接收inet缓冲 
+	 */
 	struct sk_buff *	rq_skbuff;	/* fast recv inet buffer */
 	struct svc_deferred_req*rq_deferred;	/* deferred request we are replaying */
 
@@ -130,18 +181,42 @@ struct svc_rqst {
 	short			rq_arghi;	/* pages available in argument page list */
 	short			rq_resused;	/* pages used for result */
 
+	/**
+	 * 传输id 
+	 */
 	u32			rq_xid;		/* transmission id */
+	/** 
+	 * 远程程序号 
+	 */
 	u32			rq_prog;	/* program number */
+	/**
+	 * 远程版本号 
+	 */
 	u32			rq_vers;	/* program version */
+	/** 
+	 * 远程过程号 
+	 */
 	u32			rq_proc;	/* procedure number */
+	/**
+	 * IP协议 
+	 */
 	u32			rq_prot;	/* IP protocol */
+	/**
+	 * 安全端口 
+	 */
 	unsigned short
 				rq_secure  : 1;	/* secure port */
 
 
 	__u32			rq_daddr;	/* dest addr of request - reply from here */
 
+	/**
+	 * 译码参数
+	 */
 	void *			rq_argp;	/* decoded arguments */
+	/**
+	 * xdr结果 
+	 */
 	void *			rq_resp;	/* xdr'd results */
 	void *			rq_auth_data;	/* flavor-specific data */
 
@@ -153,13 +228,22 @@ struct svc_rqst {
 						 * request delaying 
 						 */
 	/* Catering to nfsd */
+	/**
+	 * RPC client信息 
+	 */
 	struct auth_domain *	rq_client;	/* RPC peer info */
+	/**
+	 * 缓冲信息 
+	 */
 	struct svc_cacherep *	rq_cacherep;	/* cache info */
 	struct knfsd_fh *	rq_reffh;	/* Referrence filehandle, used to
 						 * determine what device number
 						 * to report (real or virtual)
 						 */
 
+	/**
+	 * 同步等待队列
+	 */
 	wait_queue_head_t	rq_wait;	/* synchronization */
 };
 

@@ -31,14 +31,42 @@
 /* counter to tag the hotplug event, read only except for the kobject core */
 extern u64 hotplug_seqnum;
 
+/**
+ * 设备驱动程序模型的核心数据结构。对应于sysfs文件系统中每一个目录。
+ * 它通常被放到设备驱动程序的一个大容器中。典型的容器有总线、设备及驱动程序描述符。
+ */
 struct kobject {
+	/**
+	 * 指向容器名称。
+	 */
 	char			* k_name;
+	/**
+	 * 如果容器名称不超过20个字符，就存在这里。
+	 */
 	char			name[KOBJ_NAME_LEN];
+	/**
+	 * 容器的引用计数。
+	 */
 	struct kref		kref;
+	/**
+	 * 用于将kobject插入某个链表。
+	 */
 	struct list_head	entry;
+	/**
+	 * 指向父kobject
+	 */
 	struct kobject		* parent;
+	/**
+	 * 指向包含的kset,kset是同类型的kobject结构的一个集合体。
+	 */
 	struct kset		* kset;
+	/**
+	 * 指向kobject的类型描述符。
+	 */
 	struct kobj_type	* ktype;
+	/**
+	 * 指向与kobject对应的sysfs文件的dentry数据结构。
+	 */
 	struct dentry		* dentry;
 };
 
@@ -66,9 +94,21 @@ extern void kobject_put(struct kobject *);
 
 extern char * kobject_get_path(struct kobject *, int);
 
+/**
+ * 描述包含kobject对象的结构类型。
+ */
 struct kobj_type {
+	/**
+	 * kobject类型的release函数。
+	 */
 	void (*release)(struct kobject *);
+	/**
+	 * 实现对象属性的方法。
+	 */
 	struct sysfs_ops	* sysfs_ops;
+	/**
+	 * 当创建kobject时，赋予该对象的默认属性。
+	 */
 	struct attribute	** default_attrs;
 };
 
@@ -91,18 +131,53 @@ struct kobj_type {
  *      reported, as well as to add its own "data" elements to the
  *      environment being passed to the hotplug helper.
  */
+/**
+ * 控制热插拨事件的结构。由kset的hotplug_ops指向该结构。
+ * 如果kset不包含一个指定的kobject，则在sysfs分层结构中进行搜索，直到找到一个包含有kset的kobject为止，然后使用这个kset的热插拨操作。
+ */
 struct kset_hotplug_ops {
+	/**
+	 * 无论何时，当内核要为指定的kobject产生事件时，都要调用filter函数。如果filter函数返回0，将不产生事件。
+	 * 因此，该函数给kset一个机会，用于决定是否向用户空间传递指定的事件。
+	 * 使用此函数的一个例子是块设备子系统。在block_hotplug_filter中，只为kobject产生磁盘和分区事件，而不会为请求队列kobject产生事件。
+	 */
 	int (*filter)(struct kset *kset, struct kobject *kobj);
+	/**
+	 * 在调用用户空间的热插拨程序时，相关子系统的名字将作为唯一的参数传递给它。
+	 * name方法负责提供此名字。它将返回一个适合传递给用户空间的字符串。
+	 */
 	char *(*name)(struct kset *kset, struct kobject *kobj);
+	/**
+	 * 任何热插拨脚本所需要知道的信息将通过环境变量传递。最后一个hotplug方法会在调用脚本前，提供添加环境变量的机会。
+	 */
 	int (*hotplug)(struct kset *kset, struct kobject *kobj, char **envp,
 			int num_envp, char *buffer, int buffer_size);
 };
 
+/**
+ * 嵌入相同类型结构的kobject集合。
+ * 当创建一个kobject对象时，通常需要将它们加入到kset中。
+ */
 struct kset {
+	/**
+	 * 所属子系统。
+	 */
 	struct subsystem	* subsys;
+	/**
+	 * 所包含的kobjec的类型。
+	 */
 	struct kobj_type	* ktype;
+	/**
+	 * 第一个kobject节点。
+	 */
 	struct list_head	list;
+	/**
+	 * 嵌入的kobject
+	 */
 	struct kobject		kobj;
+	/**
+	 * 用于处理kobject结构的过滤和热插拨操作的回调函数表。
+	 */
 	struct kset_hotplug_ops	* hotplug_ops;
 };
 
@@ -146,11 +221,24 @@ extern struct kobject * kset_find_obj(struct kset *, const char *);
 
 
 
+/**
+ * 子系统。通常显示在sysfs分层结构中的顶层。
+ * 包含block_subsys、devices_subsys以及各种总线等子系统，对应于sys/block、sys/devices等目录。
+ */
 struct subsystem {
+	/**
+	 * 下层对象集合。
+	 */
 	struct kset		kset;
+	/**
+	 * 访问子系统所用的读写信号量。
+	 */
 	struct rw_semaphore	rwsem;
 };
 
+/**
+ * 定义一个子系统。
+ */
 #define decl_subsys(_name,_type,_hotplug_ops) \
 struct subsystem _name##_subsys = { \
 	.kset = { \

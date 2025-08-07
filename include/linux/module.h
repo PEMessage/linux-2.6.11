@@ -143,6 +143,10 @@ extern struct module __this_module;
 #define MODULE_PARM_DESC(_parm, desc) \
 	__MODULE_INFO(parm, _parm, #_parm ":" desc)
 
+/**
+ * 创建一个名为__mod_##type_device_table的局部变量，指向struct pci_device_id数组。
+ * 在内核构建过程中，depmod程序在所有的模块中搜索符号，如果找到符号，把它从模块中抽出，添加到文件中。
+ */
 #define MODULE_DEVICE_TABLE(type,name)		\
   MODULE_GENERIC_TABLE(type##_device,name)
 
@@ -199,9 +203,15 @@ void *__symbol_get_gpl(const char *symbol);
 	__attribute__((section("__ksymtab" sec), unused))	\
 	= { (unsigned long)&sym, __kstrtab_##sym }
 
+/**
+ * 让C编译器往__ksymtab部分加入一个专用符号。
+ */
 #define EXPORT_SYMBOL(sym)					\
 	__EXPORT_SYMBOL(sym, "")
 
+/**
+ * 让C编译器往__ksymtab_gpl部分加入一个专用符号。
+ */
 #define EXPORT_SYMBOL_GPL(sym)					\
 	__EXPORT_SYMBOL(sym, "_gpl")
 

@@ -75,18 +75,30 @@ void dm_put_device(struct dm_target *ti, struct dm_dev *d);
 /*
  * Information about a target type
  */
+/* 映射目标类型 */
 struct target_type {
+	/* 映射类型名称，如线性、条带、致错、镜像、快照等等 */
 	const char *name;
+	/* 实现模块 */
 	struct module *module;
+	/* 版本号 */
         unsigned version[3];
+	/* 构造、析构回调函数 */
 	dm_ctr_fn ctr;
 	dm_dtr_fn dtr;
+	/* 映射回调函数 */
 	dm_map_fn map;
+	/* 完成回调函数 */
 	dm_endio_fn end_io;
+	/* 挂起前的回调函数 */
 	dm_presuspend_fn presuspend;
+	/* 挂起后的回调函数 */
 	dm_postsuspend_fn postsuspend;
+	/* 恢复时的回调函数 */
 	dm_resume_fn resume;
+	/* 状态报告回调函数 */
 	dm_status_fn status;
+	/* 用于向该类型映射目标传递消息的回调函数 */
 	dm_message_fn message;
 };
 
@@ -99,16 +111,22 @@ struct io_restrictions {
 	unsigned long		seg_boundary_mask;
 };
 
+/* 映射目标描述符 */
 struct dm_target {
+	/* 所属映射表 */
 	struct dm_table *table;
+	/* 映射目标类型，如linear、striped、error等等 */
 	struct target_type *type;
 
 	/* target limits */
+	/* 这个目标在映射设备上的起始扇区 */
 	sector_t begin;
+	/* 这个目标在映射设备上的长度 */
 	sector_t len;
 
 	/* FIXME: turn this into a mask, and merge with io_restrictions */
 	/* Always a power of 2 */
+	/* 映射到这个目标的IO必须再按照这个扇区数细分为更小的IO下发执行，必须为2的幂 */
 	sector_t split_io;
 
 	/*
@@ -118,9 +136,11 @@ struct dm_target {
 	struct io_restrictions limits;
 
 	/* target specific data */
+	/* 私有信息，根据映射类型不同而不同 */
 	void *private;
 
 	/* Used to provide an error string from the ctr */
+	/* 映射表构造过程中的错误字符串 */
 	char *error;
 };
 

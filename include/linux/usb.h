@@ -52,7 +52,13 @@ struct usb_driver;
  * USB requests are always queued to a given endpoint, identified by a
  * descriptor within an active interface in a given USB configuration.
  */
+/**
+ * USB端点。分控制、中断、批量、等时端点。
+ */
 struct usb_host_endpoint {
+	/**
+	 * 真正的端点信息。
+	 */
 	struct usb_endpoint_descriptor	desc;
 	struct list_head		urb_list;
 	void				*hcpriv;
@@ -125,21 +131,40 @@ enum usb_interface_condition {
  * stored in numerical order anyhow.  Use usb_altnum_to_altsetting() to
  * look up an alternate setting in the altsetting array based on its number.
  */
+/**
+ * USB端点被捆绑为接口。USB核心把该结构体传递给设备驱动程序，之后由USB驱动程序来负责控制该结构体。
+ */
 struct usb_interface {
 	/* array of alternate settings for this interface,
 	 * stored in no particular order */
+	/**
+	 * 一个接口结构体数组。包含了所有可能用于该接口的可选配置。
+	 */
 	struct usb_host_interface *altsetting;
 
+	/**
+	 * 指向altsetting数组内部的指针，表示该接口的当前活动配置。
+	 */
 	struct usb_host_interface *cur_altsetting;	/* the currently
 					 * active alternate setting */
+	/**
+	 * altsetting指针所指向的可选设置的数量。
+	 */
 	unsigned num_altsetting;	/* number of alternate settings */
 
+	/**
+	 * 如果捆绑到该接口的USB驱动程序使用USB主设备号，这个变量包含USB核心分配给该接口的次设备号。
+	 * 这仅在一个成功的usb_register_dev调用之后才有效。
+	 */
 	int minor;			/* minor number this interface is bound to */
 	enum usb_interface_condition condition;		/* state of binding */
 	struct device dev;		/* interface specific device info */
 	struct class_device *class_dev;
 };
 #define	to_usb_interface(d) container_of(d, struct usb_interface, dev)
+/**
+ * 把一个给定的usb_interface结构体转换为usb_device结构体。
+ */
 #define	interface_to_usbdev(intf) \
 	container_of(intf->dev.parent, struct usb_device, dev)
 
@@ -221,6 +246,9 @@ struct usb_interface_cache {
  * desires (expressed through hotplug scripts).  However, drivers can call
  * usb_reset_configuration() to reinitialize the current configuration and
  * all its interfaces.
+ */
+/**
+ * 一个USB设备可以有多个配置，而且可以在配置之间切换以改变设备的状态。
  */
 struct usb_host_config {
 	struct usb_config_descriptor	desc;
@@ -453,6 +481,9 @@ static inline int usb_make_path (struct usb_device *dev, char *buf, size_t size)
  * This macro is used to create a struct usb_device_id that matches a
  * specific device.
  */
+/**
+ * 创建一个usb_device_id结构体，仅和指定的制造商和产品ID值相匹配。该宏常用于需要一个特定驱动程序的USB设备。
+ */
 #define USB_DEVICE(vend,prod) \
 	.match_flags = USB_DEVICE_ID_MATCH_DEVICE, .idVendor = (vend), .idProduct = (prod)
 /**
@@ -464,6 +495,9 @@ static inline int usb_make_path (struct usb_device *dev, char *buf, size_t size)
  *
  * This macro is used to create a struct usb_device_id that matches a
  * specific device, with a version range.
+ */
+/**
+ * 创建一个usb_device_id结构体，仅和某版本范围内的指定制造商和产品ID值相匹配。
  */
 #define USB_DEVICE_VER(vend,prod,lo,hi) \
 	.match_flags = USB_DEVICE_ID_MATCH_DEVICE_AND_VERSION, .idVendor = (vend), .idProduct = (prod), .bcdDevice_lo = (lo), .bcdDevice_hi = (hi)
@@ -477,6 +511,9 @@ static inline int usb_make_path (struct usb_device *dev, char *buf, size_t size)
  * This macro is used to create a struct usb_device_id that matches a
  * specific class of devices.
  */
+/**
+ * 创建一个usb_device_id结构体，仅和USB设备的指定类型相匹配。
+ */
 #define USB_DEVICE_INFO(cl,sc,pr) \
 	.match_flags = USB_DEVICE_ID_MATCH_DEV_INFO, .bDeviceClass = (cl), .bDeviceSubClass = (sc), .bDeviceProtocol = (pr)
 
@@ -488,6 +525,9 @@ static inline int usb_make_path (struct usb_device *dev, char *buf, size_t size)
  *
  * This macro is used to create a struct usb_device_id that matches a
  * specific class of interfaces.
+ */
+/**
+ * 创建一个usb_device_id结构体，仅和USB接口的指定类型相匹配。
  */
 #define USB_INTERFACE_INFO(cl,sc,pr) \
 	.match_flags = USB_DEVICE_ID_MATCH_INT_INFO, .bInterfaceClass = (cl), .bInterfaceSubClass = (sc), .bInterfaceProtocol = (pr)
@@ -535,21 +575,53 @@ static inline int usb_make_path (struct usb_device *dev, char *buf, size_t size)
  * well as forcing all pending I/O requests to complete (by unlinking
  * them as necessary, and blocking until the unlinks complete).
  */
+/**
+ * USB设备驱动。由驱动设置，向USB核心代码描述USB驱动程序。
+ */
 struct usb_driver {
+	/**
+	 * 指向该驱动程序的模块所有者指针。
+	 */
 	struct module *owner;
 
+	/**
+	 * 指向驱动程序名字的指针。在内核的所有USB驱动程序中它必须是唯一的。
+	 * 通常被设置为和驱动程序模块名字相同的名字。
+	 */
 	const char *name;
 
+	/**
+	 * 指向USB驱动程序的探测函数的指针。当USB核心认为它有一个struct usb_interface可以由该驱动程序处理时，它将调用该函数。
+	 * USB核心用来作判断的指向struct usb_device_id的指针也被传递给该函数。
+	 * 如果USB驱动程序确认传递给它的struct usb_interface，它应该初始化设备然后返回0，否则应该返回一个负值。
+	 */
 	int (*probe) (struct usb_interface *intf,
 		      const struct usb_device_id *id);
 
+	/**
+	 * 指向USB驱动程序中的断开函数的指针。当struct usb_interface被从系统中移除或者驱动程序正在从USB核心中卸载时，USB核心将调用该函数。
+	 */
 	void (*disconnect) (struct usb_interface *intf);
 
+	/**
+	 * 指向USB驱动程序中的ioctl函数。如果该函数存在，当用户空间的程序对usbfs文件系统中的设备文件进行了ioctl调用，而和该设备文件相关联的USB设备在该USB驱动程序上时，它将被调用。
+	 * 实际上，只有USB集线器驱动程序使用该ioctl。
+	 */
 	int (*ioctl) (struct usb_interface *intf, unsigned int code, void *buf);
 
+	/**
+	 * 指向USB驱动程序中的挂起函数的指针。当设备被USB核心挂起时调用该函数。
+	 */
 	int (*suspend) (struct usb_interface *intf, u32 state);
+	/**
+	 * 指向USB驱动程序中的恢复函数的指针。当设备将被USB核心恢复时调用该函数。
+	 */
 	int (*resume) (struct usb_interface *intf);
 
+	/**
+	 * 指向struct usb_device_id表的指针，该表包含了一列该驱动程序可以支持的所有不同类型的USB设备。
+	 * 如果没有设置该变量，USB驱动程序中的探测回调函数不会被调用。
+	 */
 	const struct usb_device_id *id_table;
 
 	struct device_driver driver;
@@ -570,10 +642,25 @@ extern struct bus_type usb_bus_type;
  * usb_unregister_dev() functions, to consolidate a number of the
  * parameters used for them.
  */
+/**
+ * USB设备所属类别。
+ */
 struct usb_class_driver {
+	/**
+	 * sysfs用来描述设备的名字。如果需要包含设备编号，需要在字符串中包含字符%d。
+	 */
 	char *name;
+	/**
+	 * 使用它来将USB设备注册为一个字符设备。
+	 */
 	struct file_operations *fops;
+	/**
+	 * 为该驱动程序创建的devfs文件的模式。典型设置是S_IRUSR和S_IWUSR值的组合。
+	 */
 	mode_t mode;
+	/**
+	 * 这是为该驱动程序指派的次设备号范围的开始值。
+	 */
 	int minor_base;	
 };
 
@@ -600,19 +687,59 @@ extern int usb_disabled(void);
 /*
  * urb->transfer_flags:
  */
+/**
+ * 如果被设置，说明任何发生的对IN端点的简短读取应该被USB核心当作是一个错误。
+ * 该值只对从USB设备读取的urb有用，对用于写入的urb没有意义。
+ */
 #define URB_SHORT_NOT_OK	0x0001	/* report short reads as errors */
+/**
+ * 如果该urb是等时的，当驱动程序想要该urb被调度时可以设置这个位。只要带宽允许它这么做，而且想要在此时设置urb的start_frame变量。
+ * 如果一个等时的urb没有设置该位，驱动程序必须指定start_frame的值。如果传输在当时不能启动的话，必有能够正确的恢复。
+ */
 #define URB_ISO_ASAP		0x0002	/* iso-only, urb->start_frame ignored */
+/**
+ * 当urb包含一个即将传输的DMA缓冲区时应该设置该闰。USB核心使用transfer_data变量所指向的缓冲区，而不是transfer_buffer变量所指向的。
+ */
 #define URB_NO_TRANSFER_DMA_MAP	0x0004	/* urb->transfer_dma valid on submit */
+/**
+ * 和URB_NO_TRANSFER_DMA_MAP位类似，该位用于控制带有已设置好的DMA缓冲区的urb。如果它被设置，USB核心使用setup_dma变量所指向的缓冲区。而不是set_packet变量。
+ */
 #define URB_NO_SETUP_DMA_MAP	0x0008	/* urb->setup_dma valid on submit */
+/**
+ * 如果被设置，对该urb的usb_unlink_urb调用几乎立即返回。该urb的链接在后台被解开。
+ * 否则，此函数一直等到urb被完全解开链接和结束才返回。使用该位时要小心，因为它可能会造成非常难以调试的同步问题。
+ */
 #define URB_ASYNC_UNLINK	0x0010	/* usb_unlink_urb() returns asap */
+/**
+ * 仅由UHCI USB主控制器驱动程序使用，指示它不要企图使用前端总线回收逻辑。该位通常不应该被设置，因为带有UHCI主控制器的机器会导致大量的CPU负载，而PCI总线忙于等待一个设置了该位的urb。
+ */
 #define URB_NO_FSBR		0x0020	/* UHCI-specific */
+/**
+ * 如果被设置，一个批量输出urb以发送一个不包含数据的小数据包来结束。这时数据对齐到一个端点数据包边界。一些断线的USB设备需要该位才能正确的工作。
+ */
 #define URB_ZERO_PACKET		0x0040	/* Finish bulk OUTs with short packet */
+/**
+ * 如果被设置，当urb结束时，硬件可能不会产生一个中断。对该位的使用应当小心谨慎，只有把多个urb排队到同一个端点时才使用。
+ * USB核心的函数使用该位来进行DMA缓冲区传输。
+ */
 #define URB_NO_INTERRUPT	0x0080	/* HINT: no non-error interrupt needed */
 
 struct usb_iso_packet_descriptor {
+	/**
+	 * 该数据包的数据在传输缓冲区中的偏移量(第一个字节为0)
+	 */
 	unsigned int offset;
+	/**
+	 * 该数据包的传输缓冲区大小。
+	 */
 	unsigned int length;		/* expected length */
+	/**
+	 * 该等时数据包接收到传输缓冲区中的数据长度。
+	 */
 	unsigned int actual_length;
+	/**
+	 * 该数据包的单个等时传输的状态。它可以把相同的返回值作为urb结构体的状态变量。
+	 */
 	unsigned int status;
 };
 
@@ -786,6 +913,10 @@ typedef void (*usb_complete_t)(struct urb *, struct pt_regs *);
  * error_count.  Completion callbacks for ISO transfers will normally
  * (re)submit URBs to ensure a constant transfer rate.
  */
+/**
+ * USB请求块。类似于网络子系统的skb_buff。
+ * 一个端点可以分配多个urb，同一个urb也可以被多个端点共用。
+ */
 struct urb
 {
 	/* private, usb core and host controller only fields in the urb */
@@ -798,22 +929,82 @@ struct urb
 	u8 reject;			/* submissions will fail */
 
 	/* public, documented fields in the urb that can be used by drivers */
+	/**
+	 * 指向这个 urb 要发送到的 struct usb_device 的指针. 这个变量必须在这个 urb 被发送到 USB 核心之前被 USB 驱动初始化, .
+	 */
 	struct usb_device *dev; 	/* (in) pointer to associated device */
+	/**
+	 * urb所要发送的特定目标usb_device的端点信息。该变量在urb可以被发送到USB核心之前必须由USB驱动初始化。
+	 * 设置函数有:usb_sndctrlpipe、usb_rcvctrlpipe等。
+	 */
 	unsigned int pipe;		/* (in) pipe information */
+	/**
+	 * 当urb结束时，或者正在被USB核心处理时，该变量被设置为urb的当前状态。
+	 * USB驱动程序可以安全的该变量的唯一时刻是在urb结束处理例程中。
+	 * 该限制是为了防止当urb正在被USB核心处理进的竞态的发生。对于等时urb，该变量的一个成功值只表示urb是否已经被解开链接。
+	 * 要获取等时urb的详细状态，应该检查iso_frame_desc变量。
+	 */
 	int status;			/* (return) non-ISO status */
+	/**
+	 * 该值可以被设置为许多不同的位。取决于USB驱动的具体操作。
+	 * 可用的值如URB_SHORT_NOT_OK。
+	 */
 	unsigned int transfer_flags;	/* (in) URB_SHORT_NOT_OK | ...*/
+	/**
+	 * 指向用于发送数据到设备或者从设备接收数据的缓冲区的指针。为了使主控制器正确的访问该缓冲区，必须使用kmalloc来创建它。而不是在栈中或者静态内存中。
+	 * 对于控制端点，该缓冲区用于传输数据的中转。
+	 */
 	void *transfer_buffer;		/* (in) associated data buffer */
+	/**
+	 * 用于以DMA方式传输数据到USB设备的缓冲区。
+	 */
 	dma_addr_t transfer_dma;	/* (in) dma addr for transfer_buffer */
+	/**
+	 * transfer_buffer或者transfer_dma变量所指向的缓冲区的大小。如果该值为0，两个传输缓冲区都没有被USB核心使用。
+	 * 对一个OUT端点，如果端点的最大尺寸小于该变量所指定的值，到USB设备的传输将被分解为更小的数据块以便正确的传输。这种大数据量的传输以连续的USB帧的方式进行。
+	 * 在一个urb中提交一个大数据块然后让USB主控制器把它分割为更小的块，比以连续的次序发送更小的缓冲区的速度快得多。
+	 */
 	int transfer_buffer_length;	/* (in) data buffer length */
+	/**
+	 * 当urb结束时，该变量被设置为urb所发送的数据。或者urb所接收数据的实际长度。
+	 * 对于IN urb，必须使用它变量而不是transfer_buffer_length变量，因为所接收的数据可能小于整个缓冲区的长度。
+	 */
 	int actual_length;		/* (return) actual transfer length */
+	/**
+	 * 指向控制urb的设置数据包的指针。它在传输缓冲区中的数据之前被传送，该变量只对控制urb有效。
+	 */
 	unsigned char *setup_packet;	/* (in) setup packet (control only) */
+	/**
+	 * 控制urb用于设置数据包的DMA缓冲区。它在普通传输缓冲区中的数据之前被传送。该变量只对控制urb有效。
+	 */
 	dma_addr_t setup_dma;		/* (in) dma addr for setup_packet */
+	/**
+	 * 设置或者返回初始的帧数量，用于等时传输。
+	 */
 	int start_frame;		/* (modify) start frame (ISO) */
 	int number_of_packets;		/* (in) number of ISO packets */
+	/**
+	 * urb被轮询的时间间隔。仅对中断或者等时urb有效，该值的单位随着设备速度的不同而不同。
+	 * 对于低速和满速的设备，单位是帧，相当于毫秒。对于其他设备，单位是微帧，相当于1/8毫秒。
+	 * 对于等时或者中断urb，在urb被发送到USB核心之前，USB驱动程序必须设置该值。
+	 */
 	int interval;			/* (modify) transfer interval (INT/ISO) */
+	/**
+	 * 由USB核心设置，仅用于等时urb结束之后。它表示报告了任何一种类型错误的等时传输的数量。
+	 */
 	int error_count;		/* (return) number of ISO errors */
+	/**
+	 * 指向一个可以被USB驱动程序设置的数据块。它可以在结束处理例程中当urb被返回到驱动程序时使用。
+	 */
 	void *context;			/* (in) context for completion */
+	/**
+	 * 指向一个结束处理例程的指针。当urb被完全传输或者发生错误时，USB核心将调用该函数。
+	 * 在该函数内，USB驱动程序可以检查urb，释放它，或者把它重新提交到另一个传输中去。
+	 */
 	usb_complete_t complete;	/* (in) completion routine */
+	/**
+	 * 仅对等时urb有效。该变量是一个结构体数组。该结构体允许单个urb一次定义许多等时传输。它还用于收集每个单独传输的传输状态。
+	 */
 	struct usb_iso_packet_descriptor iso_frame_desc[0];	/* (in) ISO ONLY */
 };
 
@@ -832,6 +1023,9 @@ struct urb
  *
  * Initializes a control urb with the proper information needed to submit
  * it to a device.
+ */
+/**
+ * 初始化控制urb。参数与批量urb一致。但是新增一个setup_packet参数，它指向即将被发送到端点的设置数据包的数据。
  */
 static inline void usb_fill_control_urb (struct urb *urb,
 					 struct usb_device *dev,
@@ -864,6 +1058,10 @@ static inline void usb_fill_control_urb (struct urb *urb,
  *
  * Initializes a bulk urb with the proper information needed to submit it
  * to a device.
+ */
+/**
+ * 初始化批量urb。
+ * 参数与中断urb初始化函数一致，不过没有时间间隔参数，因为批量urb没有时间间隔值。
  */
 static inline void usb_fill_bulk_urb (struct urb *urb,
 				      struct usb_device *dev,
@@ -899,6 +1097,17 @@ static inline void usb_fill_bulk_urb (struct urb *urb,
  * Note that high speed interrupt endpoints use a logarithmic encoding of
  * the endpoint interval, and express polling intervals in microframes
  * (eight per millisecond) rather than in frames (one per millisecond).
+ */
+/**
+ * 是一个辅助函数，用来正确的初始化即将被发送到USB设备的中断端点。
+ *		urb:		指向需要初始化的urb指针。
+ *		dev:		该urb所发送的目标USB设备。
+ *		pipe:		该urb所发送的目标USB设备的特定端点。是使用usb_sndintpipe或者usb_rcvintpipe函数创建的。
+ *		transfer_buffer:	用于保存外发数据或者接收数据的缓冲区的指针。注意它不能是一个静态的缓冲区。
+ *		buffer_length:		transfer_buffer指针所指向的缓冲区的大小。
+ *		complete:			指向当该urb结束之后调用的结束处理函数的指针。
+ *		context:	指向一个小数据块，以备complete查找。
+ *		interval:	该urb应该被调度的间隔。
  */
 static inline void usb_fill_int_urb (struct urb *urb,
 				     struct usb_device *dev,
@@ -1097,13 +1306,37 @@ static inline unsigned int __create_pipe(struct usb_device *dev, unsigned int en
 }
 
 /* Create various pipes... */
+/**
+ * 把指定USB设备的指定端点号设置为一个控制OUT端点。
+ */
 #define usb_sndctrlpipe(dev,endpoint)	((PIPE_CONTROL << 30) | __create_pipe(dev,endpoint))
+/**
+ * 把指定USB设备的指定端点号设置为一个控制IN端点。
+ */
 #define usb_rcvctrlpipe(dev,endpoint)	((PIPE_CONTROL << 30) | __create_pipe(dev,endpoint) | USB_DIR_IN)
+/**
+ * 把指定USB设备的指定端点号设置为一个等时OUT端点。
+ */
 #define usb_sndisocpipe(dev,endpoint)	((PIPE_ISOCHRONOUS << 30) | __create_pipe(dev,endpoint))
+/**
+ * 把指定USB设备的指定端点号设置为一个等时IN端点。
+ */
 #define usb_rcvisocpipe(dev,endpoint)	((PIPE_ISOCHRONOUS << 30) | __create_pipe(dev,endpoint) | USB_DIR_IN)
+/**
+ * 把指定USB设备的指定端点号设置为一个批量OUT端点。
+ */
 #define usb_sndbulkpipe(dev,endpoint)	((PIPE_BULK << 30) | __create_pipe(dev,endpoint))
+/**
+ * 把指定USB设备的指定端点号设置为一个批量IN端点。
+ */
 #define usb_rcvbulkpipe(dev,endpoint)	((PIPE_BULK << 30) | __create_pipe(dev,endpoint) | USB_DIR_IN)
+/**
+ * 把指定USB设备的指定端点号设置为一个中断OUT端点。
+ */
 #define usb_sndintpipe(dev,endpoint)	((PIPE_INTERRUPT << 30) | __create_pipe(dev,endpoint))
+/**
+ * 把指定USB设备的指定端点号设置为一个中断IN端点。
+ */
 #define usb_rcvintpipe(dev,endpoint)	((PIPE_INTERRUPT << 30) | __create_pipe(dev,endpoint) | USB_DIR_IN)
 
 /*-------------------------------------------------------------------------*/

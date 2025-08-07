@@ -24,8 +24,20 @@
  * the anon_vma object itself: we're guaranteed no page can be
  * pointing to this anon_vma once its vma list is empty.
  */
+/**
+ * 用于共享匿名页的反射映射。
+ *		当创建新进程时，父进程的所有页框，包含匿名页，都同时分配给子进程。
+ *		当进程创建线性区时，如果指定了MAP_ANONYMOUS和MAP_SHARED，则这个区域内的页将由该进程后面的子进程共享。
+ * 当内核为一个匿名线性区分配第一页时，内核创建一个新的anon_vma数据结构。
+ */
 struct anon_vma {
+	/**
+	 * 保护本结构的锁。
+	 */
 	spinlock_t lock;	/* Serialize access to vma list */
+	/**
+	 * 线性区描述符双向循环链表的头部。
+	 */ 
 	struct list_head head;	/* List of private "related" vmas */
 };
 

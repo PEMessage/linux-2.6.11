@@ -120,6 +120,9 @@ extern struct screen_info screen_info;
  */
 #define TTY_FLIPBUF_SIZE 512
 
+/**
+ * 此结构用于缓冲从设备接收的数据。
+ */
 struct tty_flip_buffer {
 	struct work_struct		work;
 	struct semaphore pty_sem;
@@ -239,32 +242,58 @@ struct device;
  * size each time the window is created or resized anyway.
  * 						- TYT, 9/14/92
  */
+/**
+ * 保存当前特定tty端口的状态。
+ */
 struct tty_struct {
 	int	magic;
+	/**
+	 * 控制设备的驱动程序。
+	 */
 	struct tty_driver *driver;
 	int index;
+	/**
+	 * tty设备的线路规程。
+	 */
 	struct tty_ldisc ldisc;
 	struct semaphore termios_sem;
 	struct termios *termios, *termios_locked;
 	char name[64];
 	int pgrp;
 	int session;
+	/**
+	 * 当前tty设备的状态。可以用以下宏访问该值:TTY_THROTTLED、TTY_IO_ERROR等。
+	 */
 	unsigned long flags;
 	int count;
 	struct winsize winsize;
+	/**
+	 * stopped:		设备是否已经停止。
+	 * hw_stopped:	硬件是否已经停止。
+	 * low_latency:	是否是一个慢速设备。是否能接收高速传输的数据。
+	 */
 	unsigned char stopped:1, hw_stopped:1, flow_stopped:1, packet:1;
 	unsigned char low_latency:1, warned:1;
 	unsigned char ctrl_status;
 
 	struct tty_struct *link;
 	struct fasync_struct *fasync;
+	/**
+	 * tty设备的交替缓冲区。
+	 */
 	struct tty_flip_buffer flip;
 	int max_flip_cnt;
 	int alt_speed;		/* For magic substitution of 38400 bps */
+	/**
+	 * 等待读取数据的等待队列。当有数据可读时，应当唤醒该队列。
+	 */
 	wait_queue_head_t write_wait;
 	wait_queue_head_t read_wait;
 	struct work_struct hangup_work;
 	void *disc_data;
+	/**
+	 * 供驱动程序临时数据用的指针。不能由tty核心修改。
+	 */
 	void *driver_data;
 	struct list_head tty_files;
 
@@ -276,6 +305,9 @@ struct tty_struct {
 	 */
 	unsigned int column;
 	unsigned char lnext:1, erasing:1, raw:1, real_raw:1, icanon:1;
+	/**
+	 * tty设备是否正在关闭端口。
+	 */
 	unsigned char closing:1;
 	unsigned short minimum_to_wake;
 	unsigned long overrun_time;

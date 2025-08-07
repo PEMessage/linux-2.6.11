@@ -7,7 +7,13 @@
 struct backing_dev_info;
 
 extern spinlock_t inode_lock;
+/**
+ * 正在使用的索引节点链表。不脏且i_count不为0.
+ */
 extern struct list_head inode_in_use;
+/**
+ * 有效未使用的索引节点链表。不脏且i_count为0.用于磁盘高速缓存。
+ */
 extern struct list_head inode_unused;
 
 /*
@@ -33,12 +39,30 @@ enum writeback_sync_modes {
  * always on the stack, and hence need no locking.  They are always initialised
  * in a manner such that unspecified fields are set to zero.
  */
+/**
+ * 脏页刷新控制结构。
+ */
 struct writeback_control {
+	/**
+	 * 如果不为空，即指向一个backing_dev_info结构。此时，只有属于基本块设备的脏页将会被刷新。
+	 */
 	struct backing_dev_info *bdi;	/* If !NULL, only write back this
 					   queue */
+	/**
+	 * 同步模式。
+	 *     WB_SYNC_ALL:表示如果遇到一个上锁的索引节点，必须等待而不能略过它。
+	 *     WB_SYNC_HOLD:表示把上锁的索引节点放入稍后的链表中。
+	 *     WB_SYNC_NONE:表示简单的略过上锁的索引节点。
+	 */
 	enum writeback_sync_modes sync_mode;
+	/**
+	 * 如果不为空，就表示应该略过比指定值还新的索引节点。
+	 */
 	unsigned long *older_than_this;	/* If !NULL, only write back inodes
 					   older than this */
+	/**
+	 * 当前执行流中仍然要写的脏页数量。
+	 */ 
 	long nr_to_write;		/* Write this many pages, and decrement
 					   this for each page written */
 	long pages_skipped;		/* Pages which were not written */
@@ -51,6 +75,9 @@ struct writeback_control {
 	loff_t start;
 	loff_t end;
 
+	/**
+	 * 如果被设置，就不能阻塞进程。
+	 */
 	unsigned nonblocking:1;			/* Don't get stuck on request queues */
 	unsigned encountered_congestion:1;	/* An output: a queue is full */
 	unsigned for_kupdate:1;			/* A kupdate writeback */

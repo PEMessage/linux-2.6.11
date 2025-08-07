@@ -31,6 +31,10 @@ struct list_head {
 
 #define LIST_HEAD_INIT(name) { &(name), &(name) }
 
+/**
+ * 创建一个新的链表。是新链表头的占位符，并且是一个哑元素。
+ * 同时初始化prev和next字段，让它们指向list_name变量本身。
+ */
 #define LIST_HEAD(name) \
 	struct list_head name = LIST_HEAD_INIT(name)
 
@@ -62,6 +66,9 @@ static inline void __list_add(struct list_head *new,
  * Insert a new entry after the specified head.
  * This is good for implementing stacks.
  */
+/**
+ * 把元素插入特定元素之后
+ */
 static inline void list_add(struct list_head *new, struct list_head *head)
 {
 	__list_add(new, head, head->next);
@@ -74,6 +81,9 @@ static inline void list_add(struct list_head *new, struct list_head *head)
  *
  * Insert a new entry before the specified head.
  * This is useful for implementing queues.
+ */
+/**
+ * 把元素插到特定元素之前。
  */
 static inline void list_add_tail(struct list_head *new, struct list_head *head)
 {
@@ -157,6 +167,9 @@ static inline void __list_del(struct list_head * prev, struct list_head * next)
  * @entry: the element to delete from the list.
  * Note: list_empty on entry does not return true after this, the entry is
  * in an undefined state.
+ */
+/**
+ * 删除特定元素
  */
 static inline void list_del(struct list_head *entry)
 {
@@ -247,6 +260,9 @@ static inline void list_move_tail(struct list_head *list,
  * list_empty - tests whether a list is empty
  * @head: the list to test.
  */
+/**
+ * 检查指定的链表是否为空
+ */
 static inline int list_empty(const struct list_head *head)
 {
 	return head->next == head;
@@ -317,6 +333,9 @@ static inline void list_splice_init(struct list_head *list,
  * @type:	the type of the struct this is embedded in.
  * @member:	the name of the list_struct within the struct.
  */
+/** 
+ * 返回链表所在结构
+ */
 #define list_entry(ptr, type, member) \
 	container_of(ptr, type, member)
 
@@ -324,6 +343,9 @@ static inline void list_splice_init(struct list_head *list,
  * list_for_each	-	iterate over a list
  * @pos:	the &struct list_head to use as a loop counter.
  * @head:	the head for your list.
+ */
+/**
+ * 扫描指定的链表
  */
 #define list_for_each(pos, head) \
 	for (pos = (head)->next; prefetch(pos->next), pos != (head); \
@@ -366,6 +388,9 @@ static inline void list_splice_init(struct list_head *list,
  * @pos:	the type * to use as a loop counter.
  * @head:	the head for your list.
  * @member:	the name of the list_struct within the struct.
+ */
+/**
+ * 与list_for_each相似，但是返回每个链表结点所在结构
  */
 #define list_for_each_entry(pos, head, member)				\
 	for (pos = list_entry((head)->next, typeof(*pos), member);	\
@@ -487,11 +512,16 @@ static inline void list_splice_init(struct list_head *list,
  * too wasteful.
  * You lose the ability to access the tail in O(1).
  */
-
+/**
+ * 用于散列表的双向链表。指向链表的第一个元素。
+ */
 struct hlist_head {
 	struct hlist_node *first;
 };
 
+/**
+ * 散列表链表元素。
+ */
 struct hlist_node {
 	struct hlist_node *next, **pprev;
 };

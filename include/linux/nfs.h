@@ -10,6 +10,9 @@
 #include <linux/sunrpc/msg_prot.h>
 #include <linux/string.h>
 
+/**
+ * NFS程序号
+ */
 #define NFS_PROGRAM	100003
 #define NFS_PORT	2049
 #define NFS_MAXDATA	8192
@@ -20,11 +23,29 @@
 #define NFS_COOKIESIZE	4
 #define NFS_FIFO_DEV	(-1)
 #define NFSMODE_FMT	0170000
+/**
+ * NFS目录文件
+ */
 #define NFSMODE_DIR	0040000
+/**
+ * NFS字符文件
+ */
 #define NFSMODE_CHR	0020000
+/**
+ * NFS块文件
+ */
 #define NFSMODE_BLK	0060000
+/**
+ * 普通文件
+ */
 #define NFSMODE_REG	0100000
+/**
+ * 链接文件
+ */
 #define NFSMODE_LNK	0120000
+/**
+ * SOCK文件
+ */
 #define NFSMODE_SOCK	0140000
 #define NFSMODE_FIFO	0010000
 
@@ -38,6 +59,9 @@
  * no NFSv3 errors are returned to NFSv2 clients.
  * Error codes that have a `--' in the v2 column are not part of the
  * standard, but seem to be widely used nevertheless.
+ */
+/**
+ * NFS系统调用的返回值。
  */
  enum nfs_stat {
 	NFS_OK = 0,			/* v2 v3 v4 */
@@ -116,13 +140,33 @@
 };
 
 /* NFSv2 file types - beware, these are not the same in NFSv3 */
-
+/**
+ * NFS基本文件类型。
+ */
 enum nfs_ftype {
+	/**
+	 * 不是一个文件。
+	 */
 	NFNON = 0,
+	/**
+	 * 一般的数据文件。
+	 */
 	NFREG = 1,
+	/**
+	 * 是一个目录文件。
+	 */
 	NFDIR = 2,
+	/**
+	 * 是一个块设备文件。
+	 */
 	NFBLK = 3,
+	/**
+	 * 是一个字符设备文件。
+	 */
 	NFCHR = 4,
+	/**
+	 * 是一个符号链接。
+	 */
 	NFLNK = 5,
 	NFSOCK = 6,
 	NFBAD = 7,
@@ -134,6 +178,9 @@ enum nfs_ftype {
  * This is the kernel NFS client file handle representation
  */
 #define NFS_MAXFHSIZE		128
+/**
+ * NFS文件生成号。这是为了保证网络安全。
+ */
 struct nfs_fh {
 	unsigned short		size;
 	unsigned char		data[NFS_MAXFHSIZE];

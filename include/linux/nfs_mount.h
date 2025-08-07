@@ -23,6 +23,9 @@
 #define NFS_MOUNT_VERSION	6
 #define NFS_MAX_CONTEXT_LEN	256
 
+/**
+ * 在nfs的mount安装过程时，作为nfs_read_super函数的输入参数
+ */
 struct nfs_mount_data {
 	int		version;		/* 1 */
 	int		fd;			/* 1 */

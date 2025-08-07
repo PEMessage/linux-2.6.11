@@ -43,6 +43,9 @@
 #endif
 
 /* LATCH is used in the interval timer and ftape setup. */
+/**
+ * LATCH产生CLOCK_TICK_RATE和HX的比值。这个值用来对PIT进行编程。
+ */
 #define LATCH  ((CLOCK_TICK_RATE + HZ/2) / HZ)	/* For divider */
 
 /* Suppose we want to devide two numbers NOM and DEN: NOM/DEN, the we can
@@ -105,6 +108,9 @@ static inline u64 get_jiffies_64(void)
  * Do this with "<0" and ">=0" to only test the sign of the result. A
  * good compiler would generate better code (and a really good compiler
  * wouldn't care). Gcc is currently neither.
+ */
+/**
+ * jiffies比较，可以处理32位计数溢出。
  */
 #define time_after(a,b)		\
 	(typecheck(unsigned long, a) && \

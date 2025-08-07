@@ -116,6 +116,9 @@ struct nfs_inode {
 	/*
 	 * NFS file handle
 	 */
+	/**
+	 * 远端NFS文件句柄。
+	 */
 	struct nfs_fh		fh;
 
 	/*

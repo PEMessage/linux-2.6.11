@@ -60,6 +60,10 @@
  */
 #define in_irq()		(hardirq_count())
 #define in_softirq()		(softirq_count())
+/**
+ * 检查current_thread_info()->preempt_count的硬中断和软中断计数器
+ * 只要其中一个值为正数，就产生非0值。
+ */
 #define in_interrupt()		(irq_count())
 
 #if defined(CONFIG_PREEMPT) && !defined(CONFIG_PREEMPT_BKL)

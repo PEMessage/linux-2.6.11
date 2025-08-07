@@ -124,34 +124,54 @@
  * plus raid5d if it is handling it, plus one for each active request
  * on a cached buffer.
  */
-
+/* RAID5中的条带 */
 struct stripe_head {
+	/* 链入RAID5哈希表的节点 */
 	struct stripe_head	*hash_next, **hash_pprev; /* hash pointers */
+	/* 链表RAID5私有数据描述符的链表 */
 	struct list_head	lru;			/* inactive_list or handle_list */
+	/* 所属RAID5私有数据结构 */
 	struct raid5_private_data	*raid_conf;
+	/* 条带编号，实际上是条带在成员磁盘上的起始扇区编号 */
 	sector_t		sector;			/* sector of this row */
+	/* 校验磁盘编号 */
 	int			pd_idx;			/* parity disk index */
+	/* 状态标志 */
 	unsigned long		state;			/* state flags */
+	/* 活动线程请求数目 */
 	atomic_t		count;			/* nr of active thread/requests */
+	/* 保护条带的锁 */
 	spinlock_t		lock;
 	struct r5dev {
+		/* 读写条带的通用块层请求描述符 */
 		struct bio	req;
+		/* ??? */
 		struct bio_vec	vec;
+		/* 用于读写的页面缓冲区 */
 		struct page	*page;
+		/* 在条带上的读写状态 */
 		struct bio	*toread, *towrite, *written;
+		/* 相对于RAID设备的起始扇区编号 */
 		sector_t	sector;			/* sector of this page */
+		/* 驱动状态机标志 */
 		unsigned long	flags;
 	} dev[1]; /* allocated with extra space depending of RAID geometry */
+	/* 条带对应的每一个磁盘 */
 };
 /* Flags */
+/* 缓存页面中包含最新数据 */
 #define	R5_UPTODATE	0	/* page contains current data */
+/* 内嵌通用块层请求已经被提交到IO */
 #define	R5_LOCKED	1	/* IO has been submitted on "req" */
+/* 在towrite链表中的bio覆盖了整个缓存页面 */
 #define	R5_OVERWRITE	2	/* towrite covers whole page */
 /* and some that are internal to handle_stripe */
 #define	R5_Insync	3	/* rdev && rdev->in_sync at start */
+/* 希望对条带进行读写 */
 #define	R5_Wantread	4	/* want to schedule a read */
 #define	R5_Wantwrite	5
 #define	R5_Syncio	6	/* this io need to be accounted as resync io */
+/* 另一个请求也用于条带，因而必须等待 */
 #define	R5_Overlap	7	/* There is a pending overlapping request on this block */
 
 /*
@@ -195,36 +215,60 @@ struct stripe_head {
  * HANDLE gets cleared if stripe_handle leave nothing locked.
  */
  
-
+/* RAID成员磁盘 */
 struct disk_info {
 	mdk_rdev_t	*rdev;
 };
 
+/* RAID5私有数据结构 */
 struct raid5_private_data {
+	/* 链接条带的哈希表，加快扇区查找条带的速度  */
 	struct stripe_head	**stripe_hashtbl;
+	/* 所属的MD设备 */
 	mddev_t			*mddev;
+	/* 备用磁盘，似乎未用 */
 	struct disk_info	*spare;
+	/**
+	 * chunk_size	条带中每块的长度 
+	 * level		RAID级别
+	 * algorithm	设备算法
+	 */
 	int			chunk_size, level, algorithm;
+	/**
+	 * raid_disks	成员磁盘数
+	 */
 	int			raid_disks, working_disks, failed_disks;
+	/* 最大条带数目 */
 	int			max_nr_stripes;
 
+	/* 所有需要被处理的条带链表 */
 	struct list_head	handle_list; /* stripes needing handling */
+	/* 所有延迟处理的条带链表 */
 	struct list_head	delayed_list; /* stripes that have plugged requests */
+	/* 已经调度的条带 */
 	atomic_t		preread_active_stripes; /* stripes with scheduled io */
 
+	/* 高速缓存的名称，用于分配strip_head */
 	char			cache_name[20];
+	/* 分配strip_head的高速缓存 */
 	kmem_cache_t		*slab_cache; /* for allocating stripes */
 	/*
 	 * Free stripes pool
 	 */
+	/* 活动的条带数 */
 	atomic_t		active_stripes;
+	/* 没有被使用的strip_head链表 */
 	struct list_head	inactive_list;
+	/* 等待strip_head的进程，当strip_head不能分配时使用 */
 	wait_queue_head_t	wait_for_stripe;
+	/* 如果两次访问重叠的扇区，则后续访问的进程必须在这个队列上等待。 */
 	wait_queue_head_t	wait_for_overlap;
 	int			inactive_blocked;	/* release of inactive stripes blocked,
 							 * waiting for 25% to be free
 							 */        
+	/* 用于保护链表和哈希表的自旋锁 */							 
 	spinlock_t		device_lock;
+	/* 成员磁盘数组 */
 	struct disk_info	disks[0];
 };
 

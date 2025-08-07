@@ -49,36 +49,58 @@ struct minix_inode {
  * instead of 7+1+1). Also, some previously 8-bit values are
  * now 16-bit. The inode is now 64 bytes instead of 32.
  */
+/* MINIX3.0磁盘上的节点结构 */
 struct minix2_inode {
+	/* 文件系统的类型和模式 */
 	__u16 i_mode;
+	/* 链接数 */
 	__u16 i_nlinks;
+	/* owner id */
 	__u16 i_uid;
+	/* groud id */
 	__u16 i_gid;
+	/* 文件长度，以字节为单位 */
 	__u32 i_size;
+	/* 访问时间 */
 	__u32 i_atime;
+	/* 修改时间 */
 	__u32 i_mtime;
+	/* 创建时间 */
 	__u32 i_ctime;
+	/* 文件所占用的盘上逻辑块号数组，含直接块号，一次间接块号，二次间接块号，三次间接块号 */
 	__u32 i_zone[10];
 };
 
 /*
  * minix super-block data on disk
  */
+/* MINIX磁盘上超级块描述符 */
 struct minix_super_block {
+	/* i节点数 */
 	__u16 s_ninodes;
+	/* 逻辑块数 */
 	__u16 s_nzones;
+	/* i节点位图所占块数 */
 	__u16 s_imap_blocks;
+	/* 逻辑块位图所占块数 */
 	__u16 s_zmap_blocks;
+	/* 数据区中第一个逻辑块号 */
 	__u16 s_firstdatazone;
+	/* log2(磁盘块数/逻辑块) */
 	__u16 s_log_zone_size;
+	/* 最大文件长度 */
 	__u32 s_max_size;
+	/* 文件系统魔数 */
 	__u16 s_magic;
 	__u16 s_state;
 	__u32 s_zones;
 };
 
+/* 磁盘上的目录项结构 */
 struct minix_dir_entry {
+	/* i节点编号 */
 	__u16 inode;
+	/* 名称 */
 	char name[0];
 };
 

@@ -60,6 +60,9 @@ struct statfs;
 /*
  * Special inodes numbers
  */
+/**
+ * 保留的inode号
+ */
 #define	EXT3_BAD_INO		 1	/* Bad blocks inode */
 #define EXT3_ROOT_INO		 2	/* Root inode */
 #define EXT3_BOOT_LOADER_INO	 5	/* Boot loader inode */
@@ -127,15 +130,43 @@ struct statfs;
 /*
  * Structure of a blocks group descriptor
  */
+/**
+ * ext2文件系统的块组描述符
+ * 内存、磁盘中的数据结构是一致的。
+ */
 struct ext3_group_desc
 {
+	/**
+	 * 块位图的块号
+	 */
 	__le32	bg_block_bitmap;		/* Blocks bitmap block */
+	/**
+	 * 索引节点位图的块号
+	 */
 	__le32	bg_inode_bitmap;		/* Inodes bitmap block */
+	/**
+	 * 第一个索引节点表块的块号。
+	 */
 	__le32	bg_inode_table;		/* Inodes table block */
+	/**
+	 * 组中空闲块的个数。
+	 */
 	__le16	bg_free_blocks_count;	/* Free blocks count */
+	/**
+	 * 组中空闲索引节点的个数。
+	 */
 	__le16	bg_free_inodes_count;	/* Free inodes count */
+	/**
+	 * 组中目录的个数
+	 */
 	__le16	bg_used_dirs_count;	/* Directories count */
+	/**
+	 * 用于对齐
+	 */
 	__u16	bg_pad;
+	/**
+	 * NULL，保留
+	 */
 	__le32	bg_reserved[3];
 };
 
@@ -160,25 +191,59 @@ struct ext3_group_desc
 #define	EXT3_IND_BLOCK			EXT3_NDIR_BLOCKS
 #define	EXT3_DIND_BLOCK			(EXT3_IND_BLOCK + 1)
 #define	EXT3_TIND_BLOCK			(EXT3_DIND_BLOCK + 1)
+/**
+ * 数据块指针的个数。
+ */
 #define	EXT3_N_BLOCKS			(EXT3_TIND_BLOCK + 1)
 
 /*
  * Inode flags
  */
+/**
+ * 安全删除。
+ * 在删除文件时，将其数据块中写入随机数。
+ */
 #define	EXT3_SECRM_FL			0x00000001 /* Secure deletion */
+/**
+ * 在删除文件时，并不真的删除，而是放到临时位置。
+ */
 #define	EXT3_UNRM_FL			0x00000002 /* Undelete */
+/**
+ * 文件被压缩存储。
+ */
 #define	EXT3_COMPR_FL			0x00000004 /* Compress file */
+/**
+ * 同步更新磁盘。用于重要的数据文件。
+ */
 #define EXT3_SYNC_FL			0x00000008 /* Synchronous updates */
+/**
+ * 不能被移动位置。
+ * 在反碎片整理时，也不能移动它的位置。
+ * 主要用于启动文件。
+ */
 #define EXT3_IMMUTABLE_FL		0x00000010 /* Immutable file */
+/**
+ * 只能添加而不能修改现有文件的内容。
+ */
 #define EXT3_APPEND_FL			0x00000020 /* writes to file may only append */
+/**
+ * No dump/delete
+ * 即使link count == 0，也不真正删除文件。
+ */
 #define EXT3_NODUMP_FL			0x00000040 /* do not dump file */
 #define EXT3_NOATIME_FL			0x00000080 /* do not update atime */
 /* Reserved for compression usage... */
 #define EXT3_DIRTY_FL			0x00000100
+/**
+ * 存在压缩块，似乎未用。
+ */
 #define EXT3_COMPRBLK_FL		0x00000200 /* One or more compressed clusters */
 #define EXT3_NOCOMPR_FL			0x00000400 /* Don't compress */
 #define EXT3_ECOMPR_FL			0x00000800 /* Compression error */
 /* End compression flags --- maybe not all used */
+/**
+ * 使用了目录索引。
+ */
 #define EXT3_INDEX_FL			0x00001000 /* hash-indexed directory */
 #define EXT3_IMAGIC_FL			0x00002000 /* AFS directory */
 #define EXT3_JOURNAL_DATA_FL		0x00004000 /* file data should be journaled */
@@ -241,22 +306,74 @@ struct ext3_new_group_data {
 /*
  * Structure of an inode on the disk
  */
+/**
+ * 磁盘上存放的ext2索引节点。
+ */
 struct ext3_inode {
+	/**
+	 * 文件类型和访问权限。
+	 *		0:未知文件
+	 *		1:普通文件
+	 *		2:目录
+	 *		3:字符设备
+	 *		4:块设备
+	 *		5:命名管道
+	 *		6:套接字
+	 *		7:符号链接
+	 */
 	__le16	i_mode;		/* File mode */
+	/**
+	 * 拥有者标识符。
+	 */
 	__le16	i_uid;		/* Low 16 bits of Owner Uid */
+	/**
+	 * 以字节为单位的文件长度。
+	 */
 	__le32	i_size;		/* Size in bytes */
+	/**
+	 * 最后一次访问文件的时间。
+	 */
 	__le32	i_atime;	/* Access time */
+	/**
+	 * 索引节点最后改变的时间。
+	 */
 	__le32	i_ctime;	/* Creation time */
+	/**
+	 * 文件内容最后修改的时间。
+	 */
 	__le32	i_mtime;	/* Modification time */
+	/**
+	 * 删除时间。
+	 * 在orphan inode机制中，借用此字段，将orphan inode链接起来。
+	 */
 	__le32	i_dtime;	/* Deletion Time */
+	/**
+	 * 用户组标识符。
+	 */
 	__le16	i_gid;		/* Low 16 bits of Group Id */
+	/**
+	 * 硬链接计数。
+	 */
 	__le16	i_links_count;	/* Links count */
+	/**
+	 * 文件的数据块数。以512B为单位
+	 * 包含已经用数量，以及保留数量。
+	 */
 	__le32	i_blocks;	/* Blocks count */
+	/**
+	 * 文件标志。
+	 */
 	__le32	i_flags;	/* File flags */
+	/**
+	 * 特定的操作系统信息。
+	 */
 	union {
 		struct {
 			__u32  l_i_reserved1;
 		} linux1;
+		/**
+		 * 仅仅HURD使用了此保留值。
+		 */
 		struct {
 			__u32  h_i_translator;
 		} hurd1;
@@ -264,11 +381,33 @@ struct ext3_inode {
 			__u32  m_i_reserved1;
 		} masix1;
 	} osd1;				/* OS dependent 1 */
+	/**
+	 * 指向数据块的指针。
+	 * 前12个块是直接数据块。
+	 * 第13块是一级间接块号。
+	 * 14->二级间接块。
+	 * 15->三级间接块。
+	 */
 	__le32	i_block[EXT3_N_BLOCKS];/* Pointers to blocks */
+	/**
+	 * 文件版本，用于NFS
+	 */
 	__le32	i_generation;	/* File version (for NFS) */
+	/**
+	 * 文件访问控制列表。
+	 */
 	__le32	i_file_acl;	/* File ACL */
+	/**
+	 * 目录访问控制列表。
+	 */
 	__le32	i_dir_acl;	/* Directory ACL */
+	/**
+	 * 最后一个文件片的地址。
+	 */
 	__le32	i_faddr;	/* Fragment address */
+	/**
+	 * 特定的操作系统信息。
+	 */
 	union {
 		struct {
 			__u8	l_i_frag;	/* Fragment number */
@@ -330,6 +469,9 @@ struct ext3_inode {
 /*
  * File system states
  */
+/**
+ * 文件系统状态，正常
+ */
 #define	EXT3_VALID_FS			0x0001	/* Unmounted cleanly */
 #define	EXT3_ERROR_FS			0x0002	/* Errors detected */
 #define	EXT3_ORPHAN_FS			0x0004	/* Orphans being recovered */
@@ -387,39 +529,126 @@ struct ext3_inode {
 /*
  * Behaviour when detecting errors
  */
+/**
+ * 当出现错误时，忽略错误
+ */
 #define EXT3_ERRORS_CONTINUE		1	/* Continue execution */
+/**
+ * 当出现错误时，只能以只读方式mount
+ */
 #define EXT3_ERRORS_RO			2	/* Remount fs read-only */
+/**
+ *  当出现错误时，系统停止
+ */
 #define EXT3_ERRORS_PANIC		3	/* Panic */
 #define EXT3_ERRORS_DEFAULT		EXT3_ERRORS_CONTINUE
 
 /*
  * Structure of the super block
  */
+/**
+ * ext2在磁盘上的超级块。
+ */
 struct ext3_super_block {
+	/**
+	 * 索引结点的总数。
+	 */
 /*00*/	__le32	s_inodes_count;		/* Inodes count */
+	/**
+	 * 以块为单位的文件系统的大小。
+	 */
 	__le32	s_blocks_count;		/* Blocks count */
+	/**
+	 * 保留的块数。
+	 */
 	__le32	s_r_blocks_count;	/* Reserved blocks count */
+	/**
+	 * 空闲块计数器。
+	 */
 	__le32	s_free_blocks_count;	/* Free blocks count */
+	/**
+	 * 空闲索引结点计数器。
+	 */
 /*10*/	__le32	s_free_inodes_count;	/* Free inodes count */
+	/**
+	 * 第一个使用的块号。
+	 */
 	__le32	s_first_data_block;	/* First Data Block */
+	/**
+	 * 块的大小。
+	 */
 	__le32	s_log_block_size;	/* Block size */
+	/**
+	 * 片的大小
+	 */
 	__le32	s_log_frag_size;	/* Fragment size */
+	/**
+	 * 每组中的块数。
+	 */
 /*20*/	__le32	s_blocks_per_group;	/* # Blocks per group */
+	/**
+	 * 每组中的片数。
+	 */
 	__le32	s_frags_per_group;	/* # Fragments per group */
+	/**
+	 * 每组中的索引结点数
+	 */
 	__le32	s_inodes_per_group;	/* # Inodes per group */
+	/**
+	 * 最后一次安装操作的时间。
+	 */
 	__le32	s_mtime;		/* Mount time */
+	/**
+	 * 最后一次写操作的时间。
+	 */
 /*30*/	__le32	s_wtime;		/* Write time */
+	/**
+	 * 安装操作计数器。
+	 */
 	__le16	s_mnt_count;		/* Mount count */
+	/**
+	 * 安装操作的次数。
+	 */
 	__le16	s_max_mnt_count;	/* Maximal mount count */
+	/**
+	 * 魔术字。
+	 */
 	__le16	s_magic;		/* Magic signature */
+	/**
+	 * 状态标志。0已经安装或者没有正常卸载。1被正常卸载。2包含错误。
+	 */
 	__le16	s_state;		/* File system state */
+	/**
+	 * 当检查到错误时的行为。
+	 */
 	__le16	s_errors;		/* Behaviour when detecting errors */
+	/**
+	 * 次版本号。
+	 */
 	__le16	s_minor_rev_level;	/* minor revision level */
+	/**
+	 * 最后一次检查的时间。
+	 */
 /*40*/	__le32	s_lastcheck;		/* time of last check */
+	/**
+	 * 再次检查之间的时间间隔。
+	 */
 	__le32	s_checkinterval;	/* max. time between checks */
+	/**
+	 * 创建文件系统的OS
+	 */
 	__le32	s_creator_os;		/* OS */
+	/**
+	 * 版本号。
+	 */
 	__le32	s_rev_level;		/* Revision level */
+	/**
+	 * 保留块的缺省UID。
+	 */
 /*50*/	__le16	s_def_resuid;		/* Default uid for reserved blocks */
+	/**
+	 * 保留块的缺省用户组ID。
+	 */
 	__le16	s_def_resgid;		/* Default gid for reserved blocks */
 	/*
 	 * These fields are for EXT3_DYNAMIC_REV superblocks only.
@@ -434,22 +663,61 @@ struct ext3_super_block {
 	 * feature set, it must abort and not try to meddle with
 	 * things it doesn't understand...
 	 */
+	/**
+	 * 第一个非保留的索引结点号。
+	 */
 	__le32	s_first_ino;		/* First non-reserved inode */
+	/**
+	 * 磁盘上索引结点结构的大小。
+	 */
 	__le16   s_inode_size;		/* size of inode structure */
+	/**
+	 * 超级块的块组号。
+	 */
 	__le16	s_block_group_nr;	/* block group # of this superblock */
+	/**
+	 * 具有兼容特点的位图。
+	 */
 	__le32	s_feature_compat;	/* compatible feature set */
+	/**
+	 * 具有非兼容特点的位图。
+	 */
 /*60*/	__le32	s_feature_incompat;	/* incompatible feature set */
+	/**
+	 * 只读兼容特点的位图。
+	 */
 	__le32	s_feature_ro_compat;	/* readonly-compatible feature set */
+	/**
+	 * 128位文件系统标识符。
+	 */
 /*68*/	__u8	s_uuid[16];		/* 128-bit uuid for volume */
+	/**
+	 * 卷名
+	 */
 /*78*/	char	s_volume_name[16];	/* volume name */
+	/**
+	 * 最后一个安装点的路径名。
+	 */
 /*88*/	char	s_last_mounted[64];	/* directory where last mounted */
+	/**
+	 * 用于压缩。
+	 */
 /*C8*/	__le32	s_algorithm_usage_bitmap; /* For compression */
 	/*
 	 * Performance hints.  Directory preallocation should only
 	 * happen if the EXT3_FEATURE_COMPAT_DIR_PREALLOC flag is on.
 	 */
+	/**
+	 * 预分配的块数。
+	 */
 	__u8	s_prealloc_blocks;	/* Nr of blocks to try to preallocate*/
+	/**
+	 * 为目录预分配的块数
+	 */
 	__u8	s_prealloc_dir_blocks;	/* Nr to preallocate for dirs */
+	/**
+	 * 按字对齐，补空。
+	 */
 	__u16	s_reserved_gdt_blocks;	/* Per group desc for online growth */
 	/*
 	 * Journaling support valid if EXT3_FEATURE_COMPAT_HAS_JOURNAL set.
@@ -457,6 +725,9 @@ struct ext3_super_block {
 /*D0*/	__u8	s_journal_uuid[16];	/* uuid of journal superblock */
 /*E0*/	__le32	s_journal_inum;		/* inode number of journal file */
 	__le32	s_journal_dev;		/* device number of journal file */
+	/**
+	 * orphan链表头。
+	 */
 	__le32	s_last_orphan;		/* start of list of inodes to delete */
 	__le32	s_hash_seed[4];		/* HTREE hash seed */
 	__u8	s_def_hash_version;	/* Default hash version to use */
@@ -464,6 +735,9 @@ struct ext3_super_block {
 	__u16	s_reserved_word_pad;
 	__le32	s_default_mount_opts;
 	__le32	s_first_meta_bg; 	/* First metablock block group */
+	/**
+	 * 用NULL填充1024字节。 
+	 */
 	__u32	s_reserved[190];	/* Padding to the end of the block */
 };
 
@@ -483,6 +757,9 @@ static inline struct ext3_inode_info *EXT3_I(struct inode *inode)
 #define EXT3_SB(sb)	(sb)
 #endif
 
+/**
+ * 获得下一个orphan inode
+ */
 #define NEXT_ORPHAN(inode) EXT3_I(inode)->i_dtime
 
 /*
@@ -575,6 +852,9 @@ static inline struct ext3_inode_info *EXT3_I(struct inode *inode)
 /*
  * Structure of a directory entry
  */
+/**
+ * ext2文件名的最大长度。
+ */
 #define EXT3_NAME_LEN 255
 
 struct ext3_dir_entry {
@@ -590,11 +870,32 @@ struct ext3_dir_entry {
  * bigger than 255 chars, it's safe to reclaim the extra byte for the
  * file_type field.
  */
+/**
+ * ext2目录项结构。是一个变长结构。但是为了效率的原因，它的长度是4的倍数。
+ * 该结构存放在目录项的数据块内。
+ */
 struct ext3_dir_entry_2 {
+	/**
+	 * 索引结点号
+	 * 0表示已经删除
+	 */
 	__le32	inode;			/* Inode number */
+	/**
+	 * 目录项长度。也可以解释成一个指针。
+	 * 为了性能优化，某些实现可能将此字段补齐。
+	 */
 	__le16	rec_len;		/* Directory entry length */
+	/**
+	 * 文件名长度
+	 */
 	__u8	name_len;		/* Name length */
+	/**
+	 * 文件类型。
+	 */
 	__u8	file_type;
+	/**
+	 * 文件名
+	 */
 	char	name[EXT3_NAME_LEN];	/* File name */
 };
 

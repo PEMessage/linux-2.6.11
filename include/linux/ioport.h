@@ -13,10 +13,17 @@
  * Resources are tree-like, allowing
  * nesting etc..
  */
+/**
+ * 分配给设备驱动程序的端口资源
+ */
 struct resource {
+	/* 资源拥有者的描述 */
 	const char *name;
+	/* 资源范围的开始和结束 */
 	unsigned long start, end;
+	/* 标志 */
 	unsigned long flags;
+	/* 资源树中父亲、兄弟、第一个孩子的指针 */
 	struct resource *parent, *sibling, *child;
 };
 
@@ -31,12 +38,21 @@ struct resource_list {
  */
 #define IORESOURCE_BITS		0x000000ff	/* Bus-specific bits */
 
+/**
+ * 相关的IO区域存在。
+ */
 #define IORESOURCE_IO		0x00000100	/* Resource type */
 #define IORESOURCE_MEM		0x00000200
 #define IORESOURCE_IRQ		0x00000400
 #define IORESOURCE_DMA		0x00000800
 
+/**
+ * 内存区域是可预取的。
+ */
 #define IORESOURCE_PREFETCH	0x00001000	/* No side effects */
+/**
+ * 内存区域是写保护的。
+ */
 #define IORESOURCE_READONLY	0x00002000
 #define IORESOURCE_CACHEABLE	0x00004000
 #define IORESOURCE_RANGELENGTH	0x00008000
@@ -108,6 +124,12 @@ int adjust_resource(struct resource *res, unsigned long start,
 		    unsigned long size);
 
 /* Convenience shorthand with allocation */
+/**
+ * 允许驱动程序程序申明自己需要操作的端口。设备的所有IO地址树可以从/proc/ioports获得
+ * 		first:		起始端口号
+ *		n:			端口个数。
+ *		name:		驱动名称。
+ */
 #define request_region(start,n,name)	__request_region(&ioport_resource, (start), (n), (name))
 #define request_mem_region(start,n,name) __request_region(&iomem_resource, (start), (n), (name))
 #define rename_region(region, newname) do { (region)->name = (newname); } while (0)
@@ -115,6 +137,9 @@ int adjust_resource(struct resource *res, unsigned long start,
 extern struct resource * __request_region(struct resource *, unsigned long start, unsigned long n, const char *name);
 
 /* Compatibility cruft */
+/**
+ * 释放分配的IO端口范围。
+ */
 #define release_region(start,n)	__release_region(&ioport_resource, (start), (n))
 #define check_mem_region(start,n)	__check_region(&iomem_resource, (start), (n))
 #define release_mem_region(start,n)	__release_region(&iomem_resource, (start), (n))

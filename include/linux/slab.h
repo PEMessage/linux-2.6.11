@@ -43,6 +43,10 @@ typedef struct kmem_cache_s kmem_cache_t;
 #define SLAB_CACHE_DMA		0x00004000UL	/* use GFP_DMA memory */
 #define SLAB_MUST_HWCACHE_ALIGN	0x00008000UL	/* force alignment */
 #define SLAB_STORE_USER		0x00010000UL	/* store the last owner for bug hunting */
+/**
+ * 如果创建了slab高速缓存并且该标志被置位，那么会将页框记录为可回收页。
+ * 以满足一些用户态请求。
+ */
 #define SLAB_RECLAIM_ACCOUNT	0x00020000UL	/* track pages allocated to indicate
 						   what is reclaimable later*/
 #define SLAB_PANIC		0x00040000UL	/* panic if kmem_cache_create() fails */
@@ -82,21 +86,34 @@ struct cache_sizes {
 extern struct cache_sizes malloc_sizes[];
 extern void *__kmalloc(size_t, int);
 
+/**
+ * 获得普通高速缓存中的对象。
+ */
 static inline void *kmalloc(size_t size, int flags)
 {
 	if (__builtin_constant_p(size)) {
 		int i = 0;
+		/**
+		 * 找size对应的几何分布大小值。
+		 */
 #define CACHE(x) \
 		if (size <= x) \
 			goto found; \
 		else \
 			i++;
 #include "kmalloc_sizes.h"
+		/**
+		 * 运行到此，说明要分配的对象太大，不能分配这么大的对象。
+		 */
 #undef CACHE
 		{
 			extern void __you_cannot_kmalloc_that_much(void);
 			__you_cannot_kmalloc_that_much();
 		}
+		/**
+		 * 请求分配的size对应的高速缓存描述符索引号为i
+		 * 根据GFP_DMA，在不同的高速缓存描述符中分配对象。
+		 */
 found:
 		return kmem_cache_alloc((flags & GFP_DMA) ?
 			malloc_sizes[i].cs_dmacachep :

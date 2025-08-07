@@ -99,11 +99,23 @@ static inline struct page * rb_insert_page_cache(struct inode * inode,
 
 struct rb_node
 {
+	/**
+	 * 红黑树节点的双亲。
+	 */
 	struct rb_node *rb_parent;
+	/**
+	 * 红黑树节点颜色。
+	 */
 	int rb_color;
 #define	RB_RED		0
 #define	RB_BLACK	1
+	/**
+	 * 右孩子
+	 */
 	struct rb_node *rb_right;
+	/**
+	 * 左孩子
+	 */
 	struct rb_node *rb_left;
 };
 

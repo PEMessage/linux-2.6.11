@@ -8,34 +8,73 @@ struct nfs4_fsid {
 	__u64 minor;
 };
 
+/**
+ * NFS文件属性。
+ */
 struct nfs_fattr {
 	unsigned short		valid;		/* which fields are valid */
 	__u64			pre_size;	/* pre_op_attr.size	  */
 	struct timespec		pre_mtime;	/* pre_op_attr.mtime	  */
 	struct timespec		pre_ctime;	/* pre_op_attr.ctime	  */
+	/**
+	 * 文件的类型：目录、块设备、字符设备、符号连接 
+	 */
 	enum nfs_ftype		type;		/* always use NFSv2 types */
+	/**
+	 * 文件保护位 
+	 */
 	__u32			mode;
+	/**
+	 * 指向这个文件的硬连接数 
+	 */
 	__u32			nlink;
+	/**
+	 * 文件拥有者的用户ID
+	 */
 	__u32			uid;
+	/**
+	 * 这个文件所属的组 
+	 */
 	__u32			gid;
+	/**
+	 * 文件的大小（字节数）
+	 */
 	__u64			size;
 	union {
 		struct {
-			__u32	blocksize;
-			__u32	blocks;
+			__u32	blocksize;/* 每块大小 */
+			__u32	blocks;	  /* 文件所占的块数 */
 		} nfs2;
 		struct {
 			__u64	used;
 		} nfs3;
 	} du;
+	/**
+	 * 如果这个文件是设备文件，它的设备号 
+	 */
 	dev_t			rdev;
+	/**
+	 * 这个文件的文件系统id  
+	 */
 	union {
 		__u64		nfs3;		/* also nfs2 */
 		struct nfs4_fsid nfs4;
 	} fsid_u;
+	/**
+	 * 这个文件的id号 
+	 */
 	__u64			fileid;
+	/** 
+	 * 文件的最后存取时间 
+	 */
 	struct timespec		atime;
+	/**
+	 * 文件的最后修改时间 
+	 */
 	struct timespec		mtime;
+	/** 
+	 * 文件的inode修改时间 
+	 */
 	struct timespec		ctime;
 	__u32			bitmap[2];	/* NFSv4 returned attribute bitmap */
 	__u64			change_attr;	/* NFSv4 change attribute */
@@ -51,6 +90,9 @@ struct nfs_fattr {
 
 /*
  * Info on the file system
+ */
+/**
+ * 远程NFS文件系统信息
  */
 struct nfs_fsinfo {
 	struct nfs_fattr	*fattr; /* Post-op attributes */

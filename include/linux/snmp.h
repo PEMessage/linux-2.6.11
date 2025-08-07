@@ -18,27 +18,106 @@
 enum
 {
 	IPSTATS_MIB_NUM = 0,
+	/**
+	 * 已接收包数目。此字段不区分完整IP包和片段，也包含会被接收及因任何原因会被丢弃的包数目（但是，处于混杂模式下的接口传给ip_rcv的数据帧如果不是要传给进行接收的接口因而被丢弃时，不计算在内）。
+	 * 在ip_rcv的开头处，其值会被更新。
+	 */
 	IPSTATS_MIB_INRECEIVES,			/* InReceives */
+	/**
+	 * 因为IP报头损坏而被丢弃的包数目（片段以及非分段包）。
+	 * 此字段可在ip_rcv和ip_rcv_finish里因为各种理由而被更新。
+	 */
 	IPSTATS_MIB_INHDRERRORS,		/* InHdrErrors */
+	/**
+	 * 在Ipv4没有使用此字段。
+	 * Ipv6以此计算那些因为必须被分段（和Ipv4不同，Ipv6的路由器不可做分段运算）而无法转发的入包数目。
+	 */
 	IPSTATS_MIB_INTOOBIGERRORS,		/* InTooBigErrors */
+	/**
+	 * 当前没有使用。此字段应该计算那些因为本地主机没有有效路径而无法转发的入包。
+	 */
 	IPSTATS_MIB_INNOROUTES,			/* InNoRoutes */
+	/**
+	 * Ipv4当前没有使用。Ipv6以此计算那些已接收到但具有错误地址类型的包数目。
+	 */
 	IPSTATS_MIB_INADDRERRORS,		/* InAddrErrors */
+	/**
+	 * 已接收到但L4协议为未知协议（也就是该协议没有注册的处理函数）的包数目。
+	 * 此字段会在ip_local_deliver_finish里更新。
+	 */
 	IPSTATS_MIB_INUNKNOWNPROTOS,		/* InUnknownProtos */
+	/**
+	 * 包被截断了（也就是不包含完整的IP报头）。Ipv6使用了，但是Ipv4没有使用。
+	 */
 	IPSTATS_MIB_INTRUNCATEDPKTS,		/* InTruncatedPkts */
+	/**
+	 * 被丢弃的包数目。关于这方面的计数器不包含因为报头错误而被丢弃的包，主要是包含内存分配问题而丢弃的包。
+	 * 此字段是在ip_rcv和ip_rcv_finish里面被更新。
+	 */
 	IPSTATS_MIB_INDISCARDS,			/* InDiscards */
+	/**
+	 * 成功到L4协议处理函数的包数目。此字段是在ip_local_deliver_finish里面被更新。
+	 */
 	IPSTATS_MIB_INDELIVERS,			/* InDelivers */
+	/**
+	 * 必须被转发的入包数目。
+	 * 实际上，在包传输前，以及理论上包可能会因某种因素而被丢弃时，关于统计入包的计数器就会被递增。
+	 * 其值会在ip_forward_finish里被更新（对多播而言是在ipmr_forward_finish里）。
+	 */
 	IPSTATS_MIB_OUTFORWDATAGRAMS,		/* OutForwDatagrams */
+	/**
+	 * 系统试着传输的包数目（成功或失败），但不包括转发包。
+	 * 此字段是在ip_output里被更新（对多播而言是在ip_mc_output里）。
+	 */
 	IPSTATS_MIB_OUTREQUESTS,		/* OutRequests */
+	/**
+	 * 传输失败的包数目。此字段会在包括ip_append_data、ip_push_pending_frames、raw_send_hdrinc等函数被更新。
+	 */
 	IPSTATS_MIB_OUTDISCARDS,		/* OutDiscards */
+	/**
+	 * 因为无路径传输而被丢弃的本地产生的包数目。
+	 * 正常来讲，此字段是在ip_route_output_flow失败后而被更新。
+	 * 另外，ip_queue_xmit也是其中一个字段的函数。
+	 */
 	IPSTATS_MIB_OUTNOROUTES,		/* OutNoRoutes */
+	/**
+	 * 重组失败的包数目（因为有些片段没有实时收到）。此值是完整包的数目，而非片段数目。
+	 * 此字段会在ip_expire里更新。而ip_expire是在IP片段因超时而被丢弃时所执行的定时器函数。
+	 * 注意，关于统计重组失败的包数目的计数器的用法和本节开头所提的两份RFC文件里的定义并不相同。
+	 */
 	IPSTATS_MIB_REASMTIMEOUT,		/* ReasmTimeout */
+	/**
+	 * 已接收片段的数目（也就是试着重组的数目）。此字段会在ip_defrag里被更新。
+	 */
 	IPSTATS_MIB_REASMREQDS,			/* ReasmReqds */
+	/**
+	 * 成功重组的包数目。此字段是在ip_frag_reasm里被更新。
+	 */
 	IPSTATS_MIB_REASMOKS,			/* ReasmOKs */
+	/**
+	 * 重组失败的包数目。
+	 * 此字段会在几个地方因不同原因而被更新（__ip_evictor、ip_expire、ip_frag_reasm以及ip_defrag）。
+	 */
 	IPSTATS_MIB_REASMFAILS,			/* ReasmFails */
+	/**
+	 * 已经传输的片段数目
+	 */
 	IPSTATS_MIB_FRAGOKS,			/* FragOKs */
+	/**
+	 * 分段尝试失败次数。此字段是在ip_fragment里被更新（对多播而言是ipmr_queue_xmit）。
+	 */
 	IPSTATS_MIB_FRAGFAILS,			/* FragFails */
+	/**
+	 * 已创建的片段数目。
+	 */
 	IPSTATS_MIB_FRAGCREATES,		/* FragCreates */
+	/**
+	 * 已接收的多播包数目。此字段由ipv6使用，ipv4没有用。
+	 */
 	IPSTATS_MIB_INMCASTPKTS,		/* InMcastPkts */
+	/**
+	 * 已经传输的多播包的数目。目前，ipv4没有使用此字段。
+	 */
 	IPSTATS_MIB_OUTMCASTPKTS,		/* OutMcastPkts */
 	__IPSTATS_MIB_MAX
 };
@@ -51,8 +130,17 @@ enum
 enum
 {
 	ICMP_MIB_NUM = 0,
+	/**
+	 * 已接收ICMP消息的数目。包括ICMP_MIB_INERRORS所记录的信息。
+	 */
 	ICMP_MIB_INMSGS,			/* InMsgs */
+	/**
+	 * 因某种问题而丢弃的ICMP消息数目。Icmp_rcv及表25.9的处理函数碰到截断的ICMP报头时，就会丢弃入消息。
+	 */
 	ICMP_MIB_INERRORS,			/* InErrors */
+	/**
+	 * 以下几个值，保存各种ICMP消息的数目。
+	 */
 	ICMP_MIB_INDESTUNREACHS,		/* InDestUnreachs */
 	ICMP_MIB_INTIMEEXCDS,			/* InTimeExcds */
 	ICMP_MIB_INPARMPROBS,			/* InParmProbs */
@@ -64,8 +152,17 @@ enum
 	ICMP_MIB_INTIMESTAMPREPS,		/* InTimestampReps */
 	ICMP_MIB_INADDRMASKS,			/* InAddrMasks */
 	ICMP_MIB_INADDRMASKREPS,		/* InAddrMaskReps */
+	/**
+	 * 已传输ICMP消息的数目。
+	 */
 	ICMP_MIB_OUTMSGS,			/* OutMsgs */
+	/**
+	 * 出错的ICMP传输数目。没有使用。
+	 */
 	ICMP_MIB_OUTERRORS,			/* OutErrors */
+	/**
+	 * 已经传输的，每ICMP消息类型的计数器。
+	 */
 	ICMP_MIB_OUTDESTUNREACHS,		/* OutDestUnreachs */
 	ICMP_MIB_OUTTIMEEXCDS,			/* OutTimeExcds */
 	ICMP_MIB_OUTPARMPROBS,			/* OutParmProbs */

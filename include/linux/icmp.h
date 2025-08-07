@@ -64,10 +64,21 @@
 #define ICMP_EXC_TTL		0	/* TTL count exceeded		*/
 #define ICMP_EXC_FRAGTIME	1	/* Fragment Reass time exceeded	*/
 
-
+/**
+ * ICMP报头
+ */
 struct icmphdr {
+	/**
+	 * ICMP消息类型。
+	 */
   __u8		type;
+	/**
+	 * ICMP消息代码。
+	 */
   __u8		code;
+	/**
+	 * 校验和。
+	 */
   __u16		checksum;
   union {
 	struct {

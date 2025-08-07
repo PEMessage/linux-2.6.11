@@ -78,6 +78,10 @@
  * 0xffffffff to the register, and reading it back.  Only 
  * 1 bits are decoded.
  */
+/**
+ * PCI设备的IO、内存空间配置基地址。
+ * 对64位总线来说，可以用两个地址代表一个地址空间。
+ */
 #define PCI_BASE_ADDRESS_0	0x10	/* 32 bits */
 #define PCI_BASE_ADDRESS_1	0x14	/* 32 bits [htype 0,1 only] */
 #define PCI_BASE_ADDRESS_2	0x18	/* 32 bits [htype 0 only] */
@@ -107,7 +111,13 @@
 #define PCI_CAPABILITY_LIST	0x34	/* Offset of first capability list entry */
 
 /* 0x35-0x3b are reserved */
+/**
+ * PCI设备从此配置寄存器中获得中断号。
+ */
 #define PCI_INTERRUPT_LINE	0x3c	/* 8 bits */
+/**
+ * 如果设备不支持中断，则该寄存器为0.
+ */
 #define PCI_INTERRUPT_PIN	0x3d	/* 8 bits */
 #define PCI_MIN_GNT		0x3e	/* 8 bits */
 #define PCI_MAX_LAT		0x3f	/* 8 bits */
@@ -505,62 +515,100 @@ typedef int __bitwise pci_power_t;
 /*
  * The pci_dev structure is used to describe PCI devices.
  */
+/**
+ * 每个PCI设备都会分配一个pci_dev实例，就像每个网络设备都会分配一个net_device实例。
+ * 内核使用这个数据结构来引用一个PCI设备。
+ * 注意，这表示一个逻辑设备。一个物理PCI卡在内核中用PCI插槽来表示。
+ */
 struct pci_dev {
+	/* 通过此字段链接到所有PCI设备链表中 */
 	struct list_head global_list;	/* node in list of all PCI devices */
+	/* 通过此字段链接到所属总线的设备链表中 */
 	struct list_head bus_list;	/* node in per-bus list */
+	/* 指向所属总线的描述符 */
 	struct pci_bus	*bus;		/* bus this device is on */
+	/* 对桥设备来说，指向所桥接的下级总线 */
 	struct pci_bus	*subordinate;	/* bus this device bridges to */
 
+	/* 硬件架构相关的特定信息 */
 	void		*sysdata;	/* hook for sys-specific extension */
+	/* 该设备在/proc/bus/pci中的目录项 */
 	struct proc_dir_entry *procent;	/* device entry in /proc/bus/pci */
 
+	/* PCI设备的功能号，即逻辑设备号。高5位为插槽号，低3位为功能号 */
 	unsigned int	devfn;		/* encoded device & function index */
+	/* 配置寄存器中的厂商ID */
 	unsigned short	vendor;
+	/* 配置寄存器中的设备ID */
 	unsigned short	device;
+	/* 配置寄存器中的子系统厂商ID */
 	unsigned short	subsystem_vendor;
+	/* 配置寄存器中的子系统设备ID */
 	unsigned short	subsystem_device;
+	/* 配置寄存器中的设备类域 */
 	unsigned int	class;		/* 3 bytes: (base,sub,prog-if) */
+	/* 配置寄存器中的头类型域的低7位，0表示一般的PCI设备，01表示桥设备 */
 	u8		hdr_type;	/* PCI header type (`multi' flag masked out) */
+	/* ROM基地址寄存器在PCI配置空间中的位置 */
 	u8		rom_base_reg;	/* which config register controls the ROM */
 
+	/* 关联的pci_driver驱动结构 */
 	struct pci_driver *driver;	/* which driver has allocated this device */
+	/* PCI设备的DMA掩码，必要时，内核据此建立弹性缓冲区 */
 	u64		dma_mask;	/* Mask of the bits of bus address this
 					   device implements.  Normally this is
 					   0xffffffff.  You only need to change
 					   this if your device has broken DMA
 					   or supports 64-bit transfers.  */
 
+	/* 当前电源工作状态。取值为D0-D3 */
 	pci_power_t     current_state;  /* Current operating state. In ACPI-speak,
 					   this is D0-D3, D0 being fully functional,
 					   and D3 being off. */
 
+	/* 内嵌的通用设备对象。 */
 	struct	device	dev;		/* Generic device interface */
 
 	/* device is compatible with these IDs */
 	unsigned short vendor_compatible[DEVICE_COUNT_COMPATIBLE];
 	unsigned short device_compatible[DEVICE_COUNT_COMPATIBLE];
 
+	/* 配置空间长度，一般为256，对PCI-X2和PCIe设备来说，为4096 */
 	int		cfg_size;	/* Size of configuration space */
 
 	/*
 	 * Instead of touching interrupt line and base address registers
 	 * directly, use the values stored here. They might be different!
 	 */
+	/* 该设备的中断号 */
 	unsigned int	irq;
+	/**
+	 * 设备的资源数组
+	 * 对于PCI设备，第0-5项表示IO或者内存区间，第6项表示扩展ROM区间。
+	 * 对于桥设备，第0-1项表示资源区间，第2-5项表示IO空间或者内存区间。第6项表示扩展ROM区间。
+	 * 从PCI_BRIDGE_RESOURCES开始的项表示资源窗口。
+	 */
 	struct resource resource[DEVICE_COUNT_RESOURCE]; /* I/O and memory regions + expansion ROMs */
 
 	char *		slot_name;	/* pointer to dev.bus_id */
 
 	/* These fields are used by common fixups */
+	/* 是否为透明PCI桥 */
 	unsigned int	transparent:1;	/* Transparent PCI bridge */
+	/* 是否为多功能桥的一部分 */
 	unsigned int	multifunction:1;/* Part of multi-function device */
 	/* keep track of device state */
 	unsigned int	is_enabled:1;	/* pci_enable_device has been called */
+	/* 是否为总线主控设备 */
 	unsigned int	is_busmaster:1; /* device is busmaster */
-	
+
+	/* 设备被挂起时，保存其配置空间 */
 	u32		saved_config_space[16]; /* config space saved at suspend time */
+	/* 用于在sysfs中为这个PCI设备生成ROM属性文件 */
 	struct bin_attribute *rom_attr; /* attribute descriptor for sysfs ROM entry */
+	/* 是否允许显示ROM属性 */
 	int rom_attr_enabled;		/* has display of the rom attribute been enabled? */
+	/* 用于在sysfs中为这个设备生成资源属性文件 */
 	struct bin_attribute *res_attr[DEVICE_COUNT_RESOURCE]; /* sysfs file for resources */
 #ifdef CONFIG_PCI_NAMES
 #define PCI_NAME_SIZE	96
@@ -592,31 +640,67 @@ struct pci_dev {
   
 #define PCI_REGION_FLAG_MASK 0x0fU	/* These bits of resource flags tell us the PCI region flags */
 
+/**
+ * PCI总线，无论是根总线，还是非根总线，都对应一个pci_bus描述符 
+ * 注意与pci_bus_type的区别
+ */
 struct pci_bus {
+	/**
+	 * 对于根PCI总线，通过此字段加入到全局根总线链表。
+	 * 对于非根PCI总线，通过此字段加入到父总线的链表中。
+	 */
 	struct list_head node;		/* node in list of buses */
+	/**
+	 * 指向该PCI总线的父总线，即PCI桥所在的总线。
+	 */
 	struct pci_bus	*parent;	/* parent bus this bridge is on */
+	/* 本总线的子总线链表头 */
 	struct list_head children;	/* list of child buses */
-	struct list_head devices;	/* list of devices on this bus */
+	/* 本总线的PCI设备链表的表头 */
+	struct list_head devices;	?/* list of devices on this bus */
+	/**
+	 * 对于非根PCI总线，为指向该总线的桥设备的描述符。
+	 * 对于根总线，其值为NULL
+	 */
 	struct pci_dev	*self;		/* bridge device as seen by parent */
+	/**
+	 * 对于根总线，指向ioport_resource或iomem_resource
+	 * 对于非根总线，指向引出这条总线的桥设备的资源窗口数组。
+	 */
 	struct resource	*resource[PCI_BUS_NUM_RESOURCES];
 					/* address space routed to this bus */
 
+	/* 配置空间访问函数 */
 	struct pci_ops	*ops;		/* configuration access functions */
+	/* 系统特定的扩展钩子，用来记录所在根总线特有的信息，往往和架构相关 */
 	void		*sysdata;	/* hook for sys-specific extension */
+	/* 这条PCI总线在/proc/bus/pci中的目录项 */
 	struct proc_dir_entry *procdir;	/* directory entry in /proc/bus/pci */
 
+	/* 总线编号 */
 	unsigned char	number;		/* bus number */
+	/* 桥设备的主编号 */
 	unsigned char	primary;	/* number of primary bridge */
+	/* 桥设备的次编号 */
 	unsigned char	secondary;	/* number of secondary bridge */
+	/* 附属总线的最大编号 */
 	unsigned char	subordinate;	/* max number of subordinate buses */
 
+	/* 总线名称，如PCI Bus #%02x */
 	char		name[48];
 
+	/* 桥设备的控制寄存器 */
 	unsigned short  bridge_ctl;	/* manage NO_ISA/FBB/et al behaviors */
 	unsigned short  pad2;
+	/**
+	 * 对根PCI总线来说，为指向新创建的虚拟设备指针
+	 * 对非根PCI总线来说，为指向引出这条PCI总线的桥设备内嵌的设备指针
+	 */
 	struct device		*bridge;
 	struct class_device	class_dev;
+	/* 用于在sysfs中为这条总线生成IO属性文件 */
 	struct bin_attribute	*legacy_io; /* legacy I/O for this bus */
+	/* 用于在sysfs中为这条总线生成MEM属性文件 */
 	struct bin_attribute	*legacy_mem; /* legacy mem */
 };
 
@@ -636,6 +720,9 @@ struct pci_bus {
 
 /* Low-level architecture-dependent routines */
 
+/**
+ * 访问PCI设备配置寄存器的回调函数。
+ */
 struct pci_ops {
 	int (*read)(struct pci_bus *bus, unsigned int devfn, int where, int size, u32 *val);
 	int (*write)(struct pci_bus *bus, unsigned int devfn, int where, int size, u32 val);
@@ -660,18 +747,47 @@ struct pci_dynids {
 };
 
 struct module;
+/**
+ * pci_driver结构定义了一个PCI设备驱动。
+ */
 struct pci_driver {
 	struct list_head node;
+	/**
+	 * 设备驱动程序的名称
+	 */
 	char *name;
 	struct module *owner;
+	/**
+	 * 内核用这个ID数组关联相应的设备。
+	 */
 	const struct pci_device_id *id_table;	/* must be non-NULL for probe to be called */
+	/**
+	 * 当PCI子系统通过PCI Id数组找到相应的PCI设备驱动时会调用这个函数。
+	 * 这个函数使能相应的硬件，初始化并且注册新设备。
+	 * 在驱动中还会分配其他一些数据结构（比如发送和接收网络报的缓冲区），这些数据结构在设备中会用到。
+	 * 返回0表示该驱动会处理当前设备，否则应当返回负值。
+	 */
 	int  (*probe)  (struct pci_dev *dev, const struct pci_device_id *id);	/* New device inserted */
+	/**
+	 * 当从系统中删除一个设备或者热插扒设备被拔下时，PCI子系统会调用这个函数。
+	 * 这个函数与probe函数相对应，在这个函数中会释放相应的数据结构。
+	 * 网络设备驱动调用这个函数释放设备初始化时分配的I/O端口和I/O内存，释放net_device结构以及辅助的一些数据结构，这些数据结构通常是在probe函数中分配的。
+	 */
 	void (*remove) (struct pci_dev *dev);	/* Device removed (NULL if not a hot-plug capable driver) */
+	/**
+	 * 这个函数在设备在休眠状态和激活状态之间切换时调用。
+	 */
 	int  (*suspend) (struct pci_dev *dev, pm_message_t state);	/* Device suspended */
 	int  (*resume) (struct pci_dev *dev);	                /* Device woken up */
+	/**
+	 * 通过这个函数，设备驱动可以生成电源管理信号来激活或者关闭系统。
+	 */
 	int  (*enable_wake) (struct pci_dev *dev, u32 state, int enable);   /* Enable wake event */
 
 	struct device_driver	driver;
+	/**
+	 * 动态id
+	 */
 	struct pci_dynids dynids;
 };
 
@@ -686,6 +802,9 @@ struct pci_driver {
  * specific device.  The subvendor and subdevice fields will be set to
  * PCI_ANY_ID.
  */
+/**
+ * 创建一个仅和特定厂商和设备ID相匹配的设备ID结构。
+ */
 #define PCI_DEVICE(vend,dev) \
 	.vendor = (vend), .device = (dev), \
 	.subvendor = PCI_ANY_ID, .subdevice = PCI_ANY_ID
@@ -699,6 +818,9 @@ struct pci_driver {
  * specific PCI class.  The vendor, device, subvendor, and subdevice 
  * fields will be set to PCI_ANY_ID.
  */
+/**
+ * 创建一个和特定PCI类相匹配的设备ID结构。
+ */
 #define PCI_DEVICE_CLASS(dev_class,dev_class_mask) \
 	.class = (dev_class), .class_mask = (dev_class_mask), \
 	.vendor = PCI_ANY_ID, .device = PCI_ANY_ID, \
@@ -707,6 +829,9 @@ struct pci_driver {
 /* 
  * pci_module_init is obsolete, this stays here till we fix up all usages of it
  * in the tree.
+ */
+/**
+ * 一些驱动仍然使用pci_module_init注册。
  */
 #define pci_module_init	pci_register_driver
 
@@ -717,6 +842,7 @@ extern struct bus_type pci_bus_type;
 
 /* Do NOT directly access these two variables, unless you are arch specific pci
  * code, or pci core code. */
+/* 所有根总线链表的表头 */
 extern struct list_head pci_root_buses;	/* list of all known PCI buses */
 extern struct list_head pci_devices;	/* list of all devices */
 
@@ -776,6 +902,9 @@ int pci_bus_write_config_byte (struct pci_bus *bus, unsigned int devfn, int wher
 int pci_bus_write_config_word (struct pci_bus *bus, unsigned int devfn, int where, u16 val);
 int pci_bus_write_config_dword (struct pci_bus *bus, unsigned int devfn, int where, u32 val);
 
+/**
+ * 访问PCI设备的配置空间。会将读取到的小端值转换成处理器字节序。
+ */
 static inline int pci_read_config_byte(struct pci_dev *dev, int where, u8 *val)
 {
 	return pci_bus_read_config_byte (dev->bus, dev->devfn, where, val);
@@ -788,6 +917,9 @@ static inline int pci_read_config_dword(struct pci_dev *dev, int where, u32 *val
 {
 	return pci_bus_read_config_dword (dev->bus, dev->devfn, where, val);
 }
+/**
+ * 向配置空间写入数据。
+ */
 static inline int pci_write_config_byte(struct pci_dev *dev, int where, u8 val)
 {
 	return pci_bus_write_config_byte (dev->bus, dev->devfn, where, val);
@@ -977,8 +1109,17 @@ static inline int pci_name_bus(char *name, struct pci_bus *bus)
 
 /* these helpers provide future and backwards compatibility
  * for accessing popular PCI BAR info */
+/**
+ * 返回6个PCI IO区域之一的首地址。
+ */
 #define pci_resource_start(dev,bar)   ((dev)->resource[(bar)].start)
+/**
+ * 返回6个PCI IO区域之一的结束地址。
+ */
 #define pci_resource_end(dev,bar)     ((dev)->resource[(bar)].end)
+/**
+ * 返回PCI IO区域关联的标志。标志值如:IORESOURCE_IO
+ */
 #define pci_resource_flags(dev,bar)   ((dev)->resource[(bar)].flags)
 #define pci_resource_len(dev,bar) \
 	((pci_resource_start((dev),(bar)) == 0 &&	\

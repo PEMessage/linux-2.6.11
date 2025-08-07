@@ -13,20 +13,46 @@
 /*
  * Real Time signals may be queued.
  */
-
+/**
+ * 实时信号队列。
+ */
 struct sigqueue {
+	/**
+	 * 链表
+	 */
 	struct list_head list;
+	/**
+	 * 与挂起信号相应的信号处理程序描述中siglock字段的指针。
+	 */
 	spinlock_t *lock;
+	/**
+	 * 标志？？？
+	 */
 	int flags;
+	/**
+	 * 描述产生信号的事件。
+	 */
 	siginfo_t info;
+	/**
+	 * 存放进程拥有者的每用户数据结构的指针。
+	 */
 	struct user_struct *user;
 };
 
 /* flags values. */
 #define SIGQUEUE_PREALLOC	1
 
+/**
+ * 挂起信号队列。
+ */
 struct sigpending {
+	/**
+	 * 包含sigqueue结构的双向链表。
+	 */
 	struct list_head list;
+	/**
+	 * 挂起信号的位掩码。
+	 */
 	sigset_t signal;
 };
 
@@ -39,6 +65,9 @@ struct sigpending {
 
 /* We don't use <linux/bitops.h> for these because there is no need to
    be atomic.  */
+/**
+ * 把nsig信号在set变量中对应的位置为1
+ */
 static inline void sigaddset(sigset_t *set, int _sig)
 {
 	unsigned long sig = _sig - 1;
@@ -48,6 +77,9 @@ static inline void sigaddset(sigset_t *set, int _sig)
 		set->sig[sig / _NSIG_BPW] |= 1UL << (sig % _NSIG_BPW);
 }
 
+/**
+ * 把nsig信号在set变量中对应的位置为1
+ */
 static inline void sigdelset(sigset_t *set, int _sig)
 {
 	unsigned long sig = _sig - 1;
@@ -57,6 +89,9 @@ static inline void sigdelset(sigset_t *set, int _sig)
 		set->sig[sig / _NSIG_BPW] &= ~(1UL << (sig % _NSIG_BPW));
 }
 
+/**
+ * 返回nsig信号在set变量中对应位的值
+ */
 static inline int sigismember(sigset_t *set, int _sig)
 {
 	unsigned long sig = _sig - 1;
@@ -73,6 +108,9 @@ static inline int sigfindinword(unsigned long word)
 
 #endif /* __HAVE_ARCH_SIG_BITOPS */
 
+/**
+ * 产生nsig信号的位索引
+ */
 #define sigmask(sig)	(1UL << ((sig) - 1))
 
 #ifndef __HAVE_ARCH_SIG_SETOPS
@@ -103,12 +141,21 @@ static inline void name(sigset_t *r, const sigset_t *a, const sigset_t *b) \
 }
 
 #define _sig_or(x,y)	((x) | (y))
+/**
+ * 在sl和sl变量之间执行逻辑或。其结果保存在d中。
+ */
 _SIG_SET_BINOP(sigorsets, _sig_or)
 
 #define _sig_and(x,y)	((x) & (y))
+/**
+ * 在sl和sl变量之间执行逻辑与。其结果保存在d中。
+ */
 _SIG_SET_BINOP(sigandsets, _sig_and)
 
 #define _sig_nand(x,y)	((x) & ~(y))
+/**
+ * 在sl和sl变量之间执行逻辑与非。其结果保存在d中。
+ */
 _SIG_SET_BINOP(signandsets, _sig_nand)
 
 #undef _SIG_SET_BINOP
@@ -138,6 +185,9 @@ _SIG_SET_OP(signotset, _sig_not)
 #undef _SIG_SET_OP
 #undef _sig_not
 
+/**
+ * 把set变量中的位置为0
+ */
 static inline void sigemptyset(sigset_t *set)
 {
 	switch (_NSIG_WORDS) {
@@ -149,7 +199,9 @@ static inline void sigemptyset(sigset_t *set)
 		break;
 	}
 }
-
+/**
+ * 把set变量中的位置为1
+ */
 static inline void sigfillset(sigset_t *set)
 {
 	switch (_NSIG_WORDS) {
@@ -164,21 +216,34 @@ static inline void sigfillset(sigset_t *set)
 
 /* Some extensions for manipulating the low 32 signals in particular.  */
 
+/**
+ * 把mask中的位在set变量中对应的所有位置为1
+ * 仅针对1-32之间的信号
+ */
 static inline void sigaddsetmask(sigset_t *set, unsigned long mask)
 {
 	set->sig[0] |= mask;
 }
-
+/**
+ * 把mask中的位在set变量中对应的所有位置为0
+ * 仅针对1-32之间的信号
+ */
 static inline void sigdelsetmask(sigset_t *set, unsigned long mask)
 {
 	set->sig[0] &= ~mask;
 }
 
+/**
+ * 如果mask在set中任何一位被设置，就返回1，否则返回0。仅适用于编号为1-32的信号。
+ */
 static inline int sigtestsetmask(sigset_t *set, unsigned long mask)
 {
 	return (set->sig[0] & mask) != 0;
 }
 
+/**
+ * 用mask中的位初始化1-32之间的信号。并将高位清0。
+ */
 static inline void siginitset(sigset_t *set, unsigned long mask)
 {
 	set->sig[0] = mask;
@@ -191,6 +256,10 @@ static inline void siginitset(sigset_t *set, unsigned long mask)
 	}
 }
 
+
+/**
+ * 用mask中的位初始化1-32之间的信号。并把高位置1。
+ */
 static inline void siginitsetinv(sigset_t *set, unsigned long mask)
 {
 	set->sig[0] = ~mask;
@@ -204,6 +273,7 @@ static inline void siginitsetinv(sigset_t *set, unsigned long mask)
 }
 
 #endif /* __HAVE_ARCH_SIG_SETOPS */
+
 
 static inline void init_sigpending(struct sigpending *sig)
 {

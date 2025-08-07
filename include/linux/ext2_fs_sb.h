@@ -22,6 +22,9 @@
 /*
  * second extended-fs super-block data in memory
  */
+/**
+ * 内存中的ext2超级块
+ */
 struct ext2_sb_info {
 	unsigned long s_frag_size;	/* Size of a fragment in bytes */
 	unsigned long s_frags_per_block;/* Number of fragments per block */
@@ -31,10 +34,22 @@ struct ext2_sb_info {
 	unsigned long s_inodes_per_group;/* Number of inodes in a group */
 	unsigned long s_itb_per_group;	/* Number of inode table blocks per group */
 	unsigned long s_gdb_count;	/* Number of group descriptor blocks */
+	/**
+	 * 可以放在一个块中的组描述符个数。
+	 */
 	unsigned long s_desc_per_block;	/* Number of group descriptors per block */
 	unsigned long s_groups_count;	/* Number of groups in the fs */
+	/**
+	 * 指向包含磁盘超级块的缓冲区的缓冲区首部。
+	 */
 	struct buffer_head * s_sbh;	/* Buffer containing the super block */
+	/**
+	 * 指向磁盘超级块。
+	 */
 	struct ext2_super_block * s_es;	/* Pointer to the super block in the buffer */
+	/**
+	 * 指向一个包含组描述符的缓冲区首部数据
+	 */
 	struct buffer_head ** s_group_desc;
 	unsigned long  s_mount_opt;
 	uid_t s_resuid;

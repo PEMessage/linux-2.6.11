@@ -30,8 +30,18 @@
 #include <linux/spinlock.h>
 #include <linux/preempt.h>
 
+/**
+ * 顺序锁描述符。
+ */
 typedef struct {
+	/**
+	 * 顺序计数器。每个读者需要在读数据前后两次读顺序计数器。只有在这个值没有变化时
+	 * 才说明读取到的数据是有效的。
+	 */
 	unsigned sequence;
+	/**
+	 * 保护结构的自旋锁。
+	 */
 	spinlock_t lock;
 } seqlock_t;
 
@@ -39,7 +49,13 @@ typedef struct {
  * These macros triggered gcc-3.x compile-time problems.  We think these are
  * OK now.  Be cautious.
  */
+/**
+ * 顺序锁的初始值，表示未上锁状态。
+ */
 #define SEQLOCK_UNLOCKED { 0, SPIN_LOCK_UNLOCKED }
+/**
+ * 将顺序锁初始化成未上锁状态。
+ */
 #define seqlock_init(x)	do { *(x) = (seqlock_t) SEQLOCK_UNLOCKED; } while (0)
 
 
@@ -47,16 +63,33 @@ typedef struct {
  * Acts like a normal spin_lock/unlock.
  * Don't need preempt_disable() because that is in the spin_lock already.
  */
+/**
+ * 为写获得顺序锁。
+ */
 static inline void write_seqlock(seqlock_t *sl)
 {
+	/**
+	 * 获得自旋锁后将顺序值加一。
+	 * 注意，在unlock时也会加一。
+	 * 这样，只要读者和写者交错执行，就会造成读者重复读者，直到写者退出。
+	 * 请再注意spin_lock和spin_unlock的用法。并且spin_lock会禁用抢占。
+	 * 不禁用抢占当然会有问题。
+	 */
 	spin_lock(&sl->lock);
 	++sl->sequence;
 	smp_wmb();			
 }	
 
+/**
+ * 释放写顺序锁
+ */
 static inline void write_sequnlock(seqlock_t *sl) 
 {
 	smp_wmb();
+	/**
+	 * 再将顺序值加一，这样，如果一个控制路径在读内核数据时，写锁重新写入值了。
+	 * 它就会判断到值已经发了变化，会再读一次新值。
+	 */
 	sl->sequence++;
 	spin_unlock(&sl->lock);
 }
@@ -73,6 +106,10 @@ static inline int write_tryseqlock(seqlock_t *sl)
 }
 
 /* Start of read calculation -- fetch last complete writer token */
+/**
+ * 和read_seqretry配对使用。
+ * 它返回当前顺序号。
+ */
 static inline unsigned read_seqbegin(const seqlock_t *sl)
 {
 	unsigned ret = sl->sequence;
@@ -88,9 +125,19 @@ static inline unsigned read_seqbegin(const seqlock_t *sl)
  *    
  * Using xor saves one conditional branch.
  */
+/**
+ * 判断是否有写者改变了顺序锁
+ */
 static inline int read_seqretry(const seqlock_t *sl, unsigned iv)
 {
 	smp_rmb();
+	/**
+	 * iv为奇数，说明在读者调用read_seqbegin后，有写者更新了数据结构。
+	 * 写者调用write_seqlock后，iv一定是奇数。直到write_sequnlock才会变成偶数。
+	 * sl->sequence ^ iv是判断read_seqbegin的值是否发生了变化。
+	 * 要判断这两种情况，是因为：read_seqbegin和write_seqlock的调用顺序不一定。
+	 * 可能是write_seqlock先调用，也可能是read_seqbegin先调用。
+	 */
 	return (iv & 1) | (sl->sequence ^ iv);
 }
 
