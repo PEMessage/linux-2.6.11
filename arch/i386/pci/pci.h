@@ -43,26 +43,43 @@ extern struct pci_ops pci_root_ops;
 
 /* pci-irq.c */
 
+/* PCI插槽的IRQ描述表 */
 struct irq_info {
+	/* 总线，插槽/功能编号 */
 	u8 bus, devfn;			/* Bus, device and function */
 	struct {
+		/* 链路值，依赖于芯片组，0表示未路由 */
 		u8 link;		/* IRQ line ID, chipset dependent, 0=not routed */
+		/* 允许使用的IRQ编号位图 */
 		u16 bitmap;		/* Available IRQs */
 	} __attribute__((packed)) irq[4];
+	/* 插槽编号，0表示集成设备 */
 	u8 slot;			/* Slot number, 0=onboard */
+	/* 保留未用 */
 	u8 rfu;
 } __attribute__((packed));
 
+/* 中断路由表，需要在BIOS ROM中查找该表 */
 struct irq_routing_table {
+	/* 签名，必须是"$PIR" */
 	u32 signature;			/* PIRQ_SIGNATURE should be here */
+	/* 版本号 */
 	u16 version;			/* PIRQ_VERSION */
+	/* 以字节为单位的表长度 */
 	u16 size;			/* Table size in bytes */
+	/* 中断路由器所在总线编号和插槽/功能编号 */
 	u8 rtr_bus, rtr_devfn;		/* Where the interrupt router lies */
+	/* 排它性IRQ位图，为1表示相应输入应当专用 */
 	u16 exclusive_irqs;		/* IRQs devoted exclusively to PCI usage */
+	/* 中断路由器的厂商ID和设备ID */
 	u16 rtr_vendor, rtr_device;	/* Vendor and device ID of interrupt router */
+	/* 未用 */
 	u32 miniport_data;		/* Crap */
+	/* 保留未用 */
 	u8 rfu[11];
+	/* 校验和，必须为0 */
 	u8 checksum;			/* Modulo 256 checksum must give zero */
+	/* 中断路由表项，每个PCI插槽占有一项 */
 	struct irq_info slots[0];
 } __attribute__((packed));
 

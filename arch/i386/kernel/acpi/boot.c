@@ -832,6 +832,9 @@ acpi_process_madt(void)
  *	!0: failure
  */
 
+/**
+ * 在内存中找到RSDP和RSDT/XSDT，从而定位ACPI表。
+ */
 int __init
 acpi_boot_table_init(void)
 {

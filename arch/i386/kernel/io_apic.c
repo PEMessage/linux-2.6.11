@@ -356,6 +356,11 @@ static inline void rotate_irqs_among_cpus(unsigned long useful_load_threshold)
 	return;
 }
 
+/**
+ * 被kirqd内核线程周期性的调用.
+ * 该函数跟踪在最近的时间间隔内,每个CPU接收的中断次数.如果发现负荷最重的CPU和负荷最轻的CPU之间IRQ负载不平衡的问题太严重,
+ * 它要么把IRQ从一个CPU转移支另外一个CPU,要么让所有的IRQ在CPU之间轮转.
+ */
 static void do_irq_balance(void)
 {
 	int i, j;
@@ -2518,6 +2523,9 @@ int io_apic_set_pci_routing (int ioapic, int pin, int irq, int edge_level, int a
 	if (irq >= 16)
 		add_pin_to_irq(irq, ioapic, pin);
 
+	/**
+	 * 将外部设备使用的GSI号与IO APIC中REDIR_TLB表建立联系，并将其结果记录到CPU的vector_irq表中。
+	 */
 	entry.vector = assign_irq_vector(irq);
 
 	apic_printk(APIC_DEBUG, KERN_DEBUG "IOAPIC[%d]: Set PCI routing entry "

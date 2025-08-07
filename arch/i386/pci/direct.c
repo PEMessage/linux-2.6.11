@@ -241,16 +241,28 @@ static int __init pci_check_type2(void)
 	return works;
 }
 
+/**
+ * 直接探测PCI总线。
+ */
 static int __init pci_direct_init(void)
 {
 	struct resource *region, *region2;
 
+	/**
+	 * 如果BOOT在引导内核时加入了"pci=xxx"以禁止conf1类型，则转到type2。
+	 */
 	if ((pci_probe & PCI_PROBE_CONF1) == 0)
 		goto type2;
+	/**
+	 * conf1使用0xCF8和0xCFC两个端口访问设备的配置空间。先申请这两个区域。
+	 */
 	region = request_region(0xCF8, 8, "PCI conf1");
 	if (!region)
 		goto type2;
 
+	/**
+	 * 支持conf1访问。随后使用pci_conf1_read和pci_conf1_write函数访问PCI空间。
+	 */
 	if (pci_check_type1()) {
 		printk(KERN_INFO "PCI: Using configuration type 1\n");
 		raw_pci_ops = &pci_direct_conf1;
@@ -268,6 +280,9 @@ static int __init pci_direct_init(void)
 	if (!region2)
 		goto fail2;
 
+	/**
+	 * 支持conf2访问，这是被x86废弃了的方法。请参考pci_conf2_read和pci_conf2_write函数。
+	 */
 	if (pci_check_type2()) {
 		printk(KERN_INFO "PCI: Using configuration type 2\n");
 		raw_pci_ops = &pci_direct_conf2;

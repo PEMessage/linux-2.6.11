@@ -294,28 +294,50 @@ __asm__(".section .text\n"
 /*
  * Create a kernel thread
  */
+/**
+ * 创建一个新的内核线程
+ * fn-要执行的内核函数的地址。
+ * arg-要传递给函数的参数
+ * flags-一组clone标志
+ */
 int kernel_thread(int (*fn)(void *), void * arg, unsigned long flags)
 {
 	struct pt_regs regs;
 
 	memset(&regs, 0, sizeof(regs));
 
+	/**
+	 * 内核栈地址，为其赋初值。
+	 * do_fork将从这里取值来为新线程初始化CPU。
+	 */
 	regs.ebx = (unsigned long) fn;
 	regs.edx = (unsigned long) arg;
 
 	regs.xds = __USER_DS;
 	regs.xes = __USER_DS;
 	regs.orig_eax = -1;
+	/**
+	 * 把eip设置成kernel_thread_helper，这样，新线程将执行fn函数。如果函数结束，将执行do_exit
+	 * fn的返回值作为do_exit的参数。
+	 */
 	regs.eip = (unsigned long) kernel_thread_helper;
 	regs.xcs = __KERNEL_CS;
 	regs.eflags = X86_EFLAGS_IF | X86_EFLAGS_SF | X86_EFLAGS_PF | 0x2;
 
 	/* Ok, create the new process.. */
+	/**
+	 * CLONE_VM避免复制调用进程的页表。由于新的内核线程无论如何都不会访问用户态地址空间。
+	 * 所以复制只会造成时间和空间的浪费。
+	 * CLONE_UNTRACED标志保证内核线程不会被跟踪，即使调用进程被跟踪。
+	 */
 	return do_fork(flags | CLONE_VM | CLONE_UNTRACED, 0, &regs, 0, NULL, NULL);
 }
 
 /*
  * Free current thread data structures etc..
+ */
+/**
+ * 从进程描述符中分离出与线程相关的数据结构。主要是IO权限位图。
  */
 void exit_thread(void)
 {
@@ -571,24 +593,43 @@ handle_io_bitmap(struct thread_struct *next, struct tss_struct *tss)
  * the task-switch, and shows up in ret_from_fork in entry.S,
  * for example.
  */
+/**
+ * __switch_to函数执行大多数进程切换的工作。
+ * 进程切换的工作开始于switch_to宏，但是它的主要工作还是由__switch_to完成。
+ * 这个函数是寄存器传参的函数。在switch_to宏中，参数已经保存在eax和edx中了.
+ */
 struct task_struct fastcall * __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 {
 	struct thread_struct *prev = &prev_p->thread,
 				 *next = &next_p->thread;
+	/**
+	 * 通过读取current_thread_info()->cpu,获得当前进程在哪个CPU上运行.
+	 * 因为在schedule函数中已经调用了禁用抢占,所以这里可以直接使用smp_processor_id()
+	 */
 	int cpu = smp_processor_id();
 	struct tss_struct *tss = &per_cpu(init_tss, cpu);
 
 	/* never put a printk in __switch_to... printk() calls wake_up*() indirectly */
-
+	/**
+	 * __unlazy_fpu宏有选择的保存FPU\MMX\XMM寄存器的内容.
+	 * 它可能会延后保存这些寄存器的内容.
+	 */
 	__unlazy_fpu(prev_p);
 
 	/*
 	 * Reload esp0, LDT and the page table pointer:
 	 */
+	/**
+	 * 把next_p->thread.esp0装入本地CPU的TSS的esp0字段.
+	 * 任何由sysenter汇编指令产生的从用户态到内核态的特权级转换将把这个地址复制到esp寄存器.
+	 */
 	load_esp0(tss, next);
 
 	/*
 	 * Load the per-thread Thread-Local Storage descriptor.
+	 */
+	/**
+	 * 将next_p进程使用的线程局部存储(TLS)段装入本地CPU的全局描述符表.
 	 */
 	load_TLS(next, cpu);
 
@@ -596,19 +637,33 @@ struct task_struct fastcall * __switch_to(struct task_struct *prev_p, struct tas
 	 * Save away %fs and %gs. No need to save %es and %ds, as
 	 * those are always kernel segments while inside the kernel.
 	 */
+	/**
+	 * 把fs和gs段寄存器的内容分别存放在prev_p->thread.fs和prev_p->thread.gs中.
+	 */
 	asm volatile("movl %%fs,%0":"=m" (*(int *)&prev->fs));
 	asm volatile("movl %%gs,%0":"=m" (*(int *)&prev->gs));
 
 	/*
 	 * Restore %fs and %gs if needed.
 	 */
+	/**
+	 * 不管是prev还是next,只要他们使用了fs和gs,那么,都需要将next中的fs,gs更新到段寄存器.
+	 * 即使next并不使用fs,但是只要prev使用了,也需要更新.这样可以防止next通过fs,gs访问prev的数据.
+	 */
 	if (unlikely(prev->fs | prev->gs | next->fs | next->gs)) {
+		/**
+		 * loadsegment可能会装载一个无效的段寄存器.CPU可能会产生一个异常.
+		 * 但是loadsegment会采用代码修正技术来处理这种情况.
+		 */
 		loadsegment(fs, next->fs);
 		loadsegment(gs, next->gs);
 	}
 
 	/*
 	 * Now maybe reload the debug registers
+	 */
+	/**
+	 * 用debugreg数组的内容dr0..dr7中的6个调试寄存器.这允许定义四个断点区域.
 	 */
 	if (unlikely(next->debugreg[7])) {
 		loaddebug(next, 0);
@@ -620,9 +675,21 @@ struct task_struct fastcall * __switch_to(struct task_struct *prev_p, struct tas
 		loaddebug(next, 7);
 	}
 
+	/**
+	 * 如果必要,更新TSS中的IO位图.当next或者prev有其自己的定制IO权限位图时必须这么做.
+	 */
 	if (unlikely(prev->io_bitmap_ptr || next->io_bitmap_ptr))
+		/**
+		 * handle_io_bitmap并不立即更新位图,而是采用一种懒模式的方法.
+		 */
 		handle_io_bitmap(next, tss);
 
+	/**
+	 * return产生的汇编指令是movl %edi, %eax,ret.
+	 * 这里有保护eax和返回地址的问题.请仔细理解.
+	 * 除了需要理解switch_to宏中的jmp指令外,对于没有产生切换,而是第一次开始执行的进程.
+	 * 它并不会跳回switch_to,而是找到ret_from_fork函数的超始地址.
+	 */
 	return prev_p;
 }
 

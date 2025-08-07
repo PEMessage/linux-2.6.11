@@ -9,6 +9,12 @@
 OUTPUT_FORMAT("elf32-i386", "elf32-i386", "elf32-i386")
 OUTPUT_ARCH(i386)
 ENTRY(startup_32)
+/**
+ * Jiffers是一个32位的计数器。用来记录自系统启动以来产生的节拍数。
+ * 每次时钟中断发生时它便加1。因此它每隔50天就会溢出。
+ * 它的初始值并不是0，而是0xfffb6c20。正好等于-300000。因此系统启动5分钟后，
+ * 这个值就会溢出。这是为了避免粗心的程序直接使用jiffies而不注意到它的溢出。
+ */
 jiffies = jiffies_64;
 SECTIONS
 {

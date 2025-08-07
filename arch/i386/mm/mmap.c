@@ -51,6 +51,9 @@ static inline unsigned long mmap_base(struct mm_struct *mm)
  * This function, called very early during the creation of a new
  * process VM image, sets up which VM layout function to use:
  */
+/**
+ * 选择进程线性区的布局
+ */
 void arch_pick_mmap_layout(struct mm_struct *mm)
 {
 	/*

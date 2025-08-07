@@ -675,6 +675,9 @@ void send_sigtrap(struct task_struct *tsk, struct pt_regs *regs, int error_code)
 /* notification of system call entry/exit
  * - triggered by current->work.syscall_trace
  */
+/**
+ * 被system_call调用，调试进程用于收集关于current的信息。
+ */
 __attribute__((regparm(3)))
 void do_syscall_trace(struct pt_regs *regs, int entryexit)
 {

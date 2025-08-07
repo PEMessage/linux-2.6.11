@@ -45,6 +45,9 @@ static union irq_ctx *softirq_ctx[NR_CPUS];
  * SMP cross-CPU interrupts have their own specific
  * handlers).
  */
+/** 
+ * do_IRQ执行与一个中断相关的所有中断服务例程.
+ */
 fastcall unsigned int do_IRQ(struct pt_regs *regs)
 {	
 	/* high bits used in ret_from_ code */
@@ -54,6 +57,9 @@ fastcall unsigned int do_IRQ(struct pt_regs *regs)
 	u32 *isp;
 #endif
 
+	/**
+	 * irq_enter增加中断嵌套计数
+	 */
 	irq_enter();
 #ifdef CONFIG_DEBUG_STACKOVERFLOW
 	/* Debugging check for stack overflow: is there less than 1KB free? */
@@ -72,6 +78,9 @@ fastcall unsigned int do_IRQ(struct pt_regs *regs)
 
 #ifdef CONFIG_4KSTACKS
 
+	/**
+	 * 如果中断栈使用不同的的栈,就需要切换栈.
+	 */
 	curctx = (union irq_ctx *) current_thread_info();
 	irqctx = hardirq_ctx[smp_processor_id()];
 
@@ -81,14 +90,27 @@ fastcall unsigned int do_IRQ(struct pt_regs *regs)
 	 * handler) we can't do that and just have to keep using the
 	 * current stack (which is the irq stack already after all)
 	 */
+	/**
+	 * 当前在使用内核栈,而不是硬中断请求栈.就需要切换栈
+	 */
 	if (curctx != irqctx) {
 		int arg1, arg2, ebx;
 
 		/* build the stack frame on the IRQ stack */
 		isp = (u32*) ((char*)irqctx + sizeof(*irqctx));
+		/**
+		 * 保存当前进程描述符指针
+		 */
 		irqctx->tinfo.task = curctx->tinfo.task;
+		/**
+		 * 把esp栈指针寄存器的当前值存入irqctx的thread_info(内核oops时使用)
+		 */
 		irqctx->tinfo.previous_esp = current_stack_pointer;
 
+		/**
+		 * 将中断请求栈的栈顶装入esp,isp即为中断栈顶
+		 * 调用完__do_IRQ后,从ebx中恢复esp
+		 */
 		asm volatile(
 			"       xchgl   %%ebx,%%esp      \n"
 			"       call    __do_IRQ         \n"
@@ -97,12 +119,18 @@ fastcall unsigned int do_IRQ(struct pt_regs *regs)
 			:  "0" (irq),   "1" (regs),  "2" (isp)
 			: "memory", "cc", "ecx"
 		);
-	} else
+	} else/* 否则,发生了中断嵌套,不用切换 */
 #endif
 		__do_IRQ(irq, regs);
 
+	/**
+	 * 递减中断计数器并检查是否有可延迟函数
+	 */
 	irq_exit();
 
+	/**
+	 * 结束后,会返回ret_from_intr函数. 
+	 */
 	return 1;
 }
 
@@ -152,6 +180,9 @@ void irq_ctx_init(int cpu)
 
 extern asmlinkage void __do_softirq(void);
 
+/**
+ * 处理挂起的软中断
+ */
 asmlinkage void do_softirq(void)
 {
 	unsigned long flags;
@@ -159,20 +190,44 @@ asmlinkage void do_softirq(void)
 	union irq_ctx *irqctx;
 	u32 *isp;
 
+	/**
+	 * 如果in_interrupt返回真，说明系统要么是处于中断中，要么是禁用了软中断。
+	 * 请注意in_interrupt()的实现代码：preempt_count() & (HARDIRQ_MASK | SOFTIRQ_MASK)
+	 * 它判断当前是否在硬件中断中，或者是否在软中断中。
+	 */
 	if (in_interrupt())
 		return;
 
+	/**
+	 * 在此时需要关闭中断，因为接下来我们需要将判断是否有挂起的中断
+	 * 如果不在关中断的情况下访问这个标志，那么，这个标志就可能被中断程序修改。
+	 * 从另一个方面来说，我们还会在后面切换堆栈，这也需要在关中断中进行。
+	 * 开中断的时机在__do_softirq中。当然，本函数结束时，也会恢复中断标志。
+	 */
 	local_irq_save(flags);
 
-	if (local_softirq_pending()) {
+	if (local_softirq_pending()) {/* 有挂起的软中断 */
+		/**
+		 * 根据配置来确定是否切换堆栈(请注意，本段代码受宏CONFIG_4KSTACKS的控制)。
+		 * 当然，这里用的是softirq_ctx而不是hardirq_ctx来保存当前进程。
+		 */
 		curctx = current_thread_info();
 		irqctx = softirq_ctx[smp_processor_id()];
 		irqctx->tinfo.task = curctx->task;
 		irqctx->tinfo.previous_esp = current_stack_pointer;
 
 		/* build the stack frame on the softirq stack */
+		/**
+		 * isp保存的是软中断栈的栈顶。
+		 * 可以放心的是，软中断在单个CPU上不会重入，而softirq_ctx是每CPU变量
+		 * 所以，在这里我们可以放心的切换栈顶了。
+		 */
 		isp = (u32*) ((char*)irqctx + sizeof(*irqctx));
 
+		/**
+		 * 切换栈到isp，并调用__do_softirq.
+		 * 然后再恢复栈（可能是恢复到中断栈、进程内核栈、内核线程栈）。
+		 */
 		asm volatile(
 			"       xchgl   %%ebx,%%esp     \n"
 			"       call    __do_softirq    \n"

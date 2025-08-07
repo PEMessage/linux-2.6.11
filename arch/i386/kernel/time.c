@@ -73,6 +73,9 @@ int pit_latch_buggy;              /* extern */
 
 #include "do_timer.h"
 
+/**
+ * 自系统启动以来产生的系统节拍的真实数目
+ */
 u64 jiffies_64 = INITIAL_JIFFIES;
 
 EXPORT_SYMBOL(jiffies_64);
@@ -86,11 +89,19 @@ DEFINE_SPINLOCK(rtc_lock);
 DEFINE_SPINLOCK(i8253_lock);
 EXPORT_SYMBOL(i8253_lock);
 
+/**
+ * cur_timer存放了某个定时器对象的地址，该定时器是系统可利用的定时器资源中“最好的”
+ * 在内核初始化期间，select_timer函数设置cur_timer指向适当定时器对象的地址。
+ * 80x86中，依次选择这些定时器作为系统定时器：timer_hpet,timer_pmtmr,timer_tsc,timer_pit,timer_none
+ */
 struct timer_opts *cur_timer = &timer_none;
 
 /*
  * This version of gettimeofday has microsecond resolution
  * and better than microsecond precision on fast x86 machines with TSC.
+ */
+/**
+ * 计算1970/01/01到目前为止走过的秒数及前一秒内走过的微秒数.
  */
 void do_gettimeofday(struct timeval *tv)
 {
@@ -101,8 +112,14 @@ void do_gettimeofday(struct timeval *tv)
 	do {
 		unsigned long lost;
 
+		/**
+		 * 为读获取顺序锁.
+		 */
 		seq = read_seqbegin(&xtime_lock);
 
+		/**
+		 * 调用get_offset方法来获得自上次时钟中断以来所走过的微秒数。
+		 */
 		usec = cur_timer->get_offset();
 		lost = jiffies - wall_jiffies;
 
@@ -118,18 +135,24 @@ void do_gettimeofday(struct timeval *tv)
 			if (lost)
 				usec += lost * max_ntp_tick;
 		}
-		else if (unlikely(lost))
+		else if (unlikely(lost))/* 自上次时钟中断以来，丢失了时钟中断，就为usec加上相应的延时 */
 			usec += lost * (USEC_PER_SEC / HZ);
 
 		sec = xtime.tv_sec;
 		usec += (xtime.tv_nsec / 1000);
-	} while (read_seqretry(&xtime_lock, seq));
+	} while (read_seqretry(&xtime_lock, seq));/* 读顺序锁的典型用法 */
 
+	/**
+	 * 检查微秒字段是否溢出。
+	 */
 	while (usec >= 1000000) {
 		usec -= 1000000;
 		sec++;
 	}
 
+	/**
+	 * 复制xtime的内容到系统调用参数tv指定的用户空间缓冲区中。
+	 */
 	tv->tv_sec = sec;
 	tv->tv_usec = usec;
 }
@@ -218,6 +241,9 @@ EXPORT_SYMBOL(profile_pc);
  * timer_interrupt() needs to keep up the real-time clock,
  * as well as call the "do_timer()" routine every clocktick
  */
+/**
+ * 时钟中断的主处理函数。
+ */
 static inline void do_timer_interrupt(int irq, void *dev_id,
 					struct pt_regs *regs)
 {
@@ -243,6 +269,10 @@ static inline void do_timer_interrupt(int irq, void *dev_id,
 	 * If we have an externally synchronized Linux clock, then update
 	 * CMOS clock accordingly every ~11 minutes. Set_rtc_mmss() has to be
 	 * called as close as possible to 500 ms before the new second starts.
+	 */
+	/**
+	 * 如果使用外部时钟来同步系统时钟，则每隔11分钟调用set_rtc_mmss函数来调整实时时钟。
+	 * 这个特性用来帮助网络中的系统同步它们的时钟。（参见adjtimex系统调用）
 	 */
 	if ((time_status & STA_UNSYNC) == 0 &&
 	    xtime.tv_sec > last_rtc_update + 660 &&
@@ -282,6 +312,9 @@ static inline void do_timer_interrupt(int irq, void *dev_id,
  * Time Stamp Counter value at the time of the timer interrupt, so that
  * we later on can estimate the time of day more exactly.
  */
+/**
+ * PIT或者HPET的中断服务例程。
+ */
 irqreturn_t timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 {
 	/*
@@ -291,13 +324,34 @@ irqreturn_t timer_interrupt(int irq, void *dev_id, struct pt_regs *regs)
 	 * the irq version of write_lock because as just said we have irq
 	 * locally disabled. -arca
 	 */
+	/**
+	 * 使用顺序锁来保护定时相关的内核变量。
+	 * 由于顺序锁并不会阻塞，而且要保护的数据都是一些简单数据，没有指针数据。所以用在这里是安全的。
+	 */
 	write_seqlock(&xtime_lock);
 
+	/**
+	 * 如果有HPET、pmtmr、tsc对象，那么首先检查是否自上次处理以来，有丢失的中断。
+	 * 应该说，丢失中断的情况虽然存在，但是极难遇到。
+	 * 如果有丢失的中断，就更新一下jiffies_64。
+	 * 然后，记录下HPET、pmtmr、tsc的当前值。
+	 * 如果只有timer_pit，那么，mark_offset什么都不会做。
+	 */
 	cur_timer->mark_offset();
- 
+
+ 	/**
+ 	 * 调用do_timer_interrupt，执行时钟中断的主体方法。
+ 	 */
 	do_timer_interrupt(irq, NULL, regs);
 
+	/**
+	 * 释放顺序锁。
+	 */
 	write_sequnlock(&xtime_lock);
+	/**
+	 * 返回IRQ_HANDLED，表示中断已经被处理。
+	 * 这是必须的，否则linux可能会认为遇到了有问题的主板，从而屏蔽相应的中断线。
+	 */
 	return IRQ_HANDLED;
 }
 
@@ -396,25 +450,52 @@ void __init hpet_time_init(void)
 }
 #endif
 
+/**
+ * 系统初始化时，用来建立计时体系结构。请注意对HPET的不同处理。
+ */
 void __init time_init(void)
 {
 #ifdef CONFIG_HPET_TIMER
+	/**
+	 * 由于HPET寄存器是由内存映射的，而time_init是在mem_init之前运行的。
+	 * 所以，对HPET的初始化必须放在mem_init之后。
+	 */
 	if (is_hpet_capable()) {
 		/*
 		 * HPET initialization needs to do memory-mapped io. So, let
 		 * us do a late initialization after mem_init().
 		 */
+		/**
+		 * 延后执行hpet_time_init，这样，在mem_init后，hpet_time_init就可以调用由内存映射的HPET寄存器。
+		 */
 		late_time_init = hpet_time_init;
 		return;
 	}
 #endif
+	/**
+	 * 初始化xtime变量。利用get_cmos_time从实时时钟上读取自UTC午夜以来经过的秒数。
+	 */
 	xtime.tv_sec = get_cmos_time();
+	/**
+	 * 设置xtime的tv_nsec字段。注意这个字段的值与jiffies的初始值的关系。这样二者才能同步。
+	 */
 	xtime.tv_nsec = (INITIAL_JIFFIES % HZ) * (NSEC_PER_SEC / HZ);
+	/**
+	 * 初始化wall_to_monotonic。
+	 */
 	set_normalized_timespec(&wall_to_monotonic,
 		-xtime.tv_sec, -xtime.tv_nsec);
 
+	/**
+	 * 从可用资源中选择一个“最好的”定时器资源，并将cur_timer指向它。
+	 */
 	cur_timer = select_timer();
 	printk(KERN_INFO "Using %s for high-res timesource\n",cur_timer->name);
 
+	/**
+	 * 间接调用setup_irq(0, &irq0);来创建与irq0相应的中断门。
+	 * irq0连接着系统时钟中断源（PIT或者HPET）。
+	 * 从现在开始，timer_interrupt将会在每个节拍到来时被调用。
+	 */
 	time_init_hook();
 }

@@ -355,6 +355,13 @@ static void close_output_buffer_if_we_run_high(struct moveparams *mv)
 }
 
 
+/**
+ * 解压内核映象。
+ * 如果内核映象是低装载的，那么解压后的内核就被放在物理地址0x00100000处
+ * 否则，如果内核映象是高装载的，那么解压后的内核就被放在位于这个压缩映象
+ * 之后的临时缓冲区中。
+ * 然后，解压后的映象就被移动到从物理地址0x00100000开始的最终位置。
+ */
 asmlinkage int decompress_kernel(struct moveparams *mv, void *rmode)
 {
 	real_mode = rmode;

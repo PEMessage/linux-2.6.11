@@ -414,6 +414,11 @@ ENTRY(_stext)
 .section ".bss.page_aligned","w"
 ENTRY(swapper_pg_dir)
 	.fill 1024,4,0
+/**
+ * 0页。当进程需要分配一个0页时，没有必要马上为它分配一个。
+ * 可以用empty_zero_page设置0页的页表项。并将该页设置为只读的。
+ * 当要向0页写数据时，再启动写时复制机制。
+ */
 ENTRY(empty_zero_page)
 	.fill 4096,1,0
 
@@ -456,6 +461,10 @@ idt_descr:
 
 # boot GDT descriptor (later on used by CPU#0):
 	.word 0				# 32 bit align gdt_desc.address
+/**
+ * 在单处理器上只有一个GDT，而在多处理器中，每个CPU对应一个GDT。
+ * 所有GDT都存放在cpu_gdt_table数组中，而所有GDT的地址和它们的大小都在cpu_gdt_table中。
+ */
 cpu_gdt_descr:
 	.word GDT_ENTRIES*8-1
 	.long cpu_gdt_table

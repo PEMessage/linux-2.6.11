@@ -16,6 +16,9 @@ struct pci_bus * __devinit pci_acpi_scan_root(struct acpi_device *device, int do
 }
 
 extern int pci_routeirq;
+/**
+ * 当使能ACPI后，pci子系统将调用此函数。
+ */
 static int __init pci_acpi_init(void)
 {
 	struct pci_dev *dev = NULL;
@@ -27,8 +30,14 @@ static int __init pci_acpi_init(void)
 		return 0;
 
 	printk(KERN_INFO "PCI: Using ACPI for IRQ routing\n");
+	/**
+	 * 更新acpi_irq_penalty表。与IRQ负载平衡相关。
+	 */
 	acpi_irq_penalty_init();
 	pcibios_scanned++;
+	/**
+	 * 使用acpi_pci_irq_enable为当前PCI总线树上的所有PCI设备分配irq号。
+	 */
 	pcibios_enable_irq = acpi_pci_irq_enable;
 
 	if (pci_routeirq) {

@@ -157,34 +157,91 @@ ENTRY(ret_from_fork)
 	# userspace resumption stub bypassing syscall exit tracing
 	ALIGN
 ret_from_exception:
+	/**
+	 * 在中断返回前，handle_IRQ_event调用local_irq_disable禁止了中断
+	 * 所以在中断返回时，不用关中断，但是在异常返回时，需要将中断关闭。
+	 */
 	preempt_stop
 ret_from_intr:
+	/**
+	 * 把当前thread_info半截到ebp中。
+	 */
 	GET_THREAD_INFO(%ebp)
+	/**
+	 * 接下来判断EFLAGS和CS，确定是否运行在用户态，是否是VM模式。
+	 */
 	movl EFLAGS(%esp), %eax		# mix EFLAGS and CS
 	movb CS(%esp), %al
 	testl $(VM_MASK | 3), %eax
+	/**
+	 * 如果是运行在内核态，并且不是VM模式，就跳到resume_kernel，
+	 * 否则跳转到resume_userspace
+	 */
 	jz resume_kernel		# returning to kernel or vm86-space
+/**
+ * 恢复用户态程序的流程入口。
+ */
 ENTRY(resume_userspace)
+	/**
+	 * 不清楚为什么还要禁用中断
+	 */
  	cli				# make sure we don't miss an interrupt
 					# setting need_resched or sigpending
 					# between sampling and the iret
+	/**
+	 * 检查thread_info的flag
+	 */
 	movl TI_flags(%ebp), %ecx
+	/**
+	 * 如果设置了_TIF_WORK_MASK中任何一位，就表示有等待处理的事情
+	 * 跳到work_pending处理这些挂起的事件。
+	 * 否则调用restore_all回到用户态。
+	 */
 	andl $_TIF_WORK_MASK, %ecx	# is there any work to be done on
 					# int/exception return?
 	jne work_pending
 	jmp restore_all
 
 #ifdef CONFIG_PREEMPT
+/**
+ * 当从异常或者中断返回时，需要返回到内核，则跳转到此处。
+ */
 ENTRY(resume_kernel)
+	/**
+	 * 不知道此处为何需要再加cli,如果是从中断或者异常跳转到这里，那么已经是关中断状态了。
+	 * 也许是还有其他地方跳到这里吧。
+	 */
 	cli
+	/**
+	 * 首先判断内核是否允许抢占，请请记住ebp中保存的是thread_info
+	 */
 	cmpl $0,TI_preempt_count(%ebp)	# non-zero preempt_count ?
+	/**
+	 * 当前不允许抢占，就继续执行内核代码。
+	 */
 	jnz restore_all
+	/**
+	 * 否则抢占计数为0，就判断是否有调度需求。
+	 */
 need_resched:
 	movl TI_flags(%ebp), %ecx	# need_resched set ?
+	/**
+	 * 判断是否有调度需求。
+	 */
 	testb $_TIF_NEED_RESCHED, %cl
+	/**
+	 * 不需要调度，就继续执行内核代码。
+	 */
 	jz restore_all
+	/**
+	 * 虽然有调度需求，但是当前是关中断状态，显然，这是不合理的。
+	 * 这时回到用户态做什么呢？timer中断都可能被关了。系统怎么工作？
+	 */
 	testl $IF_MASK,EFLAGS(%esp)     # interrupts off (exception path) ?
 	jz restore_all
+	/**
+	 * preempt_schedule_irq会设置PREEMPT_ACTIVE标志，并把大内核锁暂时设置为-1。然后开中断并调用schedule。
+	 */
 	call preempt_schedule_irq
 	jmp need_resched
 #endif
@@ -262,14 +319,35 @@ restore_all:
 
 	# perform work that needs to be done immediately before resumption
 	ALIGN
+/**
+ * 在回到用户态前，如果有挂起的任务，就处理这些挂起的任务。
+ */
 work_pending:
+	/**
+	 * 检查是否需要重新调度。
+	 */
 	testb $_TIF_NEED_RESCHED, %cl
+	/**
+	 * 不需要重新调度，需要回到用户态，在回到用户态前，先检查待处理的信号
+	 */
 	jz work_notifysig
+/**
+ * 否则，有调度需要，处理调度。
+ */
 work_resched:
+	/**
+	 * 调度一下。可能没有调出去，也可能出去后又调度回来了。
+	 */
 	call schedule
+	/**
+	 * 因为可能是调度出去后，又回来了，所以需要重新关中断。
+	 */
 	cli				# make sure we don't miss an interrupt
 					# setting need_resched or sigpending
 					# between sampling and the iret
+	/**
+	 * 这个处理流程是否有点眼熟呢？？
+	 */
 	movl TI_flags(%ebp), %ecx
 	andl $_TIF_WORK_MASK, %ecx	# is there any work to be done other
 					# than syscall tracing?
@@ -277,6 +355,15 @@ work_resched:
 	testb $_TIF_NEED_RESCHED, %cl
 	jnz work_resched
 
+/**
+ * 好了，运行到这里，说明没有重新调度的要求。
+ * 或者说有调度要求，但是调度出动后，又回来了。
+ * 总之，现在是没有调度要求了。在回到用户态前，处理信号。
+ * 需要注意的是：这个入口有不止从一个地方进入。
+ * 一是从上面两句转入，二是从更上面的jmp跳入。
+ * 接下来有两个事件需要处理：一是信号，二是VM86模式。
+ * 其中VM86模式我们不太关心。信号呢，很复杂的流程，至少需要一章才说清楚。也略过。
+ */
 work_notifysig:				# deal with pending signals and
 					# notify-resume requests
 	testl $VM_MASK, EFLAGS(%esp)
@@ -361,6 +448,11 @@ common_interrupt:
 	call do_IRQ
 	jmp ret_from_intr
 
+/**
+ * 处理器间的中断处理程序的汇编语言代码是由BUILD_INTERRUPT宏产生的。
+ * 它保存寄存器，从栈顶压入向量号减256的值，然后调用高级C函数（其名字就是低级处理程序的名字加前缀smp_）。
+ * 如，CALL_FUNCTION_VECTOR类型的处理器间中断的低级处理程序是call_function_interrupt，它调用smp_call_function_interrupt的高级处理程序。
+ */
 #define BUILD_INTERRUPT(name, nr)	\
 ENTRY(name)				\
 	pushl $nr-256;			\
@@ -372,11 +464,18 @@ ENTRY(name)				\
 /* The include is where all of the SMP etc. interrupts come from */
 #include "entry_arch.h"
 
+/**
+ * 故障-0
+ * 当一个程序试图执行整数被0除操作时产生。
+ */
 ENTRY(divide_error)
 	pushl $0			# no error code
 	pushl $do_divide_error
 	ALIGN
 error_code:
+	/**
+	 * 保存高级C函数会用到的寄存器到栈中，请参见高级C函数的
+	 */
 	pushl %ds
 	pushl %eax
 	xorl %eax, %eax
@@ -387,18 +486,43 @@ error_code:
 	decl %eax			# eax = -1
 	pushl %ecx
 	pushl %ebx
+	/**
+	 * cld指令清eflags方向标志DF，主要用于movs这样的指令。
+	 */
 	cld
 	movl %es, %ecx
+	/**
+	 * 将esp+32处的高级C函数地址载入edi.
+	 */
 	movl ES(%esp), %edi		# get the function address
+	/**
+	 * 将esp+36处的出错码复制到edx中，将将-1写到栈中。
+	 * 请注意前面xorl %eax, %eax和decl %eax一句，它将eax中置-1
+	 * 这样，如果是异常，这个位置就是-1，否则就表示是0x80系统调用。
+	 */
 	movl ORIG_EAX(%esp), %edx	# get the error code
 	movl %eax, ORIG_EAX(%esp)
 	movl %ecx, ES(%esp)
+	/**
+	 * 把用户数据段选择符复制以ds和es寄存器中。
+	 */
 	movl $(__USER_DS), %ecx
 	movl %ecx, %ds
 	movl %ecx, %es
+	/**
+	 * 把内核栈的当前栈顶复制到eax。这是一个内存单元的地址。
+	 * 它的地址是最后被pushl到栈中的值的地址。通过这个地址就可以访问所有保存的寄存器了。
+	 * 也就是pt_regs结构。
+	 */
 	movl %esp,%eax			# pt_regs pointer
+	/**
+	 * 调用高级C函数，被调用函数的参数是通过eax和edx传递。
+	 * 请参见fastcall void do_page_fault(struct pt_regs *regs, unsigned long error_code)
+	 * 其中的fastcall表示由寄存器传参，regs的值在eax，error_code的值在edx中。
+	 */
 	call *%edi
 	jmp ret_from_exception
+
 
 ENTRY(coprocessor_error)
 	pushl $0
@@ -410,6 +534,10 @@ ENTRY(simd_coprocessor_error)
 	pushl $do_simd_coprocessor_error
 	jmp error_code
 
+/**
+ * 故障-7
+ * cr0的TS标志被设置，ESCAPE、MMX或者XMM指令被执行
+ */
 ENTRY(device_not_available)
 	pushl $-1			# mark this as an int
 	SAVE_ALL
@@ -447,6 +575,10 @@ label:						\
 	pushl $__KERNEL_CS;			\
 	pushl $sysenter_past_esp
 
+/**
+ * 陷阱或故障-1
+ * 产生于：设置eflags的TF标志时，或当一条指令或者操作数的地址落在一个活动DEBUG寄存器的范围之内。
+ */
 ENTRY(debug)
 	cmpl $sysenter_entry,(%esp)
 	jne debug_stack_correct
@@ -468,6 +600,10 @@ debug_stack_correct:
  * NMI on the sysenter entry path, but after that we need to
  * check whether we got an NMI on the debug path where the debug
  * fault happened on the sysenter path.
+ */
+/**
+ * 未用-2
+ * 为非屏蔽中断保留(利用NMI引脚的中断)
  */
 ENTRY(nmi)
 	cmpl $sysenter_entry,(%esp)
@@ -505,6 +641,10 @@ nmi_debug_stack_fixup:
 	FIX_STACK(24,nmi_stack_correct, 1)
 	jmp nmi_stack_correct
 
+/**
+ * 陷阱-0
+ * 由int3断点指令(通常由debugger插入)引起
+ */
 ENTRY(int3)
 	pushl $-1			# mark this as an int
 	SAVE_ALL
@@ -515,51 +655,94 @@ ENTRY(int3)
 	jnz restore_all
 	jmp ret_from_exception
 
+/**
+ * 陷阱-4
+ * 当eflags的OF(overflow)标志被设置时，into(检查溢出)指令被执行
+ */
 ENTRY(overflow)
 	pushl $0
 	pushl $do_overflow
 	jmp error_code
 
+/**
+ * 故障-5
+ * 对于有效范围之外的操作数，bound(检查地址边界)指令被执行
+ */
 ENTRY(bounds)
 	pushl $0
 	pushl $do_bounds
 	jmp error_code
 
+/**
+ * 故障-6
+ * CPU执行单元检测到一个无效的操作码。
+ */
 ENTRY(invalid_op)
 	pushl $0
 	pushl $do_invalid_op
 	jmp error_code
 
+/**
+ * 异常中止-9
+ * 因外部的数学协处理器引起的问题（仅适用于80386）
+ */
 ENTRY(coprocessor_segment_overrun)
 	pushl $0
 	pushl $do_coprocessor_segment_overrun
 	jmp error_code
 
+/**
+ * 故障-10
+ * CPU试图让一个上下文切换到无效的TSS进程。
+ */
 ENTRY(invalid_TSS)
 	pushl $do_invalid_TSS
 	jmp error_code
 
+/**
+ * 故障-11
+ * 引用一个不存在的内存段（段描述符的Segment-Present标志被清0）
+ */
 ENTRY(segment_not_present)
 	pushl $do_segment_not_present
 	jmp error_code
 
+/**
+ * 故障-12
+ * 试图超过栈段界限的指令。或者由SS标识的段不在内存。
+ */
 ENTRY(stack_segment)
 	pushl $do_stack_segment
 	jmp error_code
 
+/**
+ * 故障-13
+ * 违反了保护模式下的保护规则之一。
+ */
 ENTRY(general_protection)
 	pushl $do_general_protection
 	jmp error_code
 
+/**
+ * 操作数的地址没有被正确的对齐（例如，一个长整数的地址不是4的倍数）
+ */
 ENTRY(alignment_check)
 	pushl $do_alignment_check
 	jmp error_code
 
+/**
+ * 故障-14
+ * 寻址的页不在内存，相应的页表项为空。或者违反了一种分页保护机制。
+ */
 ENTRY(page_fault)
 	pushl $do_page_fault
 	jmp error_code
 
 #ifdef CONFIG_X86_MCE
+/**
+ * 异常中止-18
+ * 机器检查机制检测到一个CPU错误或者总线错误
+ */
 ENTRY(machine_check)
 	pushl $0
 	pushl machine_check_vector

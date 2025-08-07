@@ -21,15 +21,29 @@
 
 extern asmlinkage void sysenter_entry(void);
 
+/**
+ * 在内核初始化期间，系统中每个CPU都调用enable_sep_cpu。
+ * 它初始化一些寄存器。
+ */
 void enable_sep_cpu(void *info)
 {
 	int cpu = get_cpu();
 	struct tss_struct *tss = &per_cpu(init_tss, cpu);
 
+
 	tss->ss1 = __KERNEL_CS;
 	tss->esp1 = sizeof(struct tss_struct) + (unsigned long) tss;
+	/**
+	 * 把内核代码的段选择符写入MSR_IA32_SYSENTER_CS
+	 */
 	wrmsr(MSR_IA32_SYSENTER_CS, __KERNEL_CS, 0);
+	/**
+	 * tss->esp1中存放的是本地TSS末端地址，将它写入MSR_IA32_SYSENTER_ESP
+	 */
 	wrmsr(MSR_IA32_SYSENTER_ESP, tss->esp1, 0);
+	/**
+	 * 把sysenter_entry地址写入到MSR_IA32_SYSENTER_EIP
+	 */
 	wrmsr(MSR_IA32_SYSENTER_EIP, (unsigned long) sysenter_entry, 0);
 	put_cpu();	
 }

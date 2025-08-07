@@ -24,6 +24,10 @@
 
 #define CALIBRATE_TIME	(5 * 1000020/HZ)
 
+/**
+ * 通过计算一个大约在5ms的时间间隔内所产生的时钟信号的个数，来算出CPU的实际频率。
+ * 为了避免在整数除法中丢失有意义的位，calibrate_tsc的返回值为时钟节拍乘以2^32。
+ */
 unsigned long __init calibrate_tsc(void)
 {
 	mach_prepare_counter();

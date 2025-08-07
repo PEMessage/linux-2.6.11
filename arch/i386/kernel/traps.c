@@ -58,6 +58,10 @@
 
 asmlinkage int system_call(void);
 
+/**
+ * 缺省的局部描述符表。
+ * 共含五项，但是内核仅使用了其中两项：用于iBCS执行文件的调用门和Aolaris/x86可执行文件的调用门。
+ */
 struct desc_struct default_ldt[] = { { 0, 0 }, { 0, 0 }, { 0, 0 },
 		{ 0, 0 }, { 0, 0 } };
 
@@ -293,6 +297,10 @@ bug:
 	printk("Kernel BUG\n");
 }
 
+/**
+ * 内核异常后，为了避免破坏硬盘上的数据，内核不会再运行，而会调用die函数
+ * 它在控制台上打印出所有CPU寄存器的内容。并调用do_exit来终止当前进程
+ */
 void die(const char * str, struct pt_regs * regs, long err)
 {
 	static struct {
@@ -453,6 +461,12 @@ DO_ERROR(11, SIGBUS,  "segment not present", segment_not_present)
 DO_ERROR(12, SIGBUS,  "stack segment", stack_segment)
 DO_ERROR_INFO(17, SIGBUS, "alignment check", alignment_check, BUS_ADRALN, 0)
 
+/**
+ * 一般的,IO位图都在"懒"模式中处理.在开初时,进程TSS的io_bitmap字段要么是0x8000,要么是0x9000.
+ * 当实际访问一个位图时,就会产生一个异常(0x8000,0x9000都不是有效地址).
+ * do_general_protection检查io_bitmap的值,如果是0x8000,就向进程发送SIGSEGV信号.如果是0x9000
+ * 就把进程位图复制到本地CPU的TSS中.并强制再执行一次有缺陷的汇编语言指令.
+ */
 fastcall void do_general_protection(struct pt_regs * regs, long error_code)
 {
 	int cpu = get_cpu();
@@ -616,13 +630,19 @@ static int dummy_nmi_callback(struct pt_regs * regs, int cpu)
 }
  
 static nmi_callback_t nmi_callback = dummy_nmi_callback;
- 
+
+/**
+ * 不可屏蔽中断处理函数
+ */
 fastcall void do_nmi(struct pt_regs * regs, long error_code)
 {
 	int cpu;
 
 	nmi_enter();
 
+	/**
+	 * 获得CPU的逻辑号。NMI功能只在SMP上打开。
+	 */
 	cpu = smp_processor_id();
 	++nmi_count(cpu);
 
@@ -905,15 +925,33 @@ fastcall void do_spurious_interrupt_bug(struct pt_regs * regs,
  * Must be called with kernel preemption disabled (in this case,
  * local interrupts are disabled at the call-site in entry.S).
  */
+/**
+ * Device not available异常处理程序。
+ */
 asmlinkage void math_state_restore(struct pt_regs regs)
 {
 	struct thread_info *thread = current_thread_info();
 	struct task_struct *tsk = thread->task;
 
+	/**
+	 * 首先清除cr0的TS标志。这样，以后执行FPU等指令时才不会继续触发异常。
+	 */
 	clts();		/* Allow maths ops (or we recurse) */
+	/**
+	 * tsk_used_math判断task_struct.flag的PF_USED_MATH.
+	 * 如果这个标志被清0,表示thread.i387中的内容无效。
+	 * 就调用init_fpu初始化thread.i387的内容。
+	 * 当然，它还会设置PF_USED_MATH标志。
+	 */
 	if (!tsk_used_math(tsk))
 		init_fpu(tsk);
+	/**
+	 * restore_fpu根据thread.i387中的内容装载FPU寄存器。
+	 */
 	restore_fpu(tsk);
+	/**
+	 * 最后，设置TS_USEDFPU标志。这样，在下次切换时，才会将寄存器内容保存到thread.i387
+	 */
 	thread->status |= TS_USEDFPU;	/* So we fnsave on switch_to() */
 }
 

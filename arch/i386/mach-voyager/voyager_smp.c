@@ -1034,6 +1034,10 @@ static struct call_data_struct * call_data;
  * previously set up.  This is used to schedule a function for
  * execution on all CPU's - set up the function then broadcast a
  * function_interrupt CPI to come here on each CPU */
+/**
+ * CALL_FUNCTION_VECTOR类型的处理器间中断的处理程序(向量0xfb)。
+ * 发送者CPU将需要执行的函数放在call_data，中断处理程序调用call_data.
+ */
 static void
 smp_call_function_interrupt(void)
 {

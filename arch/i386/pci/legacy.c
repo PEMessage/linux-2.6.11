@@ -33,6 +33,10 @@ static void __devinit pcibios_fixup_peer_bridges(void)
 	}
 }
 
+/**
+ * 完成对PCI总线的枚举，并在proc文件系统和sysfs文件系统中建立相应的结构。
+ * 如果没有使能ACPI机制，则此函数是对PCI总线进行初始化的重要函数。
+ */
 static int __init pci_legacy_init(void)
 {
 	if (!raw_pci_ops) {
@@ -40,10 +44,17 @@ static int __init pci_legacy_init(void)
 		return 0;
 	}
 
+	/**
+	 * 当引入ACPI后，pcibios_scanned默认就是1，本函数将直接返回。
+	 */
 	if (pcibios_scanned++)
 		return 0;
 
 	printk("PCI: Probing PCI hardware\n");
+	/**
+	 * 完成对PCI总线树的枚举。入参为0表示从总线号0开始进行枚举。
+	 * pcibios_scan_root还会调用pci_bus_add_devices将PCI总线上的设备加入到sysfs文件系统中。
+	 */
 	pci_root_bus = pcibios_scan_root(0);
 
 	pcibios_fixup_peer_bridges();

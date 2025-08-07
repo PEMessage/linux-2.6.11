@@ -15,6 +15,9 @@ static unsigned long doublefault_stack[DOUBLEFAULT_STACKSIZE];
 
 #define ptr_ok(x) ((x) > PAGE_OFFSET && (x) < PAGE_OFFSET + 0x1000000)
 
+/**
+ * 异常中止处理程序，当在处理一个异常时，又发生了异常，可能会调用到这里。
+ */
 static void doublefault_fn(void)
 {
 	struct Xgt_desc_struct gdt_desc = {0, 0};

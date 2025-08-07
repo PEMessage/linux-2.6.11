@@ -18,9 +18,18 @@
 	.org	__kernel_vsyscall+32
 	.globl __kernel_sigreturn
 	.type __kernel_sigreturn,@function
+/**
+ * 用户态信号处理函数返回地址，通过这段代码回到内核。
+ */
 __kernel_sigreturn:
 .LSTART_sigreturn:
+	/**
+	 * 丢弃传给信号处理函数的sig参数
+	 */
 	popl %eax		/* XXX does this mean it needs unwind info? */
+	/**
+	 * 调用sigreturn回到内核。sigreturn又会调用sys_sigreturn. 
+	 */
 	movl $__NR_sigreturn, %eax
 	int $0x80
 .LEND_sigreturn:

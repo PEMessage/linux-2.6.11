@@ -102,13 +102,22 @@ static void __init pcibios_allocate_bus_resources(struct list_head *bus_list)
 	struct resource *r, *pr;
 
 	/* Depth-First Search on bus tree */
+	/**
+	 * 遍历pci_root_buses树上的所有pci_bus结构。
+	 */
 	list_for_each_entry(bus, bus_list, node) {
 		if ((dev = bus->self)) {
 			for (idx = PCI_BRIDGE_RESOURCES; idx < PCI_NUM_RESOURCES; idx++) {
 				r = &dev->resource[idx];
 				if (!r->start)
 					continue;
+				/**
+				 * pci_find_parent_resource检查pci_bus使用的资源。
+				 */
 				pr = pci_find_parent_resource(dev, r);
+				/**
+				 * pci_find_parent_resource成功时，返回当前PCI桥的上游PCI桥使用的resource参数。
+				 */
 				if (!pr || request_resource(pr, r) < 0)
 					printk(KERN_ERR "PCI: Cannot allocate resource region %d of bridge %s\n", idx, pci_name(dev));
 			}
@@ -117,6 +126,9 @@ static void __init pcibios_allocate_bus_resources(struct list_head *bus_list)
 	}
 }
 
+/**
+ * 为PCI设备分配地址空间。
+ */
 static void __init pcibios_allocate_resources(int pass)
 {
 	struct pci_dev *dev = NULL;
@@ -124,6 +136,7 @@ static void __init pcibios_allocate_resources(int pass)
 	u16 command;
 	struct resource *r, *pr;
 
+	/* 遍历总线设备链表 */
 	while ((dev = pci_get_device(PCI_ANY_ID, PCI_ANY_ID, dev)) != NULL) {
 		pci_read_config_word(dev, PCI_COMMAND, &command);
 		for(idx = 0; idx < 6; idx++) {
@@ -139,7 +152,13 @@ static void __init pcibios_allocate_resources(int pass)
 			if (pass == disabled) {
 				DBG("PCI: Resource %08lx-%08lx (f=%lx, d=%d, p=%d)\n",
 				    r->start, r->end, r->flags, disabled, pass);
+				/**
+				 * 获得上游PCI桥管理的资源
+				 */
 				pr = pci_find_parent_resource(dev, r);
+				/**
+				 * 调用request_resource为设备分配地地址空间。
+				 */
 				if (!pr || request_resource(pr, r) < 0) {
 					printk(KERN_ERR "PCI: Cannot allocate resource region %d of device %s\n", idx, pci_name(dev));
 					/* We'll assign a new address later */
@@ -162,6 +181,9 @@ static void __init pcibios_allocate_resources(int pass)
 	}
 }
 
+/**
+ * 处理PCI设备使用的ROM空间和PCI设备使用的存储器和IO资源。
+ */
 static int __init pcibios_assign_resources(void)
 {
 	struct pci_dev *dev = NULL;
@@ -191,6 +213,9 @@ static int __init pcibios_assign_resources(void)
 			 *  address was unusable for some reason.
 			 */
 			if (!r->start && r->end)
+				/**
+				 * 对PCI设备使用的存储器和IO资源进行设置。
+				 */
 				pci_assign_resource(dev, idx);
 		}
 
@@ -205,10 +230,21 @@ static int __init pcibios_assign_resources(void)
 	return 0;
 }
 
+/**
+ * 为BIOS中已经分配好的资源保存空间
+ * pci_scan_slot函数已经将pci_dev->resource参数进行了基本的初始化，但是resource->start参数的值并不一定有效。
+ */
 void __init pcibios_resource_survey(void)
 {
 	DBG("PCI: Allocating resources\n");
+	/**
+	 * 检查链表中所有PCI总线树中的所有PCI桥使用的系统资源。
+	 */
 	pcibios_allocate_bus_resources(&pci_root_buses);
+	/**
+	 * pcibios_allocate_resources为当前PCI设备分配地址空间。
+	 * 0表示尽量利用bios中已经配置好的空间(如果没有冲突的话)。
+	 */
 	pcibios_allocate_resources(0);
 	pcibios_allocate_resources(1);
 }

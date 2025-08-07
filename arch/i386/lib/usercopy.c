@@ -103,6 +103,9 @@ __strncpy_from_user(char *dst, const char __user *src, long count)
  * If @count is smaller than the length of the string, copies @count bytes
  * and returns @count.
  */
+/**
+ * 从用户空间复制一个以NULL结束的字符串。
+ */ 
 long
 strncpy_from_user(char *dst, const char __user *src, long count)
 {
@@ -149,6 +152,9 @@ do {									\
  * Returns number of bytes that could not be cleared.
  * On success, this will be zero.
  */
+/**
+ * 用0填充用户窨的一个内存区域
+ */ 
 unsigned long
 clear_user(void __user *to, unsigned long n)
 {
@@ -168,6 +174,9 @@ clear_user(void __user *to, unsigned long n)
  *
  * Returns number of bytes that could not be cleared.
  * On success, this will be zero.
+ */
+/**
+ * 用0填充用户空间的一个内存区域
  */
 unsigned long
 __clear_user(void __user *to, unsigned long n)
@@ -595,6 +604,9 @@ __copy_from_user_ll(void *to, const void __user *from, unsigned long n)
  * Returns number of bytes that could not be copied.
  * On success, this will be zero.
  */
+/**
+ * 把任意大小的块复制到用户空间
+ */
 unsigned long
 copy_to_user(void __user *to, const void *from, unsigned long n)
 {
@@ -621,6 +633,9 @@ EXPORT_SYMBOL(copy_to_user);
  *
  * If some data could not be copied, this function will pad the copied
  * data to the requested size using zero bytes.
+ */
+/**
+ * 从用户空间复制任意大小的块。
  */
 unsigned long
 copy_from_user(void *to, const void __user *from, unsigned long n)

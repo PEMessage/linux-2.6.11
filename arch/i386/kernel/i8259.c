@@ -40,6 +40,9 @@
 
 DEFINE_SPINLOCK(i8259A_lock);
 
+/**
+ * 应答8259中断。
+ */
 static void end_8259A_irq (unsigned int irq)
 {
 	if (!(irq_desc[irq].status & (IRQ_DISABLED|IRQ_INPROGRESS)) &&
@@ -102,6 +105,9 @@ void disable_8259A_irq(unsigned int irq)
 	spin_unlock_irqrestore(&i8259A_lock, flags);
 }
 
+/**
+ * 启用8259A相应的IRQ线。
+ */
 void enable_8259A_irq(unsigned int irq)
 {
 	unsigned int mask = ~(1 << irq);

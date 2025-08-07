@@ -1066,12 +1066,18 @@ int mp_register_gsi (u32 gsi, int edge_level, int active_high_low)
 		return gsi;
 #endif
 
+	/**
+	 * 找到GSI对应的IO APIC。
+	 */
 	ioapic = mp_find_ioapic(gsi);
 	if (ioapic < 0) {
 		printk(KERN_WARNING "No IOAPIC for GSI %u\n", gsi);
 		return gsi;
 	}
 
+	/**
+	 * 找到该IO APIC上对应的引脚。
+	 */
 	ioapic_pin = gsi - mp_ioapic_routing[ioapic].gsi_base;
 
 	if (ioapic_renumber_irq)
@@ -1098,6 +1104,9 @@ int mp_register_gsi (u32 gsi, int edge_level, int active_high_low)
 
 	mp_ioapic_routing[ioapic].pin_programmed[idx] |= (1<<bit);
 
+	/**
+	 * 设置IO APIC寄存器。
+	 */
 	io_apic_set_pci_routing(ioapic, ioapic_pin, gsi,
 		    edge_level == ACPI_EDGE_SENSITIVE ? 0 : 1,
 		    active_high_low == ACPI_ACTIVE_HIGH ? 0 : 1);

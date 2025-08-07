@@ -65,6 +65,9 @@ void ack_bad_irq(unsigned int irq)
 	ack_APIC_irq();
 }
 
+/**
+ * 根据第239号向量和低级中断处理程序apic_timer_interrupt()的地址设置IDT的中断门。
+ */
 void __init apic_intr_init(void)
 {
 #ifdef CONFIG_SMP
@@ -958,7 +961,11 @@ static void __init setup_APIC_timer(unsigned int clocks)
  * And we want to have irqs off anyways, no accidental
  * APIC irq that way.
  */
-
+/**
+ * 用于引导CPU
+ * 通过正在启动的CPU的本地APIC来计算在一个节拍内收到了多少个总线时钟信号。
+ * 这个确切的值被用来对本地所有APIC编程。并由此在每个节拍产生一次本地时钟中断。
+ */
 int __init calibrate_APIC_clock(void)
 {
 	unsigned long long t1 = 0, t2 = 0;
@@ -1107,11 +1114,17 @@ int setup_profiling_timer(unsigned int multiplier)
  * multiplier is 1 and it can be changed by writing the new multiplier
  * value into /proc/profile.
  */
-
+/**
+ * smp_local_timer_interrupt函数执行每个CPU的计时活动。
+ */
 inline void smp_local_timer_interrupt(struct pt_regs * regs)
 {
 	int cpu = smp_processor_id();
 
+	/**
+	 * 监管内核代码。它采用非常简单的蒙特卡洛算法。
+	 * 这样，开发者可以发现内核经常运行在什么地方，以对系统进行改进。
+	 */
 	profile_tick(CPU_PROFILING, regs);
 	if (--per_cpu(prof_counter, cpu) <= 0) {
 		/*
@@ -1133,6 +1146,9 @@ inline void smp_local_timer_interrupt(struct pt_regs * regs)
 		}
 
 #ifdef CONFIG_SMP
+		/**
+		 * 检查当前进程运行的时间并更新一些本地CPU统计计数。
+		 */
 		update_process_times(user_mode(regs));
 #endif
 	}
@@ -1157,19 +1173,33 @@ inline void smp_local_timer_interrupt(struct pt_regs * regs)
  * [ if a single-CPU system runs an SMP kernel then we call the local
  *   interrupt as well. Thus we cannot inline the local irq ... ]
  */
-
+/**
+ * 本地时钟中断处理函数的高级中断处理函数
+ */
 fastcall void smp_apic_timer_interrupt(struct pt_regs *regs)
 {
+	/**
+	 * 获得CPU逻辑号
+	 */
 	int cpu = smp_processor_id();
 
 	/*
 	 * the NMI deadlock-detector uses this.
+	 */
+	/**
+	 * 使irq_stat的对应项的apic_timer_irqs加一。
+	 * 这个值不停的加一，可以使看门狗中断在do_nmi中检测这个值。
+	 * 如果看门狗发现这个值没有变化，那么表示系统可能遇到死锁或是其他问题了。
+	 * 总之，这不是一个好事，说明时钟中断都出现问题，系统信息将会被转储，以使开发者有机会发现错误。
 	 */
 	irq_stat[cpu].apic_timer_irqs++;
 
 	/*
 	 * NOTE! We'd better ACK the irq immediately,
 	 * because timer handling can be slow.
+	 */
+	/**
+	 * 应答本地APIC上的中断
 	 */
 	ack_APIC_irq();
 	/*
@@ -1178,6 +1208,10 @@ fastcall void smp_apic_timer_interrupt(struct pt_regs *regs)
 	 * interrupt lock, which is the WrongThing (tm) to do.
 	 */
 	irq_enter();
+	/**
+	 * 调用smp_local_timer_interrupt函数执行每个CPU的计时活动。
+	 * 主要是调用profile_tick和update_process_times。
+	 */
 	smp_local_timer_interrupt(regs);
 	irq_exit();
 }

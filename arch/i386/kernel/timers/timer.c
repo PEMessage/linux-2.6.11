@@ -49,6 +49,10 @@ void clock_fallback(void)
 /* iterates through the list of timers, returning the first 
  * one that initializes successfully.
  */
+/**
+ * 设置cur_timer指向适当定时器对象的地址。它从可用定时器中选择“最好的”定时器作为当前定时器。
+ * 优先选择HPET->ACPI->TSC->PIT
+ */
 struct timer_opts* __init select_timer(void)
 {
 	int i = 0;

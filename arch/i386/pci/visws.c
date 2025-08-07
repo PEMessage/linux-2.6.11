@@ -87,6 +87,9 @@ void __init pcibios_update_irq(struct pci_dev *dev, int irq)
 	pci_write_config_byte(dev, PCI_INTERRUPT_LINE, irq);
 }
 
+/**
+ * 使能ACPI后，PCI初始化子系统将调用此函数。
+ */
 static int __init pcibios_init(void)
 {
 	/* The VISWS supports configuration access type 1 only */
@@ -103,6 +106,9 @@ static int __init pcibios_init(void)
 	pci_scan_bus(pci_bus0, &pci_root_ops, NULL);
 	pci_scan_bus(pci_bus1, &pci_root_ops, NULL);
 	pci_fixup_irqs(visws_swizzle, visws_map_irq);
+	/**
+	 * 检查当前处理器系统的所有PCI设备的BAR空间，并不会操作PCI设备的BAR寄存器，而只是检查所有PCI设备的pci_dev->resource是否合法。
+	 */
 	pcibios_resource_survey();
 	return 0;
 }

@@ -472,6 +472,9 @@ int pcibios_set_irq_routing(struct pci_dev *dev, int pin, int irq)
 	return !(ret & 0xff00);
 }
 
+/**
+ * 目前能通过bios探测PCI。
+ */
 static int __init pci_pcbios_init(void)
 {
 	if ((pci_probe & PCI_PROBE_BIOS) 

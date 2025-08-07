@@ -21,6 +21,11 @@ struct dma_coherent_mem {
 	unsigned long	*bitmap;
 };
 
+/**
+ * 为了分配缓冲区和建立一致性DMA映射，内核提供了依赖体系结构的pci_alloc_consistent和dma_alloc_coherent
+ * 它们均返回新缓冲区的线性地址和总线地址。
+ * 在80x86中，它们返回新缓冲区的线性地址和物理地址。
+ */
 void *dma_alloc_coherent(struct device *dev, size_t size,
 			   dma_addr_t *dma_handle, int gfp)
 {
@@ -55,6 +60,10 @@ void *dma_alloc_coherent(struct device *dev, size_t size,
 	return ret;
 }
 
+/**
+ * 为了分配缓冲区和建立一致性DMA映射，内核提供了依赖体系结构的pci_alloc_consistent和dma_alloc_coherent
+ * 释放映射和缓冲区使用pci_free_consistent和dma_free_coherent
+ */
 void dma_free_coherent(struct device *dev, size_t size,
 			 void *vaddr, dma_addr_t dma_handle)
 {
