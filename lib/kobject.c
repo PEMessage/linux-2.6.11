@@ -119,6 +119,9 @@ char *kobject_get_path(struct kobject *kobj, int gfp_mask)
  *	kobject_init - initialize object.
  *	@kobj:	object in question.
  */
+/**
+ * 部分初始化kobject对象。
+ */
 void kobject_init(struct kobject * kobj)
 {
 	kref_init(&kobj->kref);
@@ -151,7 +154,10 @@ static void unlink(struct kobject * kobj)
  *	kobject_add - add an object to the hierarchy.
  *	@kobj:	object.
  */
-
+/**
+ * 将kobject对象加入到kset中。
+ * 需要首先将kobject的kset成员指向目标kset。
+ */
 int kobject_add(struct kobject * kobj)
 {
 	int error = 0;
@@ -196,7 +202,9 @@ int kobject_add(struct kobject * kobj)
  *	kobject_register - initialize and add an object.
  *	@kobj:	object in question.
  */
-
+/**
+ * 初始化并添加一个对象到kset中。并将其相应的目录增加到sysfs文件系统中。
+ */
 int kobject_register(struct kobject * kobj)
 {
 	int error = 0;
@@ -223,7 +231,9 @@ int kobject_register(struct kobject * kobj)
  *	string that @kobj->k_name points to. Otherwise, use the static 
  *	@kobj->name array.
  */
-
+/**
+ * 设置kobject对象的名称。不要直接使用字符串复制。
+ */
 int kobject_set_name(struct kobject * kobj, const char * fmt, ...)
 {
 	int error = 0;
@@ -298,7 +308,9 @@ int kobject_rename(struct kobject * kobj, char *new_name)
  *	kobject_del - unlink kobject from hierarchy.
  * 	@kobj:	object.
  */
-
+/**
+ * 从kset中删除kobject。
+ */
 void kobject_del(struct kobject * kobj)
 {
 	kobject_hotplug(kobj, KOBJ_REMOVE);
@@ -310,7 +322,9 @@ void kobject_del(struct kobject * kobj)
  *	kobject_unregister - remove object from hierarchy and decrement refcount.
  *	@kobj:	object going away.
  */
-
+/**
+ * 从kset中删除kobject并递减kobject的引用计数。
+ */
 void kobject_unregister(struct kobject * kobj)
 {
 	pr_debug("kobject %s: unregistering\n",kobject_name(kobj));
@@ -322,7 +336,9 @@ void kobject_unregister(struct kobject * kobj)
  *	kobject_get - increment refcount for object.
  *	@kobj:	object.
  */
-
+/**
+ * 增加kobject对象的引用计数。
+ */
 struct kobject * kobject_get(struct kobject * kobj)
 {
 	if (kobj)
@@ -363,6 +379,9 @@ static void kobject_release(struct kref *kref)
  *	@kobj:	object.
  *
  *	Decrement the refcount, and if 0, call kobject_cleanup().
+ */
+/**
+ * 减小kobject对象的引用计数。
  */
 void kobject_put(struct kobject * kobj)
 {
@@ -411,6 +430,9 @@ int kset_add(struct kset * k)
  *	@k:	kset.
  */
 
+/**
+ * 注册kset
+ */
 int kset_register(struct kset * k)
 {
 	kset_init(k);
@@ -423,6 +445,9 @@ int kset_register(struct kset * k)
  *	@k:	kset.
  */
 
+/**
+ * 反注册kset
+ */
 void kset_unregister(struct kset * k)
 {
 	kobject_unregister(&k->kobj);
@@ -455,7 +480,6 @@ struct kobject * kset_find_obj(struct kset * kset, const char * name)
 	up_read(&kset->subsys->rwsem);
 	return ret;
 }
-
 
 void subsystem_init(struct subsystem * s)
 {

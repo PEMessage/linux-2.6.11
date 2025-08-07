@@ -18,6 +18,7 @@
  * kref_init - initialize object.
  * @kref: object in question.
  */
+/* 初始化引用计数为1 */
 void kref_init(struct kref *kref)
 {
 	atomic_set(&kref->refcount,1);
@@ -27,6 +28,7 @@ void kref_init(struct kref *kref)
  * kref_get - increment refcount for object.
  * @kref: object.
  */
+/* 递增引用计数 */
 void kref_get(struct kref *kref)
 {
 	WARN_ON(!atomic_read(&kref->refcount));
@@ -43,6 +45,7 @@ void kref_get(struct kref *kref)
  *
  * Decrement the refcount, and if 0, call release().
  */
+/* 递减引用计数，如果为0，则调用释放函数 */
 void kref_put(struct kref *kref, void (*release) (struct kref *kref))
 {
 	WARN_ON(release == NULL);
