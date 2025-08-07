@@ -9,9 +9,15 @@
 #include <linux/config.h>
 #include <asm/processor.h>
 
+/**
+ * 8254芯片的内部振荡频率
+ */
 #ifdef CONFIG_X86_ELAN
 #  define CLOCK_TICK_RATE 1189200 /* AMD Elan has different frequency! */
 #else
+/**
+ * CLOCK_TICK_RATE产生的值为1193182。这是8254芯片的内部振荡频率。
+ */
 #  define CLOCK_TICK_RATE 1193182 /* Underlying HZ */
 #endif
 

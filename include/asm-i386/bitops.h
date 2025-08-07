@@ -39,6 +39,9 @@
  * Note that @nr may be almost arbitrarily large; this function is not
  * restricted to acting on a single-word quantity.
  */
+/**
+ * 设置*addr的第nr位
+ */
 static inline void set_bit(int nr, volatile unsigned long * addr)
 {
 	__asm__ __volatile__( LOCK_PREFIX
@@ -73,6 +76,9 @@ static inline void __set_bit(int nr, volatile unsigned long * addr)
  * not contain a memory barrier, so if it is used for locking purposes,
  * you should call smp_mb__before_clear_bit() and/or smp_mb__after_clear_bit()
  * in order to ensure changes are visible on other processors.
+ */
+/**
+ * 清*addr的第nr位
  */
 static inline void clear_bit(int nr, volatile unsigned long * addr)
 {
@@ -119,6 +125,9 @@ static inline void __change_bit(int nr, volatile unsigned long * addr)
  * Note that @nr may be almost arbitrarily large; this function is not
  * restricted to acting on a single-word quantity.
  */
+/**
+ * 转换*addr的第nr位，并返回它的原值。
+ */
 static inline void change_bit(int nr, volatile unsigned long * addr)
 {
 	__asm__ __volatile__( LOCK_PREFIX
@@ -135,6 +144,9 @@ static inline void change_bit(int nr, volatile unsigned long * addr)
  * This operation is atomic and cannot be reordered.  
  * It may be reordered on other architectures than x86.
  * It also implies a memory barrier.
+ */
+/**
+ * 设置*addr的第nr位，并返回它的原值
  */
 static inline int test_and_set_bit(int nr, volatile unsigned long * addr)
 {
@@ -175,6 +187,9 @@ static inline int __test_and_set_bit(int nr, volatile unsigned long * addr)
  * This operation is atomic and cannot be reordered.
  * It can be reorderdered on other architectures other than x86.
  * It also implies a memory barrier.
+ */
+/**
+ * 清*addr的第nr位，并返回它的原值
  */
 static inline int test_and_clear_bit(int nr, volatile unsigned long * addr)
 {
@@ -227,6 +242,9 @@ static inline int __test_and_change_bit(int nr, volatile unsigned long *addr)
  * This operation is atomic and cannot be reordered.  
  * It also implies a memory barrier.
  */
+/**
+ * 转换*addr的第nr位，并返回它的原值
+ */
 static inline int test_and_change_bit(int nr, volatile unsigned long* addr)
 {
 	int oldbit;
@@ -263,6 +281,9 @@ static inline int variable_test_bit(int nr, const volatile unsigned long * addr)
 	return oldbit;
 }
 
+/**
+ * 返回*addr的第nr位的值
+ */
 #define test_bit(nr,addr) \
 (__builtin_constant_p(nr) ? \
  constant_test_bit((nr),(addr)) : \

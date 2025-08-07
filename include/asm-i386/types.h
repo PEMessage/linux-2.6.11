@@ -51,6 +51,10 @@ typedef unsigned long long u64;
 
 /* DMA addresses come in generic and 64-bit flavours.  */
 
+/**
+ * dma_addr_t代表一个通用的总线地址。
+ * 在x86中，对应一个32位长的整数。除非内核支持PAE，这时dma_addr_t代表一个64位的整数
+ */
 #ifdef CONFIG_HIGHMEM64G
 typedef u64 dma_addr_t;
 #else
@@ -63,6 +67,9 @@ typedef u64 sector_t;
 #define HAVE_SECTOR_T
 #endif
 
+/**
+ * 高速缓存对象描述符。将slab中的空闲对象链接起来。
+ */
 typedef unsigned short kmem_bufctl_t;
 
 #endif /* __ASSEMBLY__ */

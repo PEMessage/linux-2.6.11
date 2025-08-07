@@ -31,6 +31,9 @@
  */
 #define ZERO_PAGE(vaddr) (virt_to_page(empty_zero_page))
 extern unsigned long empty_zero_page[1024];
+/**
+ * 进程0的页全局目录。
+ */
 extern pgd_t swapper_pg_dir[1024];
 extern kmem_cache_t *pgd_cache;
 extern kmem_cache_t *pmd_cache;
@@ -76,9 +79,18 @@ void paging_init(void);
  * The vmalloc() routines leaves a hole of 4kB between each vmalloced
  * area for the same reason. ;)
  */
+/**
+ * 第一个非连续映射的内存区与连续映射的线性区末尾之间的安全区大小。
+ */
 #define VMALLOC_OFFSET	(8*1024*1024)
+/**
+ * 为非连续内存区保留的线性地址的起始地址。
+ */
 #define VMALLOC_START	(((unsigned long) high_memory + vmalloc_earlyreserve + \
 			2*VMALLOC_OFFSET-1) & ~(VMALLOC_OFFSET-1))
+/**
+ * 为非连续内存区保留的线性地址的结束地址。
+ */
 #ifdef CONFIG_HIGHMEM
 # define VMALLOC_END	(PKMAP_BASE-2*PAGE_SIZE)
 #else
@@ -400,6 +412,10 @@ extern void noexec_setup(const char *str);
 #define kern_addr_valid(addr)	(1)
 #endif /* !CONFIG_DISCONTIGMEM */
 
+/**
+ * 与remap_pfn_range类似，但是将IO内存映射为虚拟地址。
+ * 除了SPARC外，其他体系结构中，这两个函数是一样的。
+ */
 #define io_remap_page_range(vma, vaddr, paddr, size, prot)		\
 		remap_pfn_range(vma, vaddr, (paddr) >> PAGE_SHIFT, size, prot)
 

@@ -81,6 +81,13 @@ extern struct movsl_mask {
  * checks that the pointer is in the user space range - after calling
  * this function, memory access functions may still return -EFAULT.
  */
+/**
+ * 对系统调用所传递地址的检查是通过access_ok宏实现的。
+ * 它有两个分别为addr和size的参数。
+ * 该宏检查addr到addr+size-1之间的地址区间。
+ * 它调用__range_ok，本质上执行如下检查：
+ * (u33)addr + (u33)size >= (u33)current->addr_limit.seg
+ */
 #define access_ok(type,addr,size) (likely(__range_ok(addr,size) == 0))
 
 /**
@@ -99,6 +106,10 @@ extern struct movsl_mask {
  * if it is definitely invalid.
  *
  * See access_ok() for more details.
+ */
+/**
+ * 函数verify_area执行与access_ok宏类似的检查，虽然它被认为是陈旧过时的
+ * 但是在源代码中仍然被广泛使用。
  */
 static inline int verify_area(int type, const void __user * addr, unsigned long size)
 {
@@ -119,8 +130,17 @@ static inline int verify_area(int type, const void __user * addr, unsigned long 
  * on our cache or tlb entries.
  */
 
+/**
+ * 异常表的表项
+ * 主要的异常表在建立内核映象时自动生成。存放在内核代码段的__ex_table节。
+ * 所有异常表的起始和终止地址由__start__ex_table和__stop__ex_table标识。
+ */
 struct exception_table_entry
 {
+	/**
+	 * insn-访问进程地址空间的指令的线性地址。
+	 * fixup-当指令发生异常时，fixup就是要调用的汇编语言代码的地址。
+	 */
 	unsigned long insn, fixup;
 };
 
@@ -169,6 +189,9 @@ extern void __get_user_4(void);
  * Returns zero on success, or -EFAULT on error.
  * On error, the variable @x is set to zero.
  */
+/**
+ * 从用户空间读一个整数（1、2、4字节）
+ */
 #define get_user(x,ptr)							\
 ({	int __ret_gu;							\
 	unsigned long __val_gu;						\
@@ -200,6 +223,9 @@ extern void __put_user_bad(void);
  * to the result of dereferencing @ptr.
  *
  * Returns zero on success, or -EFAULT on error.
+ */
+/**
+ * 向用户空间写入一个整数（1、2、4个字节）
  */
 #define put_user(x,ptr)							\
   __put_user_check((__typeof__(*(ptr)))(x),(ptr),sizeof(*(ptr)))
@@ -469,6 +495,9 @@ __copy_from_user_inatomic(void *to, const void __user *from, unsigned long n)
 	return __copy_from_user_ll(to, from, n);
 }
 
+/**
+ * 从用户空间复制任意大小的块。
+ */
 static inline unsigned long
 __copy_from_user(void *to, const void __user *from, unsigned long n)
 {
@@ -497,6 +526,9 @@ long __must_check __strncpy_from_user(char *dst,
  *
  * If there is a limit on the length of a valid string, you may wish to
  * consider using strnlen_user() instead.
+ */
+/**
+ * 返回用户空间以NULL结束的字符串的长度
  */
 #define strlen_user(str) strnlen_user(str, ~0UL >> 1)
 

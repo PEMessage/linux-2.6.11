@@ -47,6 +47,10 @@
 #define ERROR_APIC_VECTOR	0xfe
 #define INVALIDATE_TLB_VECTOR	0xfd
 #define RESCHEDULE_VECTOR	0xfc
+/**
+ * 处理器间中断向量，它将中断发往所有CPU但是不发往自己。
+ * send_IPI_allbutself产生。
+ */
 #define CALL_FUNCTION_VECTOR	0xfb
 
 #define THERMAL_APIC_VECTOR	0xf0

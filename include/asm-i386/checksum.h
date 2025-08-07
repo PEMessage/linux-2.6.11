@@ -58,6 +58,12 @@ unsigned int csum_partial_copy_from_user(const unsigned char __user *src, unsign
  *	By Jorge Cwik <jorge@laser.satlink.net>, adapted for linux by
  *	Arnt Gulbrandsen.
  */
+/**
+ * 计算IP头校验和。
+ * 此函数会利用IP报头的长度始终是4字节的倍数这一点，让一些处理流程的效率更高。
+ * 当计算一个被发送的包的IP头的校验和时，iphdr->check首先应当被置0，它为校验和应当不反应校验和自己。
+ * 它既可以用来验证一个输入包，也用来计算一个外发包的校验和。
+ */
 static inline unsigned short ip_fast_csum(unsigned char * iph,
 					  unsigned int ihl)
 {
@@ -93,7 +99,9 @@ static inline unsigned short ip_fast_csum(unsigned char * iph,
 /*
  *	Fold a partial checksum
  */
-
+/**
+ * 把32位的值的高16位折叠到低16位，并求出输出值的补码。这个操作通常是校验和的最后一步。
+ */
 static inline unsigned int csum_fold(unsigned int sum)
 {
 	__asm__(
@@ -125,6 +133,10 @@ static inline unsigned long csum_tcpudp_nofold(unsigned long saddr,
  * computes the checksum of the TCP/UDP pseudo-header
  * returns a 16-bit checksum, already complemented
  */
+/**
+ * 计算TCP和UDP伪报头的校验和.
+ * 当使用L4硬件校验和，并且存在NAT转换时，需要重新计算校验和。
+ */
 static inline unsigned short int csum_tcpudp_magic(unsigned long saddr,
 						   unsigned long daddr,
 						   unsigned short len,
@@ -138,7 +150,9 @@ static inline unsigned short int csum_tcpudp_magic(unsigned long saddr,
  * this routine is used for miscellaneous IP-like checksums, mainly
  * in icmp.c
  */
-
+/**
+ * 计算校验和的通用目的的函数。它简单的接收一个任意长度的缓冲区作为输入参数。
+ */
 static inline unsigned short ip_compute_csum(unsigned char * buff, int len)
 {
     return csum_fold (csum_partial(buff, len, 0));

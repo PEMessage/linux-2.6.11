@@ -21,6 +21,11 @@
  * on us. We need to use _exactly_ the address the user gave us,
  * not some alias that contains the same information.
  */
+/**
+ * 32位原子结构.
+ * 使用一个结构,并将counter声明成volatile是有原因的
+ * 这样可以防止编译器优化,强制从内存中读取counter的值
+ */
 typedef struct { volatile int counter; } atomic_t;
 
 #define ATOMIC_INIT(i)	{ (i) }
@@ -30,7 +35,10 @@ typedef struct { volatile int counter; } atomic_t;
  * @v: pointer of type atomic_t
  * 
  * Atomically reads the value of @v.
- */ 
+ */
+/**
+ * 返回*v
+ */
 #define atomic_read(v)		((v)->counter)
 
 /**
@@ -40,6 +48,9 @@ typedef struct { volatile int counter; } atomic_t;
  * 
  * Atomically sets the value of @v to @i.
  */ 
+/**
+ * 把*v置成i
+ */
 #define atomic_set(v,i)		(((v)->counter) = (i))
 
 /**
@@ -48,6 +59,9 @@ typedef struct { volatile int counter; } atomic_t;
  * @v: pointer of type atomic_t
  * 
  * Atomically adds @i to @v.
+ */
+/**
+ * 原子加
  */
 static __inline__ void atomic_add(int i, atomic_t *v)
 {
@@ -63,6 +77,9 @@ static __inline__ void atomic_add(int i, atomic_t *v)
  * @v: pointer of type atomic_t
  * 
  * Atomically subtracts @i from @v.
+ */
+/**
+ * 从*v中减去i
  */
 static __inline__ void atomic_sub(int i, atomic_t *v)
 {
@@ -81,6 +98,9 @@ static __inline__ void atomic_sub(int i, atomic_t *v)
  * true if the result is zero, or false for all
  * other cases.
  */
+/**
+ * 从*v中减去i,如果结果为0则返回1,否则返回0
+ */
 static __inline__ int atomic_sub_and_test(int i, atomic_t *v)
 {
 	unsigned char c;
@@ -97,7 +117,10 @@ static __inline__ int atomic_sub_and_test(int i, atomic_t *v)
  * @v: pointer of type atomic_t
  * 
  * Atomically increments @v by 1.
- */ 
+ */
+/**
+ * 把1加到*v
+ */
 static __inline__ void atomic_inc(atomic_t *v)
 {
 	__asm__ __volatile__(
@@ -111,7 +134,10 @@ static __inline__ void atomic_inc(atomic_t *v)
  * @v: pointer of type atomic_t
  * 
  * Atomically decrements @v by 1.
- */ 
+ */
+/**
+ * 从*v减一
+ */
 static __inline__ void atomic_dec(atomic_t *v)
 {
 	__asm__ __volatile__(
@@ -127,7 +153,10 @@ static __inline__ void atomic_dec(atomic_t *v)
  * Atomically decrements @v by 1 and
  * returns true if the result is 0, or false for all other
  * cases.
- */ 
+ */
+/**
+ * 从*v减一,如果结果为0,则返回1,否则返回0
+ */
 static __inline__ int atomic_dec_and_test(atomic_t *v)
 {
 	unsigned char c;
@@ -147,6 +176,9 @@ static __inline__ int atomic_dec_and_test(atomic_t *v)
  * and returns true if the result is zero, or false for all
  * other cases.
  */ 
+/**
+ * 把1加到*v,如果结果为0则返回1,否则返回0
+ */
 static __inline__ int atomic_inc_and_test(atomic_t *v)
 {
 	unsigned char c;
@@ -167,6 +199,9 @@ static __inline__ int atomic_inc_and_test(atomic_t *v)
  * if the result is negative, or false when
  * result is greater than or equal to zero.
  */ 
+/**
+ * 原子加，如果结果为负，就返回1，否则返回0
+ */
 static __inline__ int atomic_add_negative(int i, atomic_t *v)
 {
 	unsigned char c;
@@ -184,6 +219,9 @@ static __inline__ int atomic_add_negative(int i, atomic_t *v)
  * @i: integer value to add
  *
  * Atomically adds @i to @v and returns @i + @v
+ */
+/**
+ * 原子加，并返回结果
  */
 static __inline__ int atomic_add_return(int i, atomic_t *v)
 {
@@ -210,19 +248,33 @@ no_xadd: /* Legacy 386 processor */
 #endif
 }
 
+/**
+ * 从*v减i,返回*v的新值
+ */
 static __inline__ int atomic_sub_return(int i, atomic_t *v)
 {
 	return atomic_add_return(-i,v);
 }
-
+/**
+ * 把1加到*v，返回*v的新值
+ */
 #define atomic_inc_return(v)  (atomic_add_return(1,v))
+/**
+ * 从*v减1,返回*v的新值
+ */
 #define atomic_dec_return(v)  (atomic_sub_return(1,v))
 
 /* These are x86-specific, used by some header files */
+/**
+ * 清mask指定的*addr的所有位
+ */
 #define atomic_clear_mask(mask, addr) \
 __asm__ __volatile__(LOCK "andl %0,%1" \
 : : "r" (~(mask)),"m" (*addr) : "memory")
 
+/**
+ * 设置mask指定的*addr的所有位
+ */
 #define atomic_set_mask(mask, addr) \
 __asm__ __volatile__(LOCK "orl %0,%1" \
 : : "r" (mask),"m" (*(addr)) : "memory")

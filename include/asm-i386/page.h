@@ -29,6 +29,9 @@
  */
  
 #define clear_page(page)	memset((void *)(page), 0, PAGE_SIZE)
+/**
+ * 复制页框的内容
+ */
 #define copy_page(to,from)	memcpy((void *)(to), (void *)(from), PAGE_SIZE)
 
 #endif
@@ -139,6 +142,9 @@ extern int sysctl_legacy_va_layout;
 #define page_to_pfn(page)	((unsigned long)((page) - mem_map))
 #define pfn_valid(pfn)		((pfn) < max_mapnr)
 #endif /* !CONFIG_DISCONTIGMEM */
+/**
+ * 将内核逻辑地址转换为相应的page结构指针。
+ */
 #define virt_to_page(kaddr)	pfn_to_page(__pa(kaddr) >> PAGE_SHIFT)
 
 #define virt_addr_valid(kaddr)	pfn_valid(__pa(kaddr) >> PAGE_SHIFT)

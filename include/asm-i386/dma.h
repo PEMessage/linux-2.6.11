@@ -137,6 +137,9 @@
 
 extern spinlock_t  dma_spin_lock;
 
+/**
+ * 获得DMA自旋锁，并关闭本地设备中断。
+ */
 static __inline__ unsigned long claim_dma_lock(void)
 {
 	unsigned long flags;
@@ -144,12 +147,18 @@ static __inline__ unsigned long claim_dma_lock(void)
 	return flags;
 }
 
+/**
+ * 释放DMA自旋锁。
+ */
 static __inline__ void release_dma_lock(unsigned long flags)
 {
 	spin_unlock_irqrestore(&dma_spin_lock, flags);
 }
 
 /* enable/disable a specific DMA channel */
+/**
+ * 启用一个DMA通道。当DMA通道中包含了合法的数据时启用通道。
+ */
 static __inline__ void enable_dma(unsigned int dmanr)
 {
 	if (dmanr<=3)
@@ -158,6 +167,9 @@ static __inline__ void enable_dma(unsigned int dmanr)
 		dma_outb(dmanr & 3,  DMA2_MASK_REG);
 }
 
+/**
+ * 关闭一个DMA通道。在配置控制器前应当禁用DMA通道。
+ */
 static __inline__ void disable_dma(unsigned int dmanr)
 {
 	if (dmanr<=3)
@@ -173,6 +185,10 @@ static __inline__ void disable_dma(unsigned int dmanr)
  * --- In order to do that, the DMA routines below should ---
  * --- only be used while holding the DMA lock ! ---
  */
+/**
+ * 清除DMA的触发器。触发器用于控制对16位寄存器的访问，我们可以通过两个连续的8位操作访问该寄存器。
+ * 触发器用于选择写入的高字节还是低字节。当传输完8位后，触发器自动反转。
+ */
 static __inline__ void clear_dma_ff(unsigned int dmanr)
 {
 	if (dmanr<=3)
@@ -182,6 +198,12 @@ static __inline__ void clear_dma_ff(unsigned int dmanr)
 }
 
 /* set mode (above) for a specific DMA channel */
+/**
+ * 设置DMA控制器的模式。必须在DMA锁的保护下进行。
+ * 		DMA_MODE_READ:		读入通道。
+ *		DMA_MODE_WRITE:		写入通道。
+ *		DMA_MODE_CASCADE:	释放对总线的控制。去掉通道的级联属性，将其用于ISA总线。
+ */
 static __inline__ void set_dma_mode(unsigned int dmanr, char mode)
 {
 	if (dmanr<=3)
@@ -226,6 +248,10 @@ static __inline__ void set_dma_page(unsigned int dmanr, char pagenr)
 /* Set transfer address & page bits for specific DMA channel.
  * Assumes dma flipflop is clear.
  */
+/**
+ * 为DMA缓冲区分配地址。必须在DMA锁的保护下进行。
+ * 将地址的低24位写入到寄存器中。
+ */
 static __inline__ void set_dma_addr(unsigned int dmanr, unsigned int a)
 {
 	set_dma_page(dmanr, a>>16);
@@ -247,6 +273,10 @@ static __inline__ void set_dma_addr(unsigned int dmanr, unsigned int a)
  * Assumes dma flip-flop is clear.
  * NOTE 2: "count" represents _bytes_ and must be even for channels 5-7.
  */
+/**
+ * 设置传输的字节数。必须在DMA锁的保护下进行。
+ * count必须是偶数。
+ */
 static __inline__ void set_dma_count(unsigned int dmanr, unsigned int count)
 {
         count--;
@@ -267,6 +297,10 @@ static __inline__ void set_dma_count(unsigned int dmanr, unsigned int count)
  * Otherwise, it returns the number of _bytes_ left to transfer.
  *
  * Assumes DMA flip-flop is clear.
+ */
+/**
+ * 驱动程序有时需要知道DMA是否已经传输结束，调用该函数返回还未传输的字节数。
+ * 如果传输成功，该函数返回0.当传输还没有完成时，返回值并不确定，但不会是0.
  */
 static __inline__ int get_dma_residue(unsigned int dmanr)
 {

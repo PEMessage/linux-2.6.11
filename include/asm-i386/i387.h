@@ -26,24 +26,42 @@ extern void init_fpu(struct task_struct *);
 extern void restore_fpu( struct task_struct *tsk );
 
 extern void kernel_fpu_begin(void);
+/**
+ * 当内核态使用完FPU后，调用此函数。本质上就是将抢占打开。
+ * 在kernel_fpu_begin中，调用了禁止抢占函数。在此恢复抢占标志。
+ */
 #define kernel_fpu_end() do { stts(); preempt_enable(); } while(0)
 
 /*
  * These must be called with preempt disabled
  */
+/**
+ * 把FPU寄存器的内容转储到prev进程描述符中。然后重新初始化FPU.
+ */
 static inline void __save_init_fpu( struct task_struct *tsk )
 {
+	/**
+	 * 如果CPU使用SSE、SSE2扩展，则调用fxsave
+	 * 它除了保存FPU外，不保存SSE、SSE2寄存器的内容。
+	 */
 	if ( cpu_has_fxsr ) {
 		asm volatile( "fxsave %0 ; fnclex"
 			      : "=m" (tsk->thread.i387.fxsave) );
-	} else {
+	} else {/* 否则，只保存FPU寄存器内容 */
 		asm volatile( "fnsave %0 ; fwait"
 			      : "=m" (tsk->thread.i387.fsave) );
 	}
 	tsk->thread_info->status &= ~TS_USEDFPU;
 }
 
+/**
+ * 在确保关抢占的情况下，保存FPU、MMX、SSE、SSE2相关硬件寄存器上下文。
+ */
 #define __unlazy_fpu( tsk ) do { \
+	/**
+	 * 如果TS_USEDFPU标志被设置，说明在进程的本次执行中，使用了相关的寄存器。
+	 * 调用save_init_fpu保存相关硬件上下文。
+	 */
 	if ((tsk)->thread_info->status & TS_USEDFPU) \
 		save_init_fpu( tsk ); \
 } while (0)
@@ -61,10 +79,23 @@ do {								\
 /*
  * These disable preemption on their own and are safe
  */
+/**
+ * 将当前进程的FPU、MMX、XMM寄存器保存到thread.i387中
+ */
 static inline void save_init_fpu( struct task_struct *tsk )
 {
+	/**
+	 * 既然是准备保存硬件上下文，当然不能被抢占，不然保存还有什么意义呢。
+	 * 虽然在schedule中已经禁止抢占了，不过在其他地方还有调用本函数的地方。
+	 */
 	preempt_disable();
+	/**
+	 * 真正将硬件上下文保存起来。
+	 */
 	__save_init_fpu(tsk);
+	/**
+	 * 使用setts设置cro的TS标志。
+	 */
 	stts();
 	preempt_enable();
 }

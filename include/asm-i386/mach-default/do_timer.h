@@ -15,8 +15,16 @@
 
 static inline void do_timer_interrupt_hook(struct pt_regs *regs)
 {
+	/**
+	 * do_timer增加jiffies_64的值。因为此时已经保持了xtime_lock锁
+	 * 所以可以直接增加。
+	 * 它同时调用update_times更新系统日期和时间。并计算系统负载。
+	 */
 	do_timer(regs);
 #ifndef CONFIG_SMP
+	/**
+	 * update_process_times函数为本地CPU执行几个与定时相关的计数操作。
+	 */
 	update_process_times(user_mode(regs));
 #endif
 /*
@@ -25,6 +33,9 @@ static inline void do_timer_interrupt_hook(struct pt_regs *regs)
  * system, in that case we have to call the local interrupt handler.
  */
 #ifndef CONFIG_X86_LOCAL_APIC
+	/**
+	 * profile_tick与内核监管相关。
+	 */
 	profile_tick(CPU_PROFILING, regs);
 #else
 	if (!using_apic_timer)

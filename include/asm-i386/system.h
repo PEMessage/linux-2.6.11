@@ -12,19 +12,61 @@
 struct task_struct;	/* one of the stranger aspects of C forward declarations.. */
 extern struct task_struct * FASTCALL(__switch_to(struct task_struct *prev, struct task_struct *next));
 
+/**
+ * 进程切换时，切换内核态堆栈和硬件上下文。
+ * prev-被替换的进程
+ * next-新进程
+ * last-在任何进程切换中，到三个进程而不是两个。假设内核决定暂停A而激活B，那么在schedule函数中，prev指向A而next指向B。
+ *      当切换回A后，就必须暂停另外一个进程C。而LAST则指向C进程。
+ */
 #define switch_to(prev,next,last) do {					\
 	unsigned long esi,edi;						\
+	/**
+	 * 在真正执行汇编代码前，已经将prev存入eax，next存入edx中了。
+	 * 没有搞懂gcc汇编语法，反正结果就是这样。
+	 * 应该是"2" (prev), "d" (next)这句的副作用。
+	 */
+
+				/**
+				 * 保存eflags和ebp到内核栈中。必须保存是因为编译器认为在switch_to结束前，
+				 * 它们的值应当保持不变。
+				 */
 	asm volatile("pushfl\n\t"					\
 		     "pushl %%ebp\n\t"					\
+		     /**
+		      * 把esp的内容保存到prev->thread.esp中
+		      * 这样该字段指向prev内核栈的栈顶。
+		      */
 		     "movl %%esp,%0\n\t"	/* save ESP */		\
+		     /**
+		      * 将next->thread.esp装入到esp.
+		      * 此时，内核开始在next的栈上进行操作。这条指令实际上完成了从prev到next的切换。
+		      * 由于进程描述符的地址和内核栈的地址紧挨着，所以改变内核栈意味着改变当前进程。
+		      */
 		     "movl %5,%%esp\n\t"	/* restore ESP */	\
+		     /**
+		      * 将标记为1f的地址存入prev->thread.eip.
+		      * 当被替换的进程重新恢复执行时，进程执行被标记为1f的那条指令。
+		      */
 		     "movl $1f,%1\n\t"		/* save EIP */		\
+		     /**
+		      * 将next->thread.eip的值保存到next的内核栈中。
+		      * 这样，_switch_to调用ret返回时，就会跳转到next->thread.eip执行。
+		      * 这个地址一般情况下就会是1f.
+		      */
 		     "pushl %6\n\t"		/* restore EIP */	\
+		     /**
+		      * 注意，这里不是用call，是jmp，这样，上一条语句中压入的eip地址就可以执行了。
+		      */
 		     "jmp __switch_to\n"				\
+		     /**
+		      * 到这里，进程A再次获得CPU。它从栈中弹出ebp和eflags。
+		      */
 		     "1:\t"						\
 		     "popl %%ebp\n\t"					\
 		     "popfl"						\
 		     :"=m" (prev->thread.esp),"=m" (prev->thread.eip),	\
+		     /* last被作为输出参数，它的值会由eax赋给它。 */
 		      "=a" (last),"=S" (esi),"=D" (edi)			\
 		     :"m" (next->thread.esp),"m" (next->thread.eip),	\
 		      "2" (prev), "d" (next));				\
@@ -359,7 +401,13 @@ struct alt_instr {
  * by the kernel should be already ordered. But keep a full barrier for now. 
  */
 
+/**
+ * 适用于MP和UP的内存屏障
+ */
 #define mb() alternative("lock; addl $0,0(%%esp)", "mfence", X86_FEATURE_XMM2)
+/**
+ * 适用于MP和UP的读内存屏障
+ */
 #define rmb() alternative("lock; addl $0,0(%%esp)", "lfence", X86_FEATURE_XMM2)
 
 /**
@@ -419,12 +467,18 @@ struct alt_instr {
 #ifdef CONFIG_X86_OOSTORE
 /* Actually there are no OOO store capable CPUs for now that do SSE, 
    but make it already an possibility. */
+/**
+ * 适用于MP和UP的写内存屏障
+ */
 #define wmb() alternative("lock; addl $0,0(%%esp)", "sfence", X86_FEATURE_XMM)
 #else
 #define wmb()	__asm__ __volatile__ ("": : :"memory")
 #endif
 
 #ifdef CONFIG_SMP
+/**
+ * 仅适用于MP的内存屏障
+ */
 #define smp_mb()	mb()
 #define smp_rmb()	rmb()
 #define smp_wmb()	wmb()
@@ -442,8 +496,17 @@ struct alt_instr {
 
 /* interrupt control.. */
 #define local_save_flags(x)	do { typecheck(unsigned long,x); __asm__ __volatile__("pushfl ; popl %0":"=g" (x): /* no input */); } while (0)
+/**
+ * 恢复eflags的值。
+ */
 #define local_irq_restore(x) 	do { typecheck(unsigned long,x); __asm__ __volatile__("pushl %0 ; popfl": /* no output */ :"g" (x):"memory", "cc"); } while (0)
+/**
+ * 禁用本地中断。
+ */
 #define local_irq_disable() 	__asm__ __volatile__("cli": : :"memory")
+/**
+ * 打开被关闭的中断。
+ */
 #define local_irq_enable()	__asm__ __volatile__("sti": : :"memory")
 /* used in the idle loop; sti takes one instruction cycle to complete */
 #define safe_halt()		__asm__ __volatile__("sti; hlt": : :"memory")
@@ -456,6 +519,9 @@ struct alt_instr {
 })
 
 /* For spinlocks etc */
+/**
+ * 保存eflags的值，并关闭中断。
+ */
 #define local_irq_save(x)	__asm__ __volatile__("pushfl ; popl %0 ; cli":"=g" (x): /* no input */ :"memory")
 
 /*

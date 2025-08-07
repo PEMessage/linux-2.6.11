@@ -103,6 +103,9 @@ extern void __set_fixmap (enum fixed_addresses idx,
 #define set_fixmap_nocache(idx, phys) \
 		__set_fixmap(idx, phys, PAGE_KERNEL_NOCACHE)
 
+/**
+ * 撤消固定映射线性地址idx和物理地址之间的连接
+ */
 #define clear_fixmap(idx) \
 		__set_fixmap(idx, 0, __pgprot(0))
 
@@ -110,6 +113,9 @@ extern void __set_fixmap (enum fixed_addresses idx,
 
 #define __FIXADDR_SIZE	(__end_of_permanent_fixed_addresses << PAGE_SHIFT)
 #define __FIXADDR_BOOT_SIZE	(__end_of_fixed_addresses << PAGE_SHIFT)
+/**
+ * 固定映射的线性地址起始地址。
+ */
 #define FIXADDR_START		(FIXADDR_TOP - __FIXADDR_SIZE)
 #define FIXADDR_BOOT_START	(FIXADDR_TOP - __FIXADDR_BOOT_SIZE)
 

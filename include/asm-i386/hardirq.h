@@ -6,6 +6,9 @@
 #include <linux/irq.h>
 
 typedef struct {
+	/**
+	 * 每个CPU上挂起的软中断。
+	 */
 	unsigned int __softirq_pending;
 	unsigned long idle_timestamp;
 	unsigned int __nmi_count;	/* arch dependent */

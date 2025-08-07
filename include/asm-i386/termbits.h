@@ -8,12 +8,34 @@ typedef unsigned int	speed_t;
 typedef unsigned int	tcflag_t;
 
 #define NCCS 19
+/**
+ * 为在tty设备上的某个特定端口保存当前所有设置。
+ * 这些设置控制着当前的波特率、数据大小、数据流参数等等。
+ */
 struct termios {
+	/**
+	 * 输入模式。
+	 */
 	tcflag_t c_iflag;		/* input mode flags */
+	/**
+	 * 输出模式。
+	 */
 	tcflag_t c_oflag;		/* output mode flags */
+	/**
+	 * 控制模式。
+	 */
 	tcflag_t c_cflag;		/* control mode flags */
+	/**
+	 * 本地模式。
+	 */
 	tcflag_t c_lflag;		/* local mode flags */
+	/**
+	 * 线路规程类型。
+	 */
 	cc_t c_line;			/* line discipline */
+	/**
+	 * 控制字符数组。
+	 */
 	cc_t c_cc[NCCS];		/* control characters */
 };
 

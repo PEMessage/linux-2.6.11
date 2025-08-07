@@ -16,6 +16,11 @@ void *dma_alloc_coherent(struct device *dev, size_t size,
 void dma_free_coherent(struct device *dev, size_t size,
 			 void *vaddr, dma_addr_t dma_handle);
 
+
+/**
+ * 流式DMA映射是每次数据传送前建立映射，这时，驱动程序需要首先利用分配器动态分配内存缓冲区。
+ * dma_map_single的作用是建立流式DMA映射。它接收缓冲区的线性地址，返回相应的总线地址。
+ */
 static inline dma_addr_t
 dma_map_single(struct device *dev, void *ptr, size_t size,
 	       enum dma_data_direction direction)
@@ -25,6 +30,9 @@ dma_map_single(struct device *dev, void *ptr, size_t size,
 	return virt_to_phys(ptr);
 }
 
+/**
+ * 释放流式DMA映射
+ */
 static inline void
 dma_unmap_single(struct device *dev, dma_addr_t dma_addr, size_t size,
 		 enum dma_data_direction direction)
@@ -32,6 +40,11 @@ dma_unmap_single(struct device *dev, dma_addr_t dma_addr, size_t size,
 	BUG_ON(direction == DMA_NONE);
 }
 
+/**
+ * 映射一个分散、聚集DMA。
+ *		nents:		传入的分散表入口的数量。
+ * 返回值是要传送的DMA缓冲区数。可能小于nents。
+ */
 static inline int
 dma_map_sg(struct device *dev, struct scatterlist *sg, int nents,
 	   enum dma_data_direction direction)
@@ -50,6 +63,9 @@ dma_map_sg(struct device *dev, struct scatterlist *sg, int nents,
 	return nents;
 }
 
+/**
+ * 想要将高端内存区用于DMA时，可以使用pci_map_page或者dma_map_page
+ */
 static inline dma_addr_t
 dma_map_page(struct device *dev, struct page *page, unsigned long offset,
 	     size_t size, enum dma_data_direction direction)
@@ -58,6 +74,9 @@ dma_map_page(struct device *dev, struct page *page, unsigned long offset,
 	return page_to_phys(page) + offset;
 }
 
+/**
+ * 释放高端内存缓冲区
+ */
 static inline void
 dma_unmap_page(struct device *dev, dma_addr_t dma_address, size_t size,
 	       enum dma_data_direction direction)
@@ -65,7 +84,9 @@ dma_unmap_page(struct device *dev, dma_addr_t dma_address, size_t size,
 	BUG_ON(direction == DMA_NONE);
 }
 
-
+/**
+ * 解除分散、聚集IO映射。
+ */
 static inline void
 dma_unmap_sg(struct device *dev, struct scatterlist *sg, int nhwentries,
 	     enum dma_data_direction direction)
@@ -101,12 +122,22 @@ dma_sync_single_range_for_device(struct device *dev, dma_addr_t dma_handle,
 	flush_write_buffers();
 }
 
+/**
+ * 在读缓冲区前，因为DMA写内存时，硬件高速缓存不会感知到内存数据的变化
+ * 所以，需要调用此函数使用相应的硬件高速缓存失效。
+ * 在x86中，此函数为空，仅仅是因为x86维护了硬件高速缓存和DMA之间的一致性。
+ * 其他平台则不一定了。
+ */
 static inline void
 dma_sync_sg_for_cpu(struct device *dev, struct scatterlist *sg, int nelems,
 		    enum dma_data_direction direction)
 {
 }
 
+/**
+ * 驱动程序在开始从RAM到设备的DMA数据传送前，应该调用dma_sync_sg_for_device
+ * 它刷新与DMA缓冲区对应的高速缓存行。确保写到内存的数据，确实写到真实的内存中了。
+ */
 static inline void
 dma_sync_sg_for_device(struct device *dev, struct scatterlist *sg, int nelems,
 		    enum dma_data_direction direction)
@@ -134,6 +165,9 @@ dma_supported(struct device *dev, u64 mask)
 	return 1;
 }
 
+/**
+ * 检查总线是否可以接收给定大小的总线地址。如果可以，则通知总线层：给定的外围设备将使用该大小的总线地址。
+ */
 static inline int
 dma_set_mask(struct device *dev, u64 mask)
 {

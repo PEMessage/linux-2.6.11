@@ -28,8 +28,18 @@
 struct thread_info {
 	struct task_struct	*task;		/* main task structure */
 	struct exec_domain	*exec_domain;	/* execution domain */
+	/**
+	 * 如果有TIF_NEED_RESCHED标志，则必须调用调度程序。
+	 */
 	unsigned long		flags;		/* low level flags */
+	/**
+	 * 线程标志:
+	 *     TS_USEDFPU:表示进程在当前执行过程中，是否使用过FPU、MMX和XMM寄存器。
+	 */
 	unsigned long		status;		/* thread-synchronous flags */
+	/**
+	 * 可运行进程所在运行队列的CPU逻辑号。
+	 */
 	__u32			cpu;		/* current CPU */
 	__s32			preempt_count; /* 0 => preemptable, <0 => BUG */
 
@@ -85,6 +95,9 @@ struct thread_info {
 
 
 /* how to get the thread information struct from C */
+/**
+ * 获得当前线程基本信息。
+ */
 static inline struct thread_info *current_thread_info(void)
 {
 	struct thread_info *ti;
@@ -96,6 +109,10 @@ static inline struct thread_info *current_thread_info(void)
 register unsigned long current_stack_pointer asm("esp") __attribute_used__;
 
 /* thread information allocation */
+
+/**
+ * alloc_thread_info分配一个thread_info
+ */
 #ifdef CONFIG_DEBUG_STACK_USAGE
 #define alloc_thread_info(tsk)					\
 	({							\
@@ -110,6 +127,9 @@ register unsigned long current_stack_pointer asm("esp") __attribute_used__;
 #define alloc_thread_info(tsk) kmalloc(THREAD_SIZE, GFP_KERNEL)
 #endif
 
+/**
+ * 释放thread_info，及内核栈
+ */
 #define free_thread_info(info)	kfree(info)
 #define get_thread_info(ti) get_task_struct((ti)->task)
 #define put_thread_info(ti) put_task_struct((ti)->task)
@@ -133,14 +153,43 @@ register unsigned long current_stack_pointer asm("esp") __attribute_used__;
  * - pending work-to-be-done flags are in LSW
  * - other flags in MSW
  */
+/**
+ * 正在跟踪系统调用
+ * 在do_fork中，强制将子进程的这个标志清除。因为子进程返回时要进入ret_from_fork。
+ * ret_from_fork会进入异常处理退出流程。如果不清除这个标志，就可能给调试进程发送系统调用结束的消息。
+ */
 #define TIF_SYSCALL_TRACE	0	/* syscall trace active */
+/**
+ * X86上未用
+ */
 #define TIF_NOTIFY_RESUME	1	/* resumption notification requested */
+/**
+ * 进程有挂起信号
+ */
 #define TIF_SIGPENDING		2	/* signal pending */
+/**
+ * 在返回用户态前，需要进行调度
+ */
 #define TIF_NEED_RESCHED	3	/* rescheduling necessary */
+/**
+ * 在返回用户态前，恢复单步执行
+ */
 #define TIF_SINGLESTEP		4	/* restore singlestep on return to user mode */
+/**
+ * 通过iret而不是sysexit返回用户态
+ */
 #define TIF_IRET		5	/* return with iret */
+/**
+ * 系统调用正被审计??
+ */
 #define TIF_SYSCALL_AUDIT	7	/* syscall auditing active */
+/**
+ * idle进程在轮询TIF_NEED_RESHED标志。
+ */
 #define TIF_POLLING_NRFLAG	16	/* true if poll_idle() is polling TIF_NEED_RESCHED */
+/**
+ * 当内存不足时，当前进程正被杀死，以回收内存。
+ */
 #define TIF_MEMDIE		17
 
 #define _TIF_SYSCALL_TRACE	(1<<TIF_SYSCALL_TRACE)
@@ -163,6 +212,9 @@ register unsigned long current_stack_pointer asm("esp") __attribute_used__;
  * This is different from the flags in that nobody else
  * ever touches our thread-synchronous status, so we don't
  * have to worry about atomic accesses.
+ */
+/**
+ * 表示进程在当前执行过程中，是否使用过FPU、MMX和XMM寄存器。
  */
 #define TS_USEDFPU		0x0001	/* FPU was used by this task this quantum (SMP) */
 

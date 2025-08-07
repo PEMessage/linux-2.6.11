@@ -60,6 +60,9 @@ struct pci_dev;
 /* This is always fine. */
 #define pci_dac_dma_supported(pci_dev, mask)	(1)
 
+/**
+ * 建立一个DAC映射。不需要释放DAC映射。
+ */
 static inline dma64_addr_t
 pci_dac_page_to_dma(struct pci_dev *pdev, struct page *page, unsigned long offset, int direction)
 {

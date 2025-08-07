@@ -40,6 +40,9 @@ extern void kmap_init(void);
  * easily, subsequent pte tables have to be allocated in one physical
  * chunk of RAM.
  */
+/**
+ * 永久内核映射的页表项个数。可能为512或者1024项。
+ */
 #ifdef CONFIG_X86_PAE
 #define LAST_PKMAP 512
 #else
@@ -59,6 +62,9 @@ extern void kmap_init(void);
  * 			Vmalloc area
  * VMALLOC_START
  * high_memory
+ */
+/**
+ * 永久内核映射的线性地址起始处。
  */
 #define PKMAP_BASE ( (FIXADDR_BOOT_START - PAGE_SIZE*(LAST_PKMAP + 1)) & PMD_MASK )
 #define LAST_PKMAP_MASK (LAST_PKMAP-1)

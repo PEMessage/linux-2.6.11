@@ -23,6 +23,10 @@ BUILD_INTERRUPT(call_function_interrupt,CALL_FUNCTION_VECTOR)
  * a much simpler SMP time architecture:
  */
 #ifdef CONFIG_X86_LOCAL_APIC
+/**
+ * 通过BUILD_INTERRUPT，它产生一个中断入口，并在中断处理中调用smp_apic_timer_interrupt
+ * 所以，apic_timer_interrupt中断的实际处理代码是smp_apic_timer_interrupt
+ */
 BUILD_INTERRUPT(apic_timer_interrupt,LOCAL_TIMER_VECTOR)
 BUILD_INTERRUPT(error_interrupt,ERROR_APIC_VECTOR)
 BUILD_INTERRUPT(spurious_interrupt,SPURIOUS_APIC_VECTOR)

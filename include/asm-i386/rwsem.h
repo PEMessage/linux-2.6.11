@@ -51,7 +51,15 @@ extern struct rw_semaphore *FASTCALL(rwsem_downgrade_wake(struct rw_semaphore *s
 /*
  * the semaphore definition
  */
+/**
+ * 读写信号量描述符。
+ */
 struct rw_semaphore {
+	/**
+	 * 存放两个16位的计数器。
+	 * 高16位以补码形式存放等待写的进程数量。注意与读写自旋锁的不同。读写自旋锁不可能有进程在上面睡眠，所以用一个二值数表示写等待就行了。
+	 * 低16位存放非等待的读者和写者总数。
+	 */
 	signed long		count;
 #define RWSEM_UNLOCKED_VALUE		0x00000000
 #define RWSEM_ACTIVE_BIAS		0x00000001
@@ -59,7 +67,14 @@ struct rw_semaphore {
 #define RWSEM_WAITING_BIAS		(-0x00010000)
 #define RWSEM_ACTIVE_READ_BIAS		RWSEM_ACTIVE_BIAS
 #define RWSEM_ACTIVE_WRITE_BIAS		(RWSEM_WAITING_BIAS + RWSEM_ACTIVE_BIAS)
+	/**
+	 * 自旋锁，保护等待队列链表和结构本身。
+	 */
 	spinlock_t		wait_lock;
+	/**
+	 * 等待进程链表。每个结点是一个rwsem_waiter结构。
+	 * 该结构包含一个表示等待进程描述符的指针和一个表示等待读或者写的标志。
+	 */
 	struct list_head	wait_list;
 #if RWSEM_DEBUG
 	int			debug;

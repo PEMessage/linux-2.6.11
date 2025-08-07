@@ -87,12 +87,33 @@ typedef unsigned long sigset_t;
  * SA_ONESHOT and SA_NOMASK are the historical Linux names for the Single
  * Unix names RESETHAND and NODEFER respectively.
  */
+/**
+ * 仅应用于SIGCHLD，当进程被停止时不向父进程发送SIGCHLD信号。
+ */
 #define SA_NOCLDSTOP	0x00000001u
+/**
+ * 仅应用于SIGCHLD，当进程被停止时不创建僵死状态。
+ */
 #define SA_NOCLDWAIT	0x00000002u
+/**
+ * 为信号处理程序提供附加信息
+ */
 #define SA_SIGINFO	0x00000004u
+/**
+ * 为信号处理程序的执行使用一个备用栈。
+ */
 #define SA_ONSTACK	0x08000000u
+/**
+ * 自动重新开始执行被中断的系统调用。
+ */
 #define SA_RESTART	0x10000000u
+/**
+ * 执行信号处理程序时，不屏蔽信号。
+ */
 #define SA_NODEFER	0x40000000u
+/**
+ * 执行信号处理程序后，重新设置缺省操作。
+ */
 #define SA_RESETHAND	0x80000000u
 
 #define SA_NOMASK	SA_NODEFER
@@ -147,10 +168,23 @@ struct old_sigaction {
 	__sigrestore_t sa_restorer;
 };
 
+/**
+ * 在信号上执行的操作
+ */
 struct sigaction {
+	/**
+	 * 要执行的操作的类型。它的值可以是指向信号处理程序的指针
+	 * 也可以是SIG_DFL，SIG_IGN
+	 */
 	__sighandler_t sa_handler;
+	/**
+	 * 标志集，指定必须怎样处理信号。
+	 */
 	unsigned long sa_flags;
 	__sigrestore_t sa_restorer;
+	/**
+	 * 当运行信号处理程序时，需要屏蔽的信号。
+	 */
 	sigset_t sa_mask;		/* mask last for extensibility */
 };
 
