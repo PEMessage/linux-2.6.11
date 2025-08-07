@@ -21,6 +21,7 @@
 #include <asm/io.h>
 
 
+/* 全局端口资源 */
 struct resource ioport_resource = {
 	.name	= "PCI IO",
 	.start	= 0x0000,
@@ -30,6 +31,7 @@ struct resource ioport_resource = {
 
 EXPORT_SYMBOL(ioport_resource);
 
+/* 全局内存资源 */
 struct resource iomem_resource = {
 	.name	= "PCI mem",
 	.start	= 0UL,
@@ -196,6 +198,9 @@ static int __release_resource(struct resource *old)
 	return -EINVAL;
 }
 
+/**
+ * 把一个给定范围分配给一个IO设备
+ */
 int request_resource(struct resource *root, struct resource *new)
 {
 	struct resource *conflict;
@@ -220,6 +225,9 @@ struct resource *____request_resource(struct resource *root, struct resource *ne
 
 EXPORT_SYMBOL(____request_resource);
 
+/**
+ * 释放以前分配给IO设备的给定范围。
+ */
 int release_resource(struct resource *old)
 {
 	int retval;
@@ -280,6 +288,11 @@ static int find_resource(struct resource *root, struct resource *new,
 
 /*
  * Allocate empty slot in the resource tree given range and alignment.
+ */
+/**
+ * 在资源树中寻找一个给定大小和排列方式的可用范围。
+ * 若存在，就将这个范围分配给一个IO设备。
+ * 主要是PCI设备驱动程序使用。这种设备可以配置成使用任意的端口号和主板上的内存地址对其进行配置。
  */
 int allocate_resource(struct resource *root, struct resource *new,
 		      unsigned long size,

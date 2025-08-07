@@ -11,6 +11,9 @@
 #include <linux/wait.h>
 #include <linux/hash.h>
 
+/**
+ * add_wait_queue函数把一个非互斥进程插入等待队列链表的第一个位置
+ */
 void fastcall add_wait_queue(wait_queue_head_t *q, wait_queue_t *wait)
 {
 	unsigned long flags;
@@ -22,6 +25,9 @@ void fastcall add_wait_queue(wait_queue_head_t *q, wait_queue_t *wait)
 }
 EXPORT_SYMBOL(add_wait_queue);
 
+/**
+ * add_wait_queue_exclusive函数把一个互斥进程插入等待队列链表的最后一个位置
+ */
 void fastcall add_wait_queue_exclusive(wait_queue_head_t *q, wait_queue_t *wait)
 {
 	unsigned long flags;
@@ -33,6 +39,9 @@ void fastcall add_wait_queue_exclusive(wait_queue_head_t *q, wait_queue_t *wait)
 }
 EXPORT_SYMBOL(add_wait_queue_exclusive);
 
+/**
+ * 从等待队列链表中删除一个进程
+ */
 void fastcall remove_wait_queue(wait_queue_head_t *q, wait_queue_t *wait)
 {
 	unsigned long flags;
@@ -120,6 +129,9 @@ void fastcall finish_wait(wait_queue_head_t *q, wait_queue_t *wait)
 }
 EXPORT_SYMBOL(finish_wait);
 
+/**
+ * 唤醒睡眠进程并将它从等待队列上摘除。
+ */
 int autoremove_wake_function(wait_queue_t *wait, unsigned mode, int sync, void *key)
 {
 	int ret = default_wake_function(wait, mode, sync, key);

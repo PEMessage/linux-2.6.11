@@ -63,14 +63,42 @@ typedef struct tvec_root_s {
 	struct list_head vec[TVR_SIZE];
 } tvec_root_t;
 
+/**
+ * 每个CPU上的动态定时器元素
+ */
 struct tvec_t_base_s {
 	spinlock_t lock;
+	/**
+	 * 需要检查的动态定时器的最早到期时间。
+	 * 如果这个值与jiffies一样，说明可延迟函数没有积压。
+	 * 如果这个值小于jiffies，说明前几个节拍相关的可延迟函数必须被处理。
+	 * 在初始化时，它的值与jiffies相等，然后由run_timer_softieq函数增加它的值。
+	 * 如果相关的可延迟函数很长一段时间都没有被执行时，timer_jiffies可能会落后于jiffies很多。
+	 */
 	unsigned long timer_jiffies;
+	/**
+	 * 在多CPU上，running_timer指向本地CPU当前正处理的动态定时器的timer_list结构。
+	 */
 	struct timer_list *running_timer;
+	/**
+	 * 它包含一个数组，包含在紧接着到来的255个节拍内将要到期的所有动态定时器。
+	 */
 	tvec_root_t tv1;
+	/**
+	 * 它包含一个数组，包含在紧接着到来的2^14-1个节拍内将要到期的所有动态定时器。
+	 */
 	tvec_t tv2;
+	/**
+	 * 它包含一个数组，包含在紧接着到来的2^20-1个节拍内将要到期的所有动态定时器。
+	 */
 	tvec_t tv3;
+	/**
+	 * 它包含一个数组，包含在紧接着到来的2^26-1个节拍内将要到期的所有动态定时器。
+	 */
 	tvec_t tv4;
+	/**
+	 * 它包含一个数组，包含在一个大的expires内到期的动态定时器。
+	 */
 	tvec_t tv5;
 } ____cacheline_aligned_in_smp;
 
@@ -85,6 +113,10 @@ static inline void set_running_timer(tvec_base_t *base,
 }
 
 /* Fake initialization */
+/**
+ * 动态定时器的主要结构。每个元素是一个tvec_base_t对象。
+ * 它包含动态定时器需要的所有数据。
+ */
 static DEFINE_PER_CPU(tvec_base_t, tvec_bases) = { SPIN_LOCK_UNLOCKED };
 
 static void check_timer_failed(struct timer_list *timer)
@@ -384,6 +416,9 @@ EXPORT_SYMBOL(del_timer_sync);
  *
  * The function returns whether it has deactivated a pending timer or not.
  */
+/**
+ * 从定时器链表中删除一个定时器
+ */
 int del_singleshot_timer_sync(struct timer_list *timer)
 {
 	int ret = del_timer(timer);
@@ -398,6 +433,11 @@ int del_singleshot_timer_sync(struct timer_list *timer)
 EXPORT_SYMBOL(del_singleshot_timer_sync);
 #endif
 
+/**
+ * 动态定时器分别放在五个链表中。tv1到tv5,分别保存2^8,2^14,2^20,2^26,2^32个tick内到达的定时器
+ * 当tv1中为空时，调用cascade来将tv5->tv4->tv3->tv2->tv1
+ * 就是把后一个链表中的动态定时器往上移动
+ */
 static int cascade(tvec_base_t *base, tvec_t *tv, int index)
 {
 	/* cascade all the timers from tv up one level */
@@ -431,43 +471,90 @@ static int cascade(tvec_base_t *base, tvec_t *tv, int index)
  */
 #define INDEX(N) (base->timer_jiffies >> (TVR_BITS + N * TVN_BITS)) & TVN_MASK
 
+/**
+ * 处理本CPU的动态定时器。在软中断上下文中执行。
+ */
 static inline void __run_timers(tvec_base_t *base)
 {
 	struct timer_list *timer;
 
+	/**
+	 * 由于结构可能在add_timer或者mod_timer,del_timer中被访问。
+	 * 而这些API是提供给内核开发者用，不知内核开发者会将它们用在什么场景
+	 * 所以只能用spin_lock_irq这种方式加锁了。
+	 * 因为是在软中断上下文中执行，这里一定是开中断的，所以不必保存中断，强关后强开就行了。
+	 * 虽然强开强关中断是一种不道德的行为，在这里却不会有问题。
+	 */
 	spin_lock_irq(&base->lock);
+	/**
+	 * 由于jiffies和time_jiffies的值经常是一样的，所以这层循环常常只执行一次。
+	 * 但是，如果在执行软中断时，发生了时钟中断，那么，在这个节拍可能会到期新的动态定时器。
+	 * 此时就不一定是只执行一次了。
+	 */
 	while (time_after_eq(jiffies, base->timer_jiffies)) {
 		struct list_head work_list = LIST_HEAD_INIT(work_list);
 		struct list_head *head = &work_list;
+		/**
+		 * index是base->tv1链表中索引值。它保存着下一次将要处理的定时器。
+		 */
  		int index = base->timer_jiffies & TVR_MASK;
  
 		/*
 		 * Cascade timers:
+		 */
+		/**
+		 * index == 0说明tv1中所有链表都已经被检查过了。通过cascade来过滤动态定时器。
+		 * cascade将tv5->tv4->tv3->tv2->tv1
 		 */
 		if (!index &&
 			(!cascade(base, &base->tv2, INDEX(0))) &&
 				(!cascade(base, &base->tv3, INDEX(1))) &&
 					!cascade(base, &base->tv4, INDEX(2)))
 			cascade(base, &base->tv5, INDEX(3));
+		/**
+		 * 处理一次循环，就将timer_jiffies递增。
+		 */
 		++base->timer_jiffies; 
+		/**
+		 * 将tv1.vec[indx]中的定时器移动到work_list中。
+		 * 现在head指向work_list的头。
+		 */
 		list_splice_init(base->tv1.vec + index, &work_list);
 repeat:
+		/**
+		 * 遍历链表中的每一个定时器。
+		 */
 		if (!list_empty(head)) {
 			void (*fn)(unsigned long);
 			unsigned long data;
 
+			/**
+			 * 从链表中取出定时器。
+			 */
 			timer = list_entry(head->next,struct timer_list,entry);
  			fn = timer->function;
  			data = timer->data;
 
+			/**
+			 * 从链表中删除定时器。
+			 */
 			list_del(&timer->entry);
+			/**
+			 * 设置当前CPU正在处理的定时器。
+			 */
 			set_running_timer(base, timer);
 			smp_wmb();
 			timer->base = NULL;
+			/**
+			 * 注意锁的用法。它保护的定时器链表，但是没有保护回调函数。
+			 */
 			spin_unlock_irq(&base->lock);
 			{
 				u32 preempt_count = preempt_count();
 				fn(data);
+				/**
+				 * 在定时器函数中，不能随意修改抢占计数。
+				 */
 				if (preempt_count != preempt_count()) {
 					printk("huh, entered %p with %08x, exited with %08x?\n", fn, preempt_count, preempt_count());
 					BUG();
@@ -556,6 +643,11 @@ found:
  * Timekeeping variables
  */
 unsigned long tick_usec = TICK_USEC; 		/* USER_HZ period (usec) */
+/**
+ * 每个tick的ns值。如果是1000HZ，这个值就是1000 * 1000
+ * 在PC上，它被初始化成9999848，对应的Hz约为1000.15Hz。
+ * 如果计算机被外部时钟同步的话，它的值可能被内核自动调整（参见adjtimex调用）
+ */
 unsigned long tick_nsec = TICK_NSEC;		/* ACTHZ period (nsec) */
 
 /* 
@@ -810,19 +902,38 @@ static void update_wall_time(unsigned long ticks)
  * Called from the timer interrupt handler to charge one tick to the current 
  * process.  user_tick is 1 if the tick is user time, 0 for system.
  */
+/**
+ * 更新CPU统计计数
+ */
 void update_process_times(int user_tick)
 {
 	struct task_struct *p = current;
 	int cpu = smp_processor_id();
 
 	/* Note: this timer irq context must be accounted for as well. */
+	/**
+	 * 检查进程在用户态或者内核态运行了多长时间。
+	 * 如果超过了运行时间，还会杀死进程。
+	 */
 	if (user_tick)
 		account_user_time(p, jiffies_to_cputime(1));
 	else
 		account_system_time(p, HARDIRQ_OFFSET, jiffies_to_cputime(1));
+	/**
+	 * 调用raise_softirq(TIMER_SOFTIRQ);激活本地CPU上的TIMER_SOFTIRQ
+	 * 通过内核函数add_timer添加的定时器在相应的任务队列上运行。
+	 * 而用户的定时器是通过信号来实现的。
+	 */
 	run_local_timers();
+	/**
+	 * 如果系统经历了一个静止状态，那么调用tasklet_schedule来激活本地CPU的
+	 * rcu_tasklet任务的队列。这个任务负责释放RCU相关的内存。
+	 */
 	if (rcu_pending(cpu))
 		rcu_check_callbacks(cpu, user_tick);
+	/**
+	 * scheduler_tick使当前进程的时间片计数器减1。
+	 */
 	scheduler_tick();
 }
 
@@ -848,6 +959,12 @@ unsigned long avenrun[3];
  * calc_load - given tick count, update the avenrun load estimates.
  * This is called while holding a write_lock on xtime_lock.
  */
+/**
+ * 记录系统负载，用户输入uptime命令时，即会看到这些统计值。
+ * 平均负载包含有TASK_RUNNING和TASK_UNINTERRUPT状态的进程。由于处于TASK_UNINTERRUPT的进程少，所以高负载一般意味着系统繁忙。
+ * 但是这也说明在某些情况下，有反例出现。
+ * 被update_times在每个节拍调用。
+ */
 static inline void calc_load(unsigned long ticks)
 {
 	unsigned long active_tasks; /* fixed-point */
@@ -864,6 +981,9 @@ static inline void calc_load(unsigned long ticks)
 }
 
 /* jiffies at the most recent update of wall time */
+/**
+ * 墙上时间。即xtime最后被更新的时间。
+ */
 unsigned long wall_jiffies = INITIAL_JIFFIES;
 
 /*
@@ -879,8 +999,14 @@ EXPORT_SYMBOL(xtime_lock);
 /*
  * This function runs timers and the timer-tq in bottom half context.
  */
+/**
+ * TIMER_SOFTIRQ软中断执行体。
+ */
 static void run_timer_softirq(struct softirq_action *h)
 {
+	/**
+	 * 将CPU相关的tvec_base_t结构取到base中。
+	 */
 	tvec_base_t *base = &__get_cpu_var(tvec_bases);
 
 	if (time_after_eq(jiffies, base->timer_jiffies))
@@ -899,15 +1025,32 @@ void run_local_timers(void)
  * Called by the timer interrupt. xtime_lock must already be taken
  * by the timer IRQ!
  */
+/**
+ * 更新xtime的值。并计算系统负载。
+ */
 static inline void update_times(void)
 {
 	unsigned long ticks;
 
 	ticks = jiffies - wall_jiffies;
+	/**
+	 * ticks会==0？？？
+	 * 这是有可能的，wall_jiffies还可能会在其他地方被修改，从而与jiffies一致。
+	 */
 	if (ticks) {
+		/**
+		 * 一般来说，会运行到这里来，那么就更新wall_jiffies吧。。
+		 * 奇怪的是，直接用wall_jiffies = jiffies不就行了。
+		 */
 		wall_jiffies += ticks;
+		/**
+		 * 更新xtime
+		 */
 		update_wall_time(ticks);
 	}
+	/**
+	 * 计算负载平衡。
+	 */
 	calc_load(ticks);
 }
   
@@ -917,9 +1060,18 @@ static inline void update_times(void)
  * jiffies is defined in the linker script...
  */
 
+/**
+ * 被do_timer_interrupt调用，时钟中断的一部分。
+ */
 void do_timer(struct pt_regs *regs)
 {
+	/**
+	 * 直接加jiffies_64是安全的，因为外层函数timer_interrupt此时仍然保持着xtime_lock顺序锁。
+	 */
 	jiffies_64++;
+	/**
+	 * 调用update_times更新系统日期和时间,并计算当前系统负载。
+	 */
 	update_times();
 }
 
@@ -1156,23 +1308,48 @@ static long __sched nanosleep_restart(struct restart_block *restart)
 	return ret;
 }
 
+/**
+ * nanosleep系统调用的服务例程。
+ * 将进程挂起直到指定的时间间隔用完。
+ */
 asmlinkage long sys_nanosleep(struct timespec __user *rqtp, struct timespec __user *rmtp)
 {
 	struct timespec t;
 	unsigned long expire;
 	long ret;
 
+	/**
+	 * 首先调用copy_frome_user将饮食在timerspec结构中的值复制到局部变量t中。
+	 */
 	if (copy_from_user(&t, rqtp, sizeof(t)))
 		return -EFAULT;
 
+	/**
+	 * 假定是一个有效的延迟。
+	 */
 	if ((t.tv_nsec >= 1000000000L) || (t.tv_nsec < 0) || (t.tv_sec < 0))
 		return -EINVAL;
 
+	/**
+	 * timespec_to_jiffies将t中的时间间隔转换成节拍数。
+	 * 再加上t.tv_sec || t.tv_nsec，是为了保险起见。
+	 * 即，计算出来的节拍数始终会被加一。
+	 */
 	expire = timespec_to_jiffies(&t) + (t.tv_sec || t.tv_nsec);
+	/**
+	 * schedule_timeout会调用动态定时器。实现进程的延时。
+	 */
 	current->state = TASK_INTERRUPTIBLE;
+	/**
+	 * 可能会返回一个剩余节拍数。
+	 */
 	expire = schedule_timeout(expire);
 
 	ret = 0;
+	/**
+	 * schedule_timeout返回一个剩余节拍数。可能是系统调用被信号打断了。
+	 * 在此自动重启系统调用。
+	 */
 	if (expire) {
 		struct restart_block *restart;
 		jiffies_to_timespec(expire, &t);
@@ -1183,6 +1360,10 @@ asmlinkage long sys_nanosleep(struct timespec __user *rqtp, struct timespec __us
 		restart->fn = nanosleep_restart;
 		restart->arg0 = jiffies + expire;
 		restart->arg1 = (unsigned long) rmtp;
+		/**
+		 * ERESTART_RESTARTBLOCK表示系统调用需要重启。但是重启的方式不是简单的重新执行系统调用。
+		 * 而是执行一个指定的函数restart_block。让系统调用再睡眠一段时间。
+		 */
 		ret = -ERESTART_RESTARTBLOCK;
 	}
 	return ret;

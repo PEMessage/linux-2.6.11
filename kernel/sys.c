@@ -100,10 +100,20 @@ DEFINE_RWLOCK(notifier_lock);
  *
  *	Currently always returns zero.
  */
- 
+/**
+ * 在通知链表上注册一个节点
+ */
 int notifier_chain_register(struct notifier_block **list, struct notifier_block *n)
 {
+	/**
+	 * 对通知链表的访问，用notifier_lock所保护。
+	 * 使用一个锁来保护所有的通知链表不是一个大的缺陷，也不会影响性能，因为子系统注册notifier_call都是在系统启动或者模块加载的时候，注册完成后，对链表的访问就是只读模式了
+	 */
 	write_lock(&notifier_lock);
+	/**
+	 * 对每一个通知链表，notifier_block 实例插入链表，并按优先级排序。
+	 * 相同优先级的节点按插入时间排序：新加入的节点在表尾。
+	 */
 	while(*list)
 	{
 		if(n->priority > (*list)->priority)
@@ -162,12 +172,17 @@ EXPORT_SYMBOL(notifier_chain_unregister);
  *	Otherwise, the return value is the return value
  *	of the last notifier function called.
  */
- 
+/**
+ * 给通知链发送事件。
+ */
 int notifier_call_chain(struct notifier_block **n, unsigned long val, void *v)
 {
 	int ret=NOTIFY_DONE;
 	struct notifier_block *nb = *n;
 
+	/**
+	 * 按顺序激活所有通知链表上注册的函数
+	 */
 	while(nb)
 	{
 		ret=nb->notifier_call(nb,val,v);

@@ -35,26 +35,59 @@
  * remove_sequence is >= the insert_sequence which pertained when
  * flush_scheduled_work() was called.
  */
+/**
+ * 每个CPU的工作队列描述符
+ * 工作队列与可延迟函数的主要区别在于：工作队列运行在进程上下文，而可延迟函数运行在中断上下文。
+ */
 struct cpu_workqueue_struct {
-
+	/**
+	 * 保护该工作队列的自旋锁
+	 * 虽然每个CPU都有自己的工作队列，但是有时候也需要访问其他CPU的工作队列
+	 * 所以也需要自旋锁	 
+	 */
 	spinlock_t lock;
 
+	/**
+	 * flush_workqueue使用的计数
+	 */
 	long remove_sequence;	/* Least-recently added (next to run) */
 	long insert_sequence;	/* Next to add */
 
+	/**
+	 * 挂起链表的头结点
+	 */
 	struct list_head worklist;
+	/**
+	 * 等待队列，其中的工作者线程因为等待更多的工作而处于睡眠状态
+	 */
 	wait_queue_head_t more_work;
+	/**
+	 * 等待队列，其中的进程由于等待工作队列被刷新而处于睡眠状态
+	 */
 	wait_queue_head_t work_done;
 
+	/**
+	 * 指向workqueue_struct的指针，workqueue_struct中包含了本描述符
+	 */
 	struct workqueue_struct *wq;
+	/**
+	 * 指向工作者线程的进程描述符指针
+	 */
 	task_t *thread;
 
+	/**
+	 * 当前的执行深度（当工作队列链表中的函数阻塞时，这个字段的值会比1大）
+	 */
 	int run_depth;		/* Detect run_workqueue() recursion depth */
 } ____cacheline_aligned;
 
 /*
  * The externally visible workqueue abstraction is an array of
  * per-CPU workqueues:
+ */
+/**
+ * 工作队列描述符，它包含有一个NR_CPUS个元素的数组。
+ * 分多个队列的主要目的是每个CPU都有自己的工作队列，避免了多个CPU访问全局数据时，造成TLB不停刷新
  */
 struct workqueue_struct {
 	struct cpu_workqueue_struct cpu_wq[NR_CPUS];
@@ -94,14 +127,28 @@ static void __queue_work(struct cpu_workqueue_struct *cwq,
  * We queue the work to the CPU it was submitted, but there is no
  * guarantee that it will be processed by that CPU.
  */
+/**
+ * queue_work把函数插入工作队列
+ * wq-被插入的workqueue_struct描述符。
+ * work-要插入的work_struct
+ */
 int fastcall queue_work(struct workqueue_struct *wq, struct work_struct *work)
 {
 	int ret = 0, cpu = get_cpu();
 
+	/**
+	 * test_and_set_bit判断work->pending是否为1
+	 * 如果为1，表示函数已经插入到工作队列中，直接退出
+	 * 否则，执行插入过程，并将标志设置为1。
+	 */
 	if (!test_and_set_bit(0, &work->pending)) {
 		if (unlikely(is_single_threaded(wq)))
 			cpu = 0;
 		BUG_ON(!list_empty(&work->entry));
+		/**
+		 * 调用__queue_work将函数插入到工作队列中。
+		 * 如果工作者线程在本地CPU的cpu_workqueue_struct的more_work上睡眠，则唤醒线程。
+		 */
 		__queue_work(wq->cpu_wq + cpu, work);
 		ret = 1;
 	}
@@ -365,6 +412,9 @@ static void cleanup_workqueue_thread(struct workqueue_struct *wq, int cpu)
 		kthread_stop(p);
 }
 
+/**
+ * 撤消工作队列
+ */
 void destroy_workqueue(struct workqueue_struct *wq)
 {
 	int cpu;

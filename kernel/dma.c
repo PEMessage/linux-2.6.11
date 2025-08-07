@@ -37,7 +37,9 @@
  * in the kernel.
  */
 
-
+/**
+ * DMA通道是一个可共享的资源。为了防止在多核上对它的竞争，需要使用这个锁。
+ */
 DEFINE_SPINLOCK(dma_spin_lock);
 
 /*
@@ -61,7 +63,12 @@ static struct dma_chan dma_chan_busy[MAX_DMA_CHANNELS] = {
 	[4] = { 1, "cascade" },
 };
 
-
+/**
+ * 获取一个DMA通道。用于ISA设备的DMA。
+ *			dmanr:		0－7(MAX_DMA_CHANNELS)之间的一个整数，表示申请的DMA通道号。
+ *			device_id:	设备名称，出现在/proc/dma中。
+ * 返回值0表示成功，-EINVAL表示通道号超出范围。-EBUSY表示另外一个设备占用了通道。
+ */
 int request_dma(unsigned int dmanr, const char * device_id)
 {
 	if (dmanr >= MAX_DMA_CHANNELS)
@@ -77,6 +84,9 @@ int request_dma(unsigned int dmanr, const char * device_id)
 } /* request_dma */
 
 
+/**
+ * 释放一个DMA通道。用于ISA设备的DMA。
+ */
 void free_dma(unsigned int dmanr)
 {
 	if (dmanr >= MAX_DMA_CHANNELS) {

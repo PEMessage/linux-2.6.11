@@ -379,6 +379,11 @@ void profile_hit(int type, void *__pc)
 }
 #endif /* !CONFIG_SMP */
 
+/**
+ * 为内核代码监管采集数据。
+ * 在单CPU上由do_timer_interrupt调用。
+ * 在多CPU上是由smp_local_timer_interrupt调用。
+ */
 void profile_tick(int type, struct pt_regs *regs)
 {
 	if (type == CPU_PROFILING && timer_hook)

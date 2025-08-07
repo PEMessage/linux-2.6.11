@@ -1126,6 +1126,9 @@ retry_delete:
  * This is called by __exit_signal, only when there are no more
  * references to the shared signal_struct.
  */
+/**
+ * 从进程中剥离掉所有posix时间间隔定时器。
+ */
 void exit_itimers(struct signal_struct *sig)
 {
 	struct k_itimer *tmr;

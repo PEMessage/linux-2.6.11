@@ -1188,6 +1188,10 @@ int do_sysctl_strategy (ctl_table *table,
  * This routine returns %NULL on a failure to register, and a pointer
  * to the table header on success.
  */
+/**
+ * /proc/sys 目录下的文件和目录都可以用 ctl_table 结构来定义。
+ * ctl_table 结构可以用register_sysctl_table 和 unregister_sysctl_table 来分别注册和卸载，
+ */
 struct ctl_table_header *register_sysctl_table(ctl_table * table, 
 					       int insert_at_head)
 {
@@ -1213,6 +1217,10 @@ struct ctl_table_header *register_sysctl_table(ctl_table * table,
  *
  * Unregisters the sysctl table and all children. proc entries may not
  * actually be removed until they are no longer used by anyone.
+ */
+/**
+ * /proc/sys 目录下的文件和目录都可以用 ctl_table 结构来定义。
+ * ctl_table 结构可以用register_sysctl_table 和 unregister_sysctl_table 来分别注册和卸载，
  */
 void unregister_sysctl_table(struct ctl_table_header * header)
 {

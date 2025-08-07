@@ -76,6 +76,9 @@ EXPORT_SYMBOL(disable_irq_nosync);
  *
  *	This function may be called - with care - from IRQ context.
  */
+/**
+ * 禁用IRQ线。它还等待其他CPU上为IRQ运行的所有中断处理程序都完成才返回。
+ */
 void disable_irq(unsigned int irq)
 {
 	irq_desc_t *desc = irq_desc + irq;
@@ -97,6 +100,10 @@ EXPORT_SYMBOL(disable_irq);
  *
  *	This function may be called from IRQ context.
  */
+/**
+ * 允许相应的IRQ线，注意在此需要检查是否有中断丢失。
+ * 如果有，就要挽回丢失的中断。
+ */
 void enable_irq(unsigned int irq)
 {
 	irq_desc_t *desc = irq_desc + irq;
@@ -108,11 +115,24 @@ void enable_irq(unsigned int irq)
 		WARN_ON(1);
 		break;
 	case 1: {
+		/**
+		 * 当前深度为1，再次调用enable_irq就真正启用IRQ线。
+		 */
 		unsigned int status = desc->status & ~IRQ_DISABLED;
 
 		desc->status = status;
+		/**
+		 * 只有IRQ_PENDING标志，表示有一次丢失的中断。
+		 */
 		if ((status & (IRQ_PENDING | IRQ_REPLAY)) == IRQ_PENDING) {
+			/**
+			 * 想一想，如果没有这个标志，那么多次调用enable_irq标志，就会多次挽回丢失的中断。
+			 * 这个标志会在中断开始处理时清除
+			 */
 			desc->status = status | IRQ_REPLAY;
+			/**
+			 * 让硬件再次产生一次中断。
+			 */
 			hw_resend_irq(desc->handler,irq);
 		}
 		desc->handler->enable(irq);
@@ -150,6 +170,11 @@ int can_request_irq(unsigned int irq, unsigned long irqflags)
  * Internal function to register an irqaction - typically used to
  * allocate special interrupts that are part of the architecture.
  */
+/**
+ * 将irqaction插入到链表中
+ * irq-IRQ号
+ * new-要插入的描述符
+ */
 int setup_irq(unsigned int irq, struct irqaction * new)
 {
 	struct irq_desc *desc = irq_desc + irq;
@@ -180,28 +205,61 @@ int setup_irq(unsigned int irq, struct irqaction * new)
 	 * The following block of code has to be executed atomically
 	 */
 	spin_lock_irqsave(&desc->lock,flags);
+	/**
+	 * 检查是否已经有设备在使用这个IRQ了。
+	 */
 	p = &desc->action;
+	/**
+	 * 有设备在使用了。
+	 */
 	if ((old = *p) != NULL) {
 		/* Can't share interrupts unless both agree to */
+		/**
+		 * 如果有设备在使用这个IRQ线，就再次检查它是否允许共享IRQ。
+		 * 在这里，仅仅检查第一个挂接到IRQ上的设备是否允许共享就行了。
+		 * 其实，第一个设备允许共享就代表这个IRQ上的所有设备允许共享。
+		 */
 		if (!(old->flags & new->flags & SA_SHIRQ)) {
+			/**
+			 * IRQ线不允许共享，那就打开中断，并返回错误码。
+			 */
 			spin_unlock_irqrestore(&desc->lock,flags);
 			return -EBUSY;
 		}
 
 		/* add new interrupt at end of irq queue */
+		/**
+		 * 在这里，我们已经知道设备上挂接了设备，那就循环，找到最后一个挂接的设备
+		 * 我们要插入的设备应该挂接到这个设备的后面。
+		 */
 		do {
 			p = &old->next;
 			old = *p;
 		} while (old);
+		/**
+		 * IRQ上有设备，并且运行到这里了，表示IRQ允许共享。
+		 */
 		shared = 1;
 	}
 
+	/**
+	 * 把action加到链表的末尾。
+	 */
 	*p = new;
 
+	/**
+	 * 判断是否是与其他设备共享IRQ
+	 */
 	if (!shared) {
+		/**
+		 * 不是共享IRQ，就说明本设备是IRQ上的第一个设备
+		 */
 		desc->depth = 0;
 		desc->status &= ~(IRQ_DISABLED | IRQ_AUTODETECT |
 				  IRQ_WAITING | IRQ_INPROGRESS);
+		/**
+		 * startup和enable是为了确保IRQ信号被激活。
+		 */
 		if (desc->handler->startup)
 			desc->handler->startup(irq);
 		else
@@ -209,6 +267,9 @@ int setup_irq(unsigned int irq, struct irqaction * new)
 	}
 	spin_unlock_irqrestore(&desc->lock,flags);
 
+	/**
+	 * 建立proc文件
+	 */
 	new->irq = irq;
 	register_irq_proc(irq);
 	new->dir = NULL;
@@ -307,6 +368,9 @@ EXPORT_SYMBOL(free_irq);
  *	SA_SAMPLE_RANDOM	The interrupt can be used for entropy
  *
  */
+/**
+ * 设备驱动程序利用IRQ前，调用request_irq。
+ */
 int request_irq(unsigned int irq,
 		irqreturn_t (*handler)(int, void *, struct pt_regs *),
 		unsigned long irqflags, const char * devname, void *dev_id)
@@ -327,6 +391,9 @@ int request_irq(unsigned int irq,
 	if (!handler)
 		return -EINVAL;
 
+	/**
+	 * 先建立一个新的irqaction描述符，并用参数值初始化它。
+	 */
 	action = kmalloc(sizeof(struct irqaction), GFP_ATOMIC);
 	if (!action)
 		return -ENOMEM;
@@ -338,7 +405,14 @@ int request_irq(unsigned int irq,
 	action->next = NULL;
 	action->dev_id = dev_id;
 
+	/**
+	 * setup_irq函数把action描述符插入到合适的IRQ链表。
+	 */
 	retval = setup_irq(irq, action);
+	/**
+	 * 如果setup_irq返回一个错误码，
+	 * 说明IRQ线已经被另一个设备使用，并且设备不允许中断共享。
+	 */
 	if (retval)
 		kfree(action);
 

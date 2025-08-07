@@ -495,6 +495,9 @@ void getnstimeofday (struct timespec *tv)
 	tv->tv_nsec = nsec;
 }
 
+/**
+ * 该函数执行与do_gettimeofday相反的操作
+ */
 int do_settimeofday (struct timespec *tv)
 {
 	time_t wtm_sec, sec = tv->tv_sec;
@@ -530,18 +533,30 @@ int do_settimeofday (struct timespec *tv)
 	return 0;
 }
 
+/**
+ * 计算1970/01/01到目前为止走过的秒数及前一秒内走过的微秒数.
+ */
 void do_gettimeofday (struct timeval *tv)
 {
 	unsigned long seq, nsec, usec, sec, offset;
 	do {
+		/**
+		 * 为读获取顺序锁.
+		 */
 		seq = read_seqbegin(&xtime_lock);
+		/**
+		 * 调用定时器的get_offset方法确定自上一次时钟中断以来所走过的微秒数.
+		 */
 		offset = time_interpolator_get_offset();
 		sec = xtime.tv_sec;
 		nsec = xtime.tv_nsec;
-	} while (unlikely(read_seqretry(&xtime_lock, seq)));
+	} while (unlikely(read_seqretry(&xtime_lock, seq)));/* 直到没有其他过程在顺序锁上进程写操作 */
 
 	usec = (nsec + offset) / 1000;
 
+	/**
+	 * 检查微秒字段是否溢出.
+	 */
 	while (unlikely(usec >= USEC_PER_SEC)) {
 		usec -= USEC_PER_SEC;
 		++sec;
@@ -570,12 +585,19 @@ void getnstimeofday(struct timespec *tv)
 #endif
 
 #if (BITS_PER_LONG < 64)
+/**
+ * 读取jiffies_64的值并返回该值。
+ */
 u64 get_jiffies_64(void)
 {
 	unsigned long seq;
 	u64 ret;
 
 	do {
+		/**
+		 * xtime_lock用来保护对jiffies_64的读访问。直到它没有被其他内核路径写。
+		 * 这是顺序锁的内核中少有的使用地方之一。
+		 */
 		seq = read_seqbegin(&xtime_lock);
 		ret = jiffies_64;
 	} while (read_seqretry(&xtime_lock, seq));

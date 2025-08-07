@@ -27,7 +27,18 @@
 #include <linux/bootmem.h>
 #include <linux/hash.h>
 
+/**
+ * 把PID转化为表索引
+ * pidhash_shift是表索引的长度。以位为单位。
+ */
 #define pid_hashfn(nr) hash_long((unsigned long)nr, pidhash_shift)
+/**
+ * 有四种类型PID散列表。分别是:
+ *     进程PID散列表
+ *     线程组内的线程散列表。
+ *     进程组内的进程散列表。
+ *     会话内的进程散列表。
+ */
 static struct hlist_head *pid_hash[PIDTYPE_MAX];
 static int pidhash_shift;
 
@@ -144,6 +155,10 @@ struct pid * fastcall find_pid(enum pid_type type, int nr)
 	return NULL;
 }
 
+/**
+ * 把task指向的pid等于nr的进程描述符插入type类型的散列表中.
+ * 如果一个PID等于nr的进程描述符已经在散列表中,这个函数就只把task插入已有的PID进程链表中
+ */
 int fastcall attach_pid(task_t *task, enum pid_type type, int nr)
 {
 	struct pid *pid, *task_pid;
@@ -189,6 +204,11 @@ static fastcall int __detach_pid(task_t *task, enum pid_type type)
 	return nr;
 }
 
+/**
+ * 从type类型的pid进程链表中删除task所指向的进程描述符。如果删除后PID进程链表没有变为空，就终止。
+ * 否则，该函数还要从type类型的散列表中删除进程描述。
+ * 最后，如果PID的值没有出现在任何其他散列表中，为了这个值能够被反复使用，该函数还必须清除PID位置中的相应位
+ */
 void fastcall detach_pid(task_t *task, enum pid_type type)
 {
 	int tmp, nr;
@@ -204,6 +224,10 @@ void fastcall detach_pid(task_t *task, enum pid_type type)
 	free_pidmap(nr);
 }
 
+/**
+ * 在type类型的散列表中查找pid等于nr的进程。
+ * 该函数返回所匹配的进程描述符。如果没有匹配的进程，则返回NULL
+ */
 task_t *find_task_by_pid_type(int type, int nr)
 {
 	struct pid *pid;

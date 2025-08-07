@@ -59,6 +59,9 @@ EXPORT_SYMBOL(_write_trylock);
 
 #ifndef CONFIG_PREEMPT
 
+/**
+ * 在没有配置内核抢占时，read_lock的实现。
+ */
 void __lockfunc _read_lock(rwlock_t *lock)
 {
 	preempt_disable();
@@ -172,19 +175,59 @@ EXPORT_SYMBOL(_write_lock);
  *
  * (We do this in a function because inlining it would be excessive.)
  */
-
+/**
+ * 通过BUILD_LOCK_OPS(spin, spinlock);定义了_spin_lock，进而实现了spin_lock
+ * 这是在具有内核抢占时，spin_lock的实现。
+ */
 #define BUILD_LOCK_OPS(op, locktype)					\
 void __lockfunc _##op##_lock(locktype##_t *lock)			\
 {									\
+	/**
+	 * preempt_disable禁用内核抢占。
+	 * 必须在测试spinlock的值前，先禁止抢占，原因很简单，在测试值时如果发生抢占会是什么后果。
+	 */
 	preempt_disable();						\
 	for (;;) {							\
+		/**
+	     * 调用_raw_spin_trylock,它对自旋锁的slock字段进行原子性的测试和设置。
+		 * 本质上它执行以下代码：
+		 *     movb $0,%al
+		 *     xchgb %al, slp->slock
+		 * xchgb原子性的交换al和slp->slock内存单元的内容。如果原值>0，就返回1，否则返回0
+		 * 换句话说，如果原来的锁是开着的，就关掉它，它返回成功标志。如果原来就是锁着的，再次设置锁标志，并返回0。
+		 */
 		if (likely(_raw_##op##_trylock(lock)))			\
+			/**
+		     * 如果旧值是正的，表示锁是打开的，宏结束，已经获得自旋锁了。
+			 * 注意：返回后，本函数的一个负作用就是禁用抢占了。配对使用unlock时再打开抢占。
+			 * 请想一下禁用抢占的必要性。
+			 */
 			break;						\
+		/**
+		 * 否则，无法获得自旋锁，就循环一直到其他CPU释放自旋锁。
+		 * 在循环前，暂时打开preempt_enable。也就是说，在等待自旋锁的中间，进程是可能被抢占的。
+		 */
 		preempt_enable();					\
+		/**
+		 * break_lock表示有其他进程在等待锁。
+		 * 拥有锁的进程可以判断这个标志，提前释放锁。
+		 * 但是，哪个进程会判断这个标志呢？？
+		 * 另外一个问题是：加判断做什么呢？不如果直接设置break_lock为1，效率还稍微高一点。
+		 */
 		if (!(lock)->break_lock)				\
 			(lock)->break_lock = 1;				\
+		/**
+		 * 执行等待循环，cpu_relax简化成一条pause指令。
+		 * 为什么要加入cpu_relax，是有原因的，表面上看，可以用一段死循环的汇编来代替这个循环
+		 * 但是实际上是不能那样的的，那样会锁住总线，unlock想设置值都不能了。
+		 * cpu_relax就是要让CPU休息一下，把总线暂时让出来。
+		 */
 		while (!op##_can_lock(lock) && (lock)->break_lock)	\
 			cpu_relax();					\
+		/**
+		 * 上面的死循环lock的值已经变化了。那么关抢占后，再次调用_raw_spin_trylock
+		 * 真正的获得锁还是在_raw_spin_trylock中。
+		 */
 		preempt_disable();					\
 	}								\
 }									\
@@ -258,10 +301,19 @@ void __lockfunc _spin_unlock(spinlock_t *lock)
 	preempt_enable();
 }
 EXPORT_SYMBOL(_spin_unlock);
-
+/**
+ * 释放写锁。
+ */
 void __lockfunc _write_unlock(rwlock_t *lock)
 {
+	/**
+	 * 调用汇编lock ; addl $0x01000000, rwlp把字段中的未锁标志置位。
+	 */
 	_raw_write_unlock(lock);
+	/**
+	 * 当然了，在获得锁时是禁用抢占的，此时要把抢占打开。
+	 * 另外，注意它的顺序，是与lock时相反。
+	 */
 	preempt_enable();
 }
 EXPORT_SYMBOL(_write_unlock);
