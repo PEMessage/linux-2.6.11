@@ -18,11 +18,17 @@ extern int get_filesystem_list(char * buf);
 
 int __initdata rd_doload;	/* 1 = load RAM disk, 0 = don't load */
 
+/**
+ * 根文件系统的安装标志。可通过rootflags启动参数修改
+ */
 int root_mountflags = MS_RDONLY | MS_VERBOSE;
 char * __initdata root_device_name;
 static char __initdata saved_root_name[64];
 
 /* this is initialized in init/main.c */
+/**
+ * 在系统初始化时指定，表示包含根文件系统的磁盘主设备号
+ */
 dev_t ROOT_DEV;
 
 EXPORT_SYMBOL(ROOT_DEV);
@@ -318,6 +324,9 @@ out:
 }
  
 #ifdef CONFIG_ROOT_NFS
+/**
+ * 绑定远程NFS文件系统作为根文件系统。
+ */
 static int __init mount_nfs_root(void)
 {
 	void *data = nfs_root_data();
@@ -383,12 +392,22 @@ void __init mount_root(void)
 			change_floppy("root floppy");
 	}
 #endif
+	/**
+	 * 调用sys_mknod在rootfs中创建设备文件/dev/root。
+	 */
 	create_dev("/dev/root", ROOT_DEV, root_device_name);
+	/**
+	 * 分配一个缓冲区并填充它
+	 * 然后扫描文件系统类型链表，对每个名字，调用sys_mount试图在根设备上安装给定的文件系统。
+	 */
 	mount_block_root("/dev/root", root_mountflags);
 }
 
 /*
  * Prepare the namespace - decide what/where to mount, load ramdisks, etc.
+ */
+/**
+ * 安装实际上根文件系统。而不是初始的rootfs。
  */
 void __init prepare_namespace(void)
 {
@@ -404,8 +423,14 @@ void __init prepare_namespace(void)
 
 	md_run_setup();
 
+	/**
+	 * 把root_device_name变量置为从启动参数"root"中获取的设备文件名。
+	 */
 	if (saved_root_name[0]) {
 		root_device_name = saved_root_name;
+		/**
+		 * 把ROOT_DEV置为同一设备文件的主设备号和次设备号。
+		 */
 		ROOT_DEV = name_to_dev_t(root_device_name);
 		if (strncmp(root_device_name, "/dev/", 5) == 0)
 			root_device_name += 5;
@@ -419,9 +444,15 @@ void __init prepare_namespace(void)
 	if (is_floppy && rd_doload && rd_load_disk(0))
 		ROOT_DEV = Root_RAM0;
 
+	/**
+	 * mount_root执行真正的挂载。
+	 */
 	mount_root();
 out:
 	umount_devfs("/dev");
+	/**
+	 * 移动rootfs文件系统根目录上的已安装文件系统的安装点。
+	 */
 	sys_mount(".", "/", NULL, MS_MOVE, NULL);
 	sys_chroot(".");
 	security_sb_post_mountroot();

@@ -412,7 +412,9 @@ void __init parse_early_param(void)
 /*
  *	Activate the first processor.
  */
-
+/**
+ * 初始化内核需要的数据结构，激活中断，创建init进程。
+ */
 asmlinkage void __init start_kernel(void)
 {
 	char * command_line;
@@ -511,6 +513,11 @@ asmlinkage void __init start_kernel(void)
 	acpi_early_init(); /* before LAPIC and SMP init */
 
 	/* Do the rest non-__init'ed, we're now alive */
+	/**
+	 * 在这里创建init进程。
+	 * 然后执行cpu_idle函数。这个函数本质上是在开中断的情况下重复执行hlt汇编指令。
+	 * 只有没有其他进程处于TASK_RUNNING状态时，调度程序才选择进程0.
+	 */
 	rest_init();
 }
 
