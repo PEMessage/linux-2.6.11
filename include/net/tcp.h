@@ -82,10 +82,20 @@ struct tcp_ehash_bucket {
  * users logged onto your box, isn't it nice to know that new data
  * ports are created in O(1) time?  I thought so. ;-)	-DaveM
  */
+/* 绑定端口 */
 struct tcp_bind_bucket {
+	/* 绑定的端口号 */
 	unsigned short		port;
+	/**
+	 * 标识端口是否能重用
+	 *		0:		已经绑定，不能重用。
+	 *		1:		已经绑定，能重用
+	 *		-1:		被客户端动态绑定
+	 */
 	signed short		fastreuse;
+	/* 存储bhash散列表结点 */
 	struct hlist_node	node;
+	/* 在端口上的传输控制块链表 */
 	struct hlist_head	owners;
 };
 
@@ -106,6 +116,7 @@ static inline struct tcp_bind_bucket *tb_head(struct tcp_bind_hashbucket *head)
 	return hlist_empty(&head->chain) ? NULL : __tb_head(head);
 }
 
+/* 所有的TCP连接 */
 extern struct tcp_hashinfo {
 	/* This is for sockets with full identity only.  Sockets here will
 	 * always be without wildcards and will have the following invariant:
@@ -115,20 +126,25 @@ extern struct tcp_hashinfo {
 	 * First half of the table is for sockets not in TIME_WAIT, second half
 	 * is for TIME_WAIT sockets only.
 	 */
+	/* 该散列表中保存所有LISTEN状态以外的传输控制块 */
 	struct tcp_ehash_bucket *__tcp_ehash;
 
 	/* Ok, let's try this, I give up, we do need a local binding
 	 * TCP hash as well as the others for fast bind/connect.
 	 */
+	/* 已经绑定端口的散列表， */
 	struct tcp_bind_hashbucket *__tcp_bhash;
 
+	/* __tcp_bhash哈希桶大小 */
 	int __tcp_bhash_size;
+	/* __tcp_ehash哈希桶大小 */
 	int __tcp_ehash_size;
 
 	/* All sockets in TCP_LISTEN state will be in here.  This is the only
 	 * table where wildcard'd TCP sockets can exist.  Hash function here
 	 * is just local port number.
 	 */
+	/* 用来存储管理LISTEN状态的传输控制块的散列表 */
 	struct hlist_head __tcp_listening_hash[TCP_LHTABLE_SIZE];
 
 	/* All the above members are written once at bootup and
@@ -137,8 +153,11 @@ extern struct tcp_hashinfo {
 	 * Now align to a new cache line as all the following members
 	 * are often dirty.
 	 */
+	/* 保护__tcp_lhash_users和__tcp_lhash_wait的锁 */
 	rwlock_t __tcp_lhash_lock ____cacheline_aligned;
+	/* 引用计数 */
 	atomic_t __tcp_lhash_users;
+	/* 在对hashinfo进行写锁时，如果引用计数器__tcp_lhash_users大于0，则会睡眠直到此字段为0，睡眠进程的描述符保存在本字段中 */
 	wait_queue_head_t __tcp_lhash_wait;
 	spinlock_t __tcp_portalloc_lock;
 } tcp_hashinfo;
@@ -184,6 +203,7 @@ struct tcp_tw_bucket {
 	 * Now struct sock also uses sock_common, so please just
 	 * don't add nothing before this first member (__tw_common) --acme
 	 */
+	/* TIME_WAIT状态的SOCK，也包含一般SOCKET的公共属性 */
 	struct sock_common	__tw_common;
 #define tw_family		__tw_common.skc_family
 #define tw_state		__tw_common.skc_state
@@ -192,7 +212,9 @@ struct tcp_tw_bucket {
 #define tw_node			__tw_common.skc_node
 #define tw_bind_node		__tw_common.skc_bind_node
 #define tw_refcnt		__tw_common.skc_refcnt
+	/* 子状态，标识处于FIN_WAIT2还是FIN_WAIT状态 */
 	volatile unsigned char	tw_substate;
+	/* 以下几个字段与inet_sock结构中的含义相同，在创建本结构时从inet_sock中复制而来 */
 	unsigned char		tw_rcv_wscale;
 	__u16			tw_sport;
 	/* Socket demultiplex comparisons on incoming packets. */
@@ -204,16 +226,21 @@ struct tcp_tw_bucket {
 	__u16			tw_num;
 	/* And these are ours. */
 	int			tw_hashent;
+	/* 2MSL超时时间 */
 	int			tw_timeout;
+	/* 这几个字段与tcp_sock结构前几个字段相同 */
 	__u32			tw_rcv_nxt;
 	__u32			tw_snd_nxt;
 	__u32			tw_rcv_wnd;
 	__u32			tw_ts_recent;
 	long			tw_ts_recent_stamp;
+	/* 超时时间，供proc文件系统使用 */
 	unsigned long		tw_ttd;
+	/* 本地绑定端口信息 */
 	struct tcp_bind_bucket	*tw_tb;
+	/* 用于将本结构链接入哈希表 */
 	struct hlist_node	tw_death_node;
-#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)/* IPV6相关 */
 	struct in6_addr		tw_v6_daddr;
 	struct in6_addr		tw_v6_rcv_saddr;
 	int			tw_v6_ipv6only;
@@ -399,8 +426,11 @@ static __inline__ int tcp_sk_listen_hashfn(struct sock *sk)
 #define TCP_MAX_QUICKACKS	16U
 
 /* urg_data states */
+/* 紧急数据是有效的，用户可以获取 */
 #define TCP_URG_VALID	0x0100
+/* 接收到的段中有紧急数据 */
 #define TCP_URG_NOTYET	0x0200
+/* 紧急数据已经被全部读取 */
 #define TCP_URG_READ	0x0400
 
 #define TCP_RETR1	3	/*
@@ -615,11 +645,17 @@ extern int tcp_memory_pressure;
 
 struct open_request;
 
+/* 连接请求处理函数指针表 */
 struct or_calltable {
+	/* 所属协议族 */
 	int  family;
+	/* 发送SYN+ACK段的函数指针，TCP中为tcp_v4_send_synack */
 	int  (*rtx_syn_ack)	(struct sock *sk, struct open_request *req, struct dst_entry*);
+	/* 发送ACK段的函数指针，TCP中为tcp_v4_send_ack */
 	void (*send_ack)	(struct sk_buff *skb, struct open_request *req);
+	/* 析构函数，在释放连接请求控制块时调用，用来清理释放资源。TCP中为tcp_v4_reqst_destructor */
 	void (*destructor)	(struct open_request *req);
+	/* 发送rst段的函数指针，TCP中为tcp_v4_send_reset */
 	void (*send_reset)	(struct sk_buff *skb);
 };
 
@@ -640,26 +676,46 @@ struct tcp_v6_open_req {
 
 /* this structure is too big */
 struct open_request {
+	/* 指向下一个结构的指针 */
 	struct open_request	*dl_next; /* Must be first member! */
+	/* 客户端的初始序号，接收到客户端连接请求SYN段的序号 */
 	__u32			rcv_isn;
+	/* 服务端的初始序号，服务端发送SYN+ACK段的序号 */
 	__u32			snt_isn;
+	/* 对端端口 */
 	__u16			rmt_port;
+	/* 客户端连接请求段中通行的MSS，如无通告，则为初值536 */
 	__u16			mss;
+	/* 重复发送SYN+ACK的次数，达到指定次数后中止连接 */
 	__u8			retrans;
+	/* 填充字段，未用 */
 	__u8			__pad;
-	__u16	snd_wscale : 4, 
+	/* 发送窗口扩大因子 */
+	__u16	snd_wscale : 4,
+		/* 接收窗口扩大因子 */
 		rcv_wscale : 4, 
+		/* TCP段是否存在TCP时间戳选项 */
 		tstamp_ok : 1,
+		/* 是否支持SACK */
 		sack_ok : 1,
+		/* 是否支持窗口扩大因子 */
 		wscale_ok : 1,
+		/* 是否启用了显式拥塞通知 */
 		ecn_ok : 1,
+		/* 标识已接收到第三次握手的ACK段，但是由于服务器繁忙或其他原因导致未能建立起连接 */
 		acked : 1;
 	/* The following two fields can be easily recomputed I think -AK */
+	/* 标识本端最大通告窗口，在生成SYN+ACK时计算 */
 	__u32			window_clamp;	/* window clamp at creation time */
+	/* 连接建立时，本端接收窗口大小 */
 	__u32			rcv_wnd;	/* rcv_wnd offered first time */
+	/* 下一个将要发送的ACK中的时间戳值。当一个包含最后发送ACK确认序号的段到达时，该段中的时间戳保存在此 */
 	__u32			ts_recent;
+	/* 发送完SYN+ACK后，等待客户端确认的超时时间，超过此时间会重发SYN+ACK段 */
 	unsigned long		expires;
+	/* 连接请求函数指针表 */
 	struct or_calltable	*class;
+	/* 三次握手后创建对应的传输控制块 */
 	struct sock		*sk;
 	union {
 		struct tcp_v4_open_req v4_req;
@@ -691,30 +747,38 @@ static inline void tcp_openreq_free(struct open_request *req)
  *	Pointers to address related TCP functions
  *	(i.e. things that depend on the address family)
  */
-
+/* 与网络层相关的操作集。 */
 struct tcp_func {
+	/* 从传输层向网络层传递的接口，TCP中设置为ip_queue_xmit */
 	int			(*queue_xmit)		(struct sk_buff *skb,
 							 int ipfragok);
 
+	/* 计算传输层首部校验和函数，TCP中为tcp_v4_send_check */
 	void			(*send_check)		(struct sock *sk,
 							 struct tcphdr *th,
 							 int len,
 							 struct sk_buff *skb);
 
+	/* 当构造选项时调用，如果还没有路由缓存项，则为其选择路由 */
 	int			(*rebuild_header)	(struct sock *sk);
 
+	/* 处理连接请求的接口，TCP中为tcp_v4_conn_request */
 	int			(*conn_request)		(struct sock *sk,
 							 struct sk_buff *skb);
 
+	/* 当完成三次握手后，调用此接口来创建一个新的套接口，在TCP中为tcp_v4_sync_recv_sock */
 	struct sock *		(*syn_recv_sock)	(struct sock *sk,
 							 struct sk_buff *skb,
 							 struct open_request *req,
 							 struct dst_entry *dst);
-    
+
+	/* 在启用tw_recycle情况下，关闭套接口时，记录相关时间戳信息到对端信息管理块中 */
 	int			(*remember_stamp)	(struct sock *sk);
 
+	/* IP首部长度 */
 	__u16			net_header_len;
 
+	/* setsocket，getsocket系统调用接口 */
 	int			(*setsockopt)		(struct sock *sk, 
 							 int level, 
 							 int optname, 
@@ -727,10 +791,11 @@ struct tcp_func {
 							 char __user *optval, 
 							 int __user *optlen);
 
-
+	/* 将IP套接口地址结构中的地址信息复制到传输控制块中，实际上未使用 */
 	void			(*addr2sockaddr)	(struct sock *sk,
 							 struct sockaddr *);
 
+	/* 套接口地址长度 */
 	int sockaddr_len;
 };
 
@@ -802,9 +867,9 @@ extern void			tcp_rcv_space_adjust(struct sock *sk);
 
 enum tcp_ack_state_t
 {
-	TCP_ACK_SCHED = 1,
-	TCP_ACK_TIMER = 2,
-	TCP_ACK_PUSHED= 4
+	TCP_ACK_SCHED = 1,/* 有ACK需要发送，是立即发送还是延时发送要看其他标志，在接收到有负荷的TCP段时设置此标志 */
+	TCP_ACK_TIMER = 2,/* 延时发送定时器已经启动 */
+	TCP_ACK_PUSHED= 4/* 只要有ACK就立即发送 */
 };
 
 static inline void tcp_schedule_ack(struct tcp_sock *tp)
@@ -1074,13 +1139,14 @@ static __inline__ void tcp_fast_path_on(struct tcp_sock *tp)
 	__tcp_fast_path_on(tp, tp->snd_wnd >> tp->rx_opt.snd_wscale);
 }
 
+/* TCP接收是否满足快速路径的条件 */
 static inline void tcp_fast_path_check(struct sock *sk, struct tcp_sock *tp)
 {
-	if (skb_queue_len(&tp->out_of_order_queue) == 0 &&
-	    tp->rcv_wnd &&
-	    atomic_read(&sk->sk_rmem_alloc) < sk->sk_rcvbuf &&
-	    !tp->urg_data)
-		tcp_fast_path_on(tp);
+	if (skb_queue_len(&tp->out_of_order_queue) == 0 &&/* 接收缓存乱序队列为空 */
+	    tp->rcv_wnd &&/* 接收窗口不为0，表示当前还能接收数据 */
+	    atomic_read(&sk->sk_rmem_alloc) < sk->sk_rcvbuf &&/* 接收缓存未达到上限，说明还能接收数据 */
+	    !tp->urg_data)/* 没有接收到带外数据，快速路径不处理带外数据 */
+		tcp_fast_path_on(tp);/* 根据发送窗口设置首部预测标志，预测的是对方的接收窗口大小和ACK标志位 */
 }
 
 /* Compute the actual receive window we are currently advertising.
@@ -1117,16 +1183,24 @@ extern u32	__tcp_select_window(struct sock *sk);
  * 40 bytes on 64-bit machines, if this grows please adjust
  * skbuff.h:skbuff->cb[xxx] size appropriately.
  */
+/* TCP层在报文中的私有数据 */
 struct tcp_skb_cb {
-	union {
+	union {/* 报文TCP首部 */
 		struct inet_skb_parm	h4;
 #if defined(CONFIG_IPV6) || defined (CONFIG_IPV6_MODULE)
 		struct inet6_skb_parm	h6;
 #endif
 	} header;	/* For incoming frames		*/
+	/**
+	 * 报文开始序号和结束序号。
+	 * 对普通报文来说，结束序号就是开始序号加数据长度。
+	 * 如果报文存在SYN和FIN标志，那么结束序号就是开始序号加数据长度再加1，因为这两个标志会占用一个序号。
+	 */
 	__u32		seq;		/* Starting sequence number	*/
 	__u32		end_seq;	/* SEQ + FIN + SYN + datalen	*/
+	/* 发送段的jiffies值 */
 	__u32		when;		/* used to compute rtt's	*/
+	/* 原始的TCP首部标志 */
 	__u8		flags;		/* TCP header flags.		*/
 
 	/* NOTE: These must match up to the flags byte in a
@@ -1141,6 +1215,7 @@ struct tcp_skb_cb {
 #define TCPCB_FLAG_ECE		0x40
 #define TCPCB_FLAG_CWR		0x80
 
+	/* 段的重传状态，同时标志是否包含紧急数据，如TCPCB_SACKED_ACKED */
 	__u8		sacked;		/* State flags for SACK/FACK.	*/
 #define TCPCB_SACKED_ACKED	0x01	/* SKB ACK'd by a SACK block	*/
 #define TCPCB_SACKED_RETRANS	0x02	/* SKB retransmitted		*/
@@ -1154,7 +1229,9 @@ struct tcp_skb_cb {
 
 #define TCPCB_AT_TAIL		(TCPCB_URG)
 
+	/* 如果有紧急数据，则该字段用来保存TCP首部中紧急指针值 */
 	__u16		urg_ptr;	/* Valid w/URG flags is set.	*/
+	/* 接收到的TCP段首部中的确认序号 */
 	__u32		ack_seq;	/* Sequence number ACK'd	*/
 };
 
@@ -1321,6 +1398,7 @@ static inline __u32 tcp_current_ssthresh(struct tcp_sock *tp)
 			    (tp->snd_cwnd >> 2)));
 }
 
+/* 计算已离开主机在网络中未确认的的段数 */
 static inline void tcp_sync_left_out(struct tcp_sock *tp)
 {
 	if (tp->rx_opt.sack_ok &&
@@ -1332,44 +1410,53 @@ static inline void tcp_sync_left_out(struct tcp_sock *tp)
 extern void tcp_cwnd_application_limited(struct sock *sk);
 
 /* Congestion window validation. (RFC2861) */
-
+/* 当成功输出TCP段后，调用此函数进行拥塞窗口的校验 */
 static inline void tcp_cwnd_validate(struct sock *sk, struct tcp_sock *tp)
 {
 	__u32 packets_out = tp->packets_out;
 
-	if (packets_out >= tp->snd_cwnd) {
+	if (packets_out >= tp->snd_cwnd) {/* 发出而未确认的段超过了拥塞窗口，说明发送方受到了网络限制 */
 		/* Network is feed fully. */
+		/* 更新拥塞时间和拥塞计数 */
 		tp->snd_cwnd_used = 0;
 		tp->snd_cwnd_stamp = tcp_time_stamp;
-	} else {
+	} else {/* 未填满拥塞窗口，则可能是应用程序进行限制 */
 		/* Network starves. */
 		if (tp->packets_out > tp->snd_cwnd_used)
 			tp->snd_cwnd_used = tp->packets_out;
 
+		/* 最近一次检测拥塞窗口的时间超过了重传时间 */
 		if ((s32)(tcp_time_stamp - tp->snd_cwnd_stamp) >= tp->rto)
-			tcp_cwnd_application_limited(sk);
+			tcp_cwnd_application_limited(sk);/* 重新调整检测拥塞窗口 */
 	}
 }
 
 /* Set slow start threshould and cwnd not falling to slow start */
 static inline void __tcp_enter_cwr(struct tcp_sock *tp)
 {
-	tp->undo_marker = 0;
+	tp->undo_marker = 0;/* 进入CWR后不允许再进行拥塞窗口撤销了 */
 	tp->snd_ssthresh = tcp_recalc_ssthresh(tp);
+	/* 根据不同的拥塞算法重新设置拥塞慢启动阀值，微调拥塞窗口大小 */
 	tp->snd_cwnd = min(tp->snd_cwnd,
 			   tcp_packets_in_flight(tp) + 1U);
+	/* 调整状态后，将接收的ACK段清0 */
 	tp->snd_cwnd_cnt = 0;
+	/* 拥塞控制发生时的snd，表示重传队列的尾部 */
 	tp->high_seq = tp->snd_nxt;
+	/* 最后一次调整拥塞窗口的时间 */
 	tp->snd_cwnd_stamp = tcp_time_stamp;
+	/* 标识由于收到显示拥塞通知而进入拥塞状态 */
 	TCP_ECN_queue_cwr(tp);
 }
 
+/* 进入CWR */
 static inline void tcp_enter_cwr(struct tcp_sock *tp)
 {
+	/* 进入CWR后不需要拥塞窗口撤销了，因此需要清除拥塞控制的慢启动阀值的旧值 */
 	tp->prior_ssthresh = 0;
-	if (tp->ca_state < TCP_CA_CWR) {
+	if (tp->ca_state < TCP_CA_CWR) {/* 在OPEN或者Disorder状态才能迁移到CWR状态 */
 		__tcp_enter_cwr(tp);
-		tcp_set_ca_state(tp, TCP_CA_CWR);
+		tcp_set_ca_state(tp, TCP_CA_CWR); /* 设置当前拥塞状态为CWR */
 	}
 }
 
@@ -1539,6 +1626,7 @@ static __inline__ int __tcp_checksum_complete(struct sk_buff *skb)
 	return (unsigned short)csum_fold(skb_checksum(skb, 0, skb->len, skb->csum));
 }
 
+/* 基于伪首部累加和，完成全包校验和检测。用于没有负载的TCP段 */
 static __inline__ int tcp_checksum_complete(struct sk_buff *skb)
 {
 	return skb->ip_summed != CHECKSUM_UNNECESSARY &&
@@ -1563,27 +1651,32 @@ static __inline__ void tcp_prequeue_init(struct tcp_sock *tp)
  *
  * NOTE: is this not too big to inline?
  */
+/* 将TCP段添加到prequeue队列 */
 static __inline__ int tcp_prequeue(struct sock *sk, struct sk_buff *skb)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 
-	if (!sysctl_tcp_low_latency && tp->ucopy.task) {
+	if (!sysctl_tcp_low_latency && tp->ucopy.task) {/* 只有当没有启用tcp_low_latency，并且用户进程正在读取数据时，才将段添加到prequeue队列 */
+		/* 将接收到的报文添加到prequeue队列 */
 		__skb_queue_tail(&tp->ucopy.prequeue, skb);
+		/* 更新prequeue队列消耗的内存 */
 		tp->ucopy.memory += skb->truesize;
-		if (tp->ucopy.memory > sk->sk_rcvbuf) {
+		if (tp->ucopy.memory > sk->sk_rcvbuf) {/* prequeue队列中的内存超过接收缓存上限 */
 			struct sk_buff *skb1;
 
 			BUG_ON(sock_owned_by_user(sk));
 
+			/* 遍历prequeue队列中的报文 */
 			while ((skb1 = __skb_dequeue(&tp->ucopy.prequeue)) != NULL) {
+				/* 将报文添加到后备队列中 */
 				sk->sk_backlog_rcv(sk, skb1);
 				NET_INC_STATS_BH(LINUX_MIB_TCPPREQUEUEDROPPED);
 			}
 
-			tp->ucopy.memory = 0;
-		} else if (skb_queue_len(&tp->ucopy.prequeue) == 1) {
+			tp->ucopy.memory = 0;/* prequeue队列数据已经清空 */
+		} else if (skb_queue_len(&tp->ucopy.prequeue) == 1) {/* 没有超过接收缓存上限，并且prequeue队列中只有一个报文 */
 			wake_up_interruptible(sk->sk_sleep);
-			if (!tcp_ack_scheduled(tp))
+			if (!tcp_ack_scheduled(tp))/* 重置延迟确认定时器 */
 				tcp_reset_xmit_timer(sk, TCP_TIME_DACK, (3*TCP_RTO_MIN)/4);
 		}
 		return 1;
@@ -1656,9 +1749,10 @@ static __inline__ void tcp_sack_reset(struct tcp_options_received *rx_opt)
 	rx_opt->num_sacks = 0;
 }
 
+/* 构建非SYN和SYN+ACK段的TCP选项 */
 static __inline__ void tcp_build_and_update_options(__u32 *ptr, struct tcp_sock *tp, __u32 tstamp)
 {
-	if (tp->rx_opt.tstamp_ok) {
+	if (tp->rx_opt.tstamp_ok) {/* 套接口支持时间戳 */
 		*ptr++ = __constant_htonl((TCPOPT_NOP << 24) |
 					  (TCPOPT_NOP << 16) |
 					  (TCPOPT_TIMESTAMP << 8) |
@@ -1666,15 +1760,17 @@ static __inline__ void tcp_build_and_update_options(__u32 *ptr, struct tcp_sock 
 		*ptr++ = htonl(tstamp);
 		*ptr++ = htonl(tp->rx_opt.ts_recent);
 	}
-	if (tp->rx_opt.eff_sacks) {
+	if (tp->rx_opt.eff_sacks) {/* 待发送报文的SACK队列大小 */
 		struct tcp_sack_block *sp = tp->rx_opt.dsack ? tp->duplicate_sack : tp->selective_acks;
 		int this_sack;
 
+		/* TCPOLEN_SACK_PERBLOCK是每个SACK块的大小 */
 		*ptr++ = __constant_htonl((TCPOPT_NOP << 24) |
 					  (TCPOPT_NOP << 16) |
 					  (TCPOPT_SACK << 8) |
 					  (TCPOLEN_SACK_BASE +
 					   (tp->rx_opt.eff_sacks * TCPOLEN_SACK_PERBLOCK)));
+		/* 遍历输出每个SACK边界值对 */
 		for(this_sack = 0; this_sack < tp->rx_opt.eff_sacks; this_sack++) {
 			*ptr++ = htonl(sp[this_sack].start_seq);
 			*ptr++ = htonl(sp[this_sack].end_seq);
@@ -1691,6 +1787,7 @@ static __inline__ void tcp_build_and_update_options(__u32 *ptr, struct tcp_sock 
  * MAX_SYN_SIZE to match the new maximum number of options that you
  * can generate.
  */
+/* 为SYN和SYN+ACK段构建TCP首部中的TCP选项 */
 static inline void tcp_syn_build_options(__u32 *ptr, int mss, int ts, int sack,
 					     int offer_wscale, int wscale, __u32 tstamp, __u32 ts_recent)
 {
@@ -1707,20 +1804,22 @@ static inline void tcp_syn_build_options(__u32 *ptr, int mss, int ts, int sack,
 	 * SACKs don't matter, we never delay an ACK when we
 	 * have any of those going out.
 	 */
+	/* 生成MSS选项，如果不指定则默认是536 */
 	*ptr++ = htonl((TCPOPT_MSS << 24) | (TCPOLEN_MSS << 16) | mss);
-	if (ts) {
-		if(sack)
+	if (ts) {/* 如果启用时间戳 */
+		if(sack)/* SACK选项 */
 			*ptr++ = __constant_htonl((TCPOPT_SACK_PERM << 24) | (TCPOLEN_SACK_PERM << 16) |
 						  (TCPOPT_TIMESTAMP << 8) | TCPOLEN_TIMESTAMP);
 		else
 			*ptr++ = __constant_htonl((TCPOPT_NOP << 24) | (TCPOPT_NOP << 16) |
 						  (TCPOPT_TIMESTAMP << 8) | TCPOLEN_TIMESTAMP);
+		/* 时间戳和时间戳回显应答 */
 		*ptr++ = htonl(tstamp);		/* TSVAL */
 		*ptr++ = htonl(ts_recent);	/* TSECR */
 	} else if(sack)
 		*ptr++ = __constant_htonl((TCPOPT_NOP << 24) | (TCPOPT_NOP << 16) |
 					  (TCPOPT_SACK_PERM << 8) | TCPOLEN_SACK_PERM);
-	if (offer_wscale)
+	if (offer_wscale)/* 窗口扩大因子选项 */
 		*ptr++ = htonl((TCPOPT_NOP << 24) | (TCPOPT_WINDOW << 16) | (TCPOLEN_WINDOW << 8) | (wscale));
 }
 
@@ -1765,13 +1864,20 @@ static inline void tcp_acceptq_queue(struct sock *sk, struct open_request *req,
 	req->dl_next = NULL;
 }
 
+/* 在侦听套口上的连接请求块 */
 struct tcp_listen_opt
 {
+	/* 实际分配用来保存SYN请求连接的数组长度 */
 	u8			max_qlen_log;	/* log_2 of maximal queued SYNs */
+	/* 当前请求连接块数目 */
 	int			qlen;
+	/* 当前未重传过SYN+ACK段的请求块数目 */
 	int			qlen_young;
+	/* 用来记录连接建立定时器处理函数下次被激活时，处理的连接请求块散列表入口。 */
 	int			clock_hand;
+	/* 用来计算SYN请求块散列表键值的随机数 */
 	u32			hash_rnd;
+	/* 散列表 */
 	struct open_request	*syn_table[TCP_SYNQ_HSIZE];
 };
 
@@ -1921,6 +2027,7 @@ static inline void tcp_v4_setup_caps(struct sock *sk, struct dst_entry *dst)
 
 #define TCP_CHECK_TIMER(sk) do { } while (0)
 
+/* 判断是否可以使用FRTO算法进行处理 */
 static inline int tcp_use_frto(const struct sock *sk)
 {
 	const struct tcp_sock *tp = tcp_sk(sk);
@@ -1929,9 +2036,9 @@ static inline int tcp_use_frto(const struct sock *sk)
 	 * unsent new data, and the advertised window should allow
 	 * sending it.
 	 */
-	return (sysctl_tcp_frto && sk->sk_send_head &&
+	return (sysctl_tcp_frto && sk->sk_send_head &&/* 启用了FRTO算法，发送队列中有数据需要发送 */
 		!after(TCP_SKB_CB(sk->sk_send_head)->end_seq,
-		       tp->snd_una + tp->snd_wnd));
+		       tp->snd_una + tp->snd_wnd));/* 待发送的段全部在发送窗口内 */
 }
 
 static inline void tcp_mib_init(void)

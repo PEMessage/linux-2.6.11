@@ -68,6 +68,9 @@ static inline unsigned int csum_sub(unsigned int csum, unsigned int addend)
 	return csum_add(csum, ~addend);
 }
 
+/**
+ * 增加了一块数据后计算校验和。
+ */
 static inline unsigned int
 csum_block_add(unsigned int csum, unsigned int csum2, int offset)
 {
@@ -76,6 +79,9 @@ csum_block_add(unsigned int csum, unsigned int csum2, int offset)
 	return csum_add(csum, csum2);
 }
 
+/**
+ * 减少了一块数据后计算校验和。
+ */
 static inline unsigned int
 csum_block_sub(unsigned int csum, unsigned int csum2, int offset)
 {

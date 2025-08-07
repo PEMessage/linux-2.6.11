@@ -24,9 +24,18 @@ struct qdisc_rate_table
 	int		refcnt;
 };
 
+/**
+ * 流量管理。
+ */
 struct Qdisc
 {
+	/**
+	 * 添加一个元素到队列。
+	 */
 	int 			(*enqueue)(struct sk_buff *skb, struct Qdisc *dev);
+	/**
+	 * 从队列中取出一个元素。
+	 */
 	struct sk_buff *	(*dequeue)(struct Qdisc *dev);
 	unsigned		flags;
 #define TCQ_F_BUILTIN	1
@@ -83,6 +92,9 @@ struct Qdisc_class_ops
 					struct gnet_dump *);
 };
 
+/**
+ * 流量控制队列惩罚算法
+ */
 struct Qdisc_ops
 {
 	struct Qdisc_ops	*next;
@@ -90,8 +102,17 @@ struct Qdisc_ops
 	char			id[IFNAMSIZ];
 	int			priv_size;
 
+	/**
+	 * 添加一个元素到队列。
+	 */
 	int 			(*enqueue)(struct sk_buff *, struct Qdisc *);
+	/**
+	 * 从队列中取出一个元素。
+	 */
 	struct sk_buff *	(*dequeue)(struct Qdisc *);
+	/**
+	 * 新将一个元素放回队列。
+	 */
 	int 			(*requeue)(struct sk_buff *, struct Qdisc *);
 	unsigned int		(*drop)(struct Qdisc *);
 

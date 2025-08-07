@@ -70,6 +70,9 @@ struct snmp_mib {
 
 /* IPstats */
 #define IPSTATS_MIB_MAX	__IPSTATS_MIB_MAX
+/**
+ * SNMP采用一种名为MIB（管理信息库）的对象来收集系统的状态。名为ipstates_mib的数据结构会保存关于IP层的统计资料。
+ */
 struct ipstats_mib {
 	unsigned long	mibs[IPSTATS_MIB_MAX];
 } __SNMP_MIB_ALIGN__;

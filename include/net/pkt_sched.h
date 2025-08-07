@@ -228,6 +228,11 @@ extern void qdisc_put_rtab(struct qdisc_rate_table *tab);
 
 extern int qdisc_restart(struct net_device *dev);
 
+/**
+ * 无论何时，当一个设备被调度发送包时，下一个被传送的帧的由qdisc_run函数选择，它间接的调用相关队列的dequeue虚函数。
+ * 同样的，实际的工作是由另外一个函数完成的：qdist_restart。
+ * qdist_run函数是一个简单的包装函数，它过滤被禁止的出队列.
+ */
 static inline void qdisc_run(struct net_device *dev)
 {
 	while (!netif_queue_stopped(dev) && qdisc_restart(dev) < 0)

@@ -15,16 +15,44 @@
 #include <linux/spinlock.h>
 #include <asm/atomic.h>
 
+/**
+ * 内核会为最近连接过的每个远程主机都保留一个这一结构的实例。
+ * 所有inet_peer被一棵AVL组织在一起。
+ */
 struct inet_peer
 {
+	/**
+	 * 它们是指向两棵子树的左右指针。
+	 */
 	struct inet_peer	*avl_left, *avl_right;
+	/**
+	 * 用于把此节点连接到一个内含过期元素的链表。而unused_prevp是用于检查此节点是否在该链表中。
+	 */
 	struct inet_peer	*unused_next, **unused_prevp;
+	/**
+	 * 此元素的引用计数值。使用此结构者有路由子系统及TCP层。
+	 */
 	atomic_t		refcnt;
+	/**
+	 * 当此元素通过inet_putpeer加入未用链表inet_peer_unuser_head的时间。
+	 */
 	unsigned long		dtime;		/* the time of last use of not
 						 * referenced entries */
+	/**
+	 * 远程端点的IP地址。
+	 */
 	__u32			v4daddr;	/* peer's address */
+	/**
+	 * AVL树的高度。
+	 */
 	__u16			avl_height;
+	/**
+	 * 此端点下一个可用的包ID。
+	 */
 	__u16			ip_id_count;	/* IP ID for the next packet */
+	/**
+	 * 由TCP使用，管理时间戳。
+	 */
 	__u32			tcp_ts;
 	unsigned long		tcp_ts_stamp;
 };

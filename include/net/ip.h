@@ -36,6 +36,9 @@
 
 struct sock;
 
+/**
+ * IP标志和选项结构。
+ */
 struct inet_skb_parm
 {
 	struct ip_options	opt;		/* Compiled IP options		*/
@@ -47,13 +50,28 @@ struct inet_skb_parm
 #define IPSKB_XFRM_TUNNEL_SIZE	8
 };
 
+/**
+ * 此结构包含了传输包所需要的各种信息。
+ */
 struct ipcm_cookie
 {
+	/**
+	 * 目的地IP地址
+	 */
 	u32			addr;
+	/**
+	 * 出设备
+	 */
 	int			oif;
+	/**
+	 * IP选项
+	 */
 	struct ip_options	*opt;
 };
-
+/**
+ * 在重组时，用此宏返回skb->cb中的IP选项信息。由于此inet_skb_parm字段是ipfrag_skb_cb的第一个字段。
+ * 因此，skb->cb可以安全的转化为inet_skb_parm或者ipfrag_skb_cb
+ */
 #define IPCB(skb) ((struct inet_skb_parm*)((skb)->cb))
 
 struct ip_ra_chain
@@ -142,17 +160,43 @@ void ip_send_reply(struct sock *sk, struct sk_buff *skb, struct ip_reply_arg *ar
 
 extern int ip_finish_output(struct sk_buff *skb);
 
+/**
+ * ipv4_devconf结构用于存储每个设备的配置，ipv4_config存储主机的配置。
+ */
 struct ipv4_config
 {
+	/**
+	 * 该参数也存在于ipv4_devconfig结构内。
+	 * 当特定错误发生时，此参数可用于决定是否打印警告信息到控制台上。
+	 * 它的值不会被直接检查，而是通过宏IN_DEV_LOG_MARTIANS（可以把较高优先权给予这个设备实例）。
+	 */
 	int	log_martians;
+	/**
+	 * 当主机的IP配置是通过象DHCP这类协议完成时，就会设置成1。
+	 */
 	int	autoconfig;
+	/**
+	 * 当为0时，路径MTU发现功能就会开启。
+	 */
 	int	no_pmtu_disc;
 };
 
 extern struct ipv4_config ipv4_config;
 DECLARE_SNMP_STAT(struct ipstats_mib, ip_statistics);
+/**
+ * 更新IP统计计数。
+ * 用在任一种环境中，因为其内部会检查它是否在中断环境中被调用，然后据以更新正确元素。
+ */
 #define IP_INC_STATS(field)		SNMP_INC_STATS(ip_statistics, field)
+/**
+ * 更新IP统计计数。
+ * 用在中断环境中。
+ */
 #define IP_INC_STATS_BH(field)		SNMP_INC_STATS_BH(ip_statistics, field)
+/**
+ * 更新IP统计计数。
+ * 用在中断环境外。
+ */
 #define IP_INC_STATS_USER(field) 	SNMP_INC_STATS_USER(ip_statistics, field)
 DECLARE_SNMP_STAT(struct linux_mib, net_statistics);
 #define NET_INC_STATS(field)		SNMP_INC_STATS(net_statistics, field)
@@ -167,6 +211,9 @@ extern int sysctl_ip_default_ttl;
 #ifdef CONFIG_INET
 /* The function in 2.2 was invalid, producing wrong result for
  * check=0xFEFF. It was noticed by Arthur Skawina _year_ ago. --ANK(000625) */
+/**
+ * 在转发包时，递减TTL字段，同时会修正IP层校验和。
+ */
 static inline
 int ip_decrease_ttl(struct iphdr *iph)
 {
@@ -175,7 +222,9 @@ int ip_decrease_ttl(struct iphdr *iph)
 	iph->check = check + (check>=0xFFFF);
 	return --iph->ttl;
 }
-
+/**
+ * 根据系统设置，如果打开了PMTU发现功能，以及当前的PMTU值，确定是否需要对IP进行分片。
+ */
 static inline
 int ip_dont_fragment(struct sock *sk, struct dst_entry *dst)
 {
@@ -186,18 +235,24 @@ int ip_dont_fragment(struct sock *sk, struct dst_entry *dst)
 
 extern void __ip_select_ident(struct iphdr *iph, struct dst_entry *dst, int more);
 
+/**
+ * 为IP报文选择ID。
+ */
 static inline void ip_select_ident(struct iphdr *iph, struct dst_entry *dst, struct sock *sk)
 {
-	if (iph->frag_off & htons(IP_DF)) {
+	if (iph->frag_off & htons(IP_DF)) {/* 不能分段的包 */
 		/* This is only to work around buggy Windows95/2000
 		 * VJ compression implementations.  If the ID field
 		 * does not change, they drop every other packet in
 		 * a TCP stream using header compression.
 		 */
+		/**
+		 * 间接从sock数据结构中取出。这是为了解决windows系统的BUG。
+		 */
 		iph->id = (sk && inet_sk(sk)->daddr) ?
 					htons(inet_sk(sk)->id++) : 0;
 	} else
-		__ip_select_ident(iph, dst, 0);
+		__ip_select_ident(iph, dst, 0);/* 对可以分段的包，则从__ip_select_ident获得ID */
 }
 
 static inline void ip_select_ident_more(struct iphdr *iph, struct dst_entry *dst, struct sock *sk, int more)
