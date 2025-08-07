@@ -390,6 +390,9 @@ static int page_referenced_file(struct page *page, int ignore_token)
  * Quick test_and_clear_referenced for all mappings to a page,
  * returns the number of ptes which referenced the page.
  */
+/**
+ * 如果PG_referenced标志或者页表项中的某些accessed标志位置位，则该函数返回1，否则返回0.
+ */
 int page_referenced(struct page *page, int is_locked, int ignore_token)
 {
 	int referenced = 0;
@@ -400,9 +403,15 @@ int page_referenced(struct page *page, int is_locked, int ignore_token)
 	if (page_test_and_clear_young(page))
 		referenced++;
 
+	/**
+	 * 如果标志置位则清0.
+	 */
 	if (TestClearPageReferenced(page))
 		referenced++;
 
+	/**
+	 * 使用反向映射方法，对引用该页的所有用户态页表项中的accessed标志进行检查并清0.
+	 */
 	if (page_mapped(page) && page->mapping) {
 		if (PageAnon(page))
 			referenced += page_referenced_anon(page, ignore_token);
@@ -499,6 +508,11 @@ void page_remove_rmap(struct page *page)
  * Subfunctions of try_to_unmap: try_to_unmap_one called
  * repeatedly from either try_to_unmap_anon or try_to_unmap_file.
  */
+/**
+ * 被try_to_unmap_anon和try_to_unmap_file重复调用。用于解除反向映射。
+ * 		page:	是一个指向目标页描述符的指针。该页将被解除所有反向映射。
+ *		vma:	指向线性区描述符的指针。
+ */
 static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 {
 	struct mm_struct *mm = vma->vm_mm;
@@ -512,7 +526,13 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 
 	if (!mm->rss)
 		goto out;
+	/**
+	 * 计算page在vma中的虚拟地址。即待回收页的线性地址。
+	 */
 	address = vma_address(page, vma);
+	/**
+	 * 如果page是匿名页，那么，其anon_vma链表中可能存在有不包含目标页的线性区。此时应该结束函数。
+	 */
 	if (address == -EFAULT)
 		goto out;
 
@@ -520,8 +540,14 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 	 * We need the page_table_lock to protect us from page faults,
 	 * munmap, fork, etc...
 	 */
+	/**
+	 * 获得保护页表的自旋锁。
+	 */
 	spin_lock(&mm->page_table_lock);
 
+	/**
+	 * 调用pgd_offset，pud_offset，pmd_offset，pte_offset_map以获得对应目标页线性地址的页表项地址。
+	 */
 	pgd = pgd_offset(mm, address);
 	if (!pgd_present(*pgd))
 		goto out_unlock;
@@ -538,6 +564,15 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 	if (!pte_present(*pte))
 		goto out_unmap;
 
+	/**
+	 * 以下执行一些检查来验证目标页是否可以有效回收。
+	 */
+
+	/**
+	 * 检查指向目标页的页表项。
+	 *		如果指向页框的页表项与COW关联，而vma标识的匿名线性区仍然属于原页框的anon_vma链表。
+	 *		mremap系统调用可重新映射线性区，并通过直接修改页表项将页移到用户态地址空间。这种特殊情况下，因为页描述符的index字段不能用于确定页的实际纯属地址，所以面向对象的反射映射也不能被使用。
+	 */ 
 	if (page_to_pfn(page) != pte_pfn(*pte))
 		goto out_unmap;
 
@@ -545,6 +580,10 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 	 * If the page is mlock()d, we cannot swap it out.
 	 * If it's recently referenced (perhaps page_referenced
 	 * skipped over this mm) then we should reactivate it.
+	 */
+	/**
+	 * 验证线性区不是锁定或者保留的。
+	 * 鸡页表项中的访问标志位是否被清0。如果没有，则将它清0，并返回SWAP_FAIL，该标志位表示页在使用，因而不能被回收。
 	 */
 	if ((vma->vm_flags & (VM_LOCKED|VM_RESERVED)) ||
 			ptep_clear_flush_young(vma, address, pte)) {
@@ -567,6 +606,9 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 	 * to drop page lock: its reference to the page stops existing
 	 * ptes from being unmapped, so swapoff can make progress.
 	 */
+	/**
+	 * 验证页是否属于交换高速缓存，且此时它正由get_user_pages处理。在这种情况下，为避免恶性竞争条件，函数返回SWAP_FAIL。
+	 */
 	if (PageSwapCache(page) &&
 	    page_count(page) != page_mapcount(page) + 2) {
 		ret = SWAP_FAIL;
@@ -575,9 +617,15 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 
 	/* Nuke the page table entry. */
 	flush_cache_page(vma, address);
+	/**
+	 * 清空页表项并刷新TLB。
+	 */
 	pteval = ptep_clear_flush(vma, address, pte);
 
 	/* Move the dirty bit to the physical page now the pte is gone. */
+	/**
+	 * 页可以被回收，如果页表项的Dirty标志被置位，则将页的PG_dirty标志置位。
+	 */
 	if (pte_dirty(pteval))
 		set_page_dirty(page);
 
@@ -594,19 +642,38 @@ static int try_to_unmap_one(struct page *page, struct vm_area_struct *vma)
 			list_add(&mm->mmlist, &init_mm.mmlist);
 			spin_unlock(&mmlist_lock);
 		}
+		/**
+		 * 对匿名页来说，将换出页标识符插入页表项。以便将来访问时将该页换入。
+		 */
 		set_pte(pte, swp_entry_to_pte(entry));
 		BUG_ON(pte_file(*pte));
+		/**
+		 * 同时递减存放在内存描述符anon_rss字段中的匿名页计数器。
+		 */
 		mm->anon_rss--;
 	}
 
 	mm->rss--;
 	acct_update_integrals();
+	/**
+	 * 递减页描述符的_mapcount，因为对用户态页表项中页框的引用已经被删除。
+	 */
 	page_remove_rmap(page);
+	/**
+	 * 递减存放在页描述符_count字段中的页框使用计数器。
+	 * 如果计数器小于0，还会从活动或者非活动链表中删除页描述符，并调用free_hot_page释放页框。
+	 */
 	page_cache_release(page);
 
 out_unmap:
+	/**
+	 * pte_offset_map可能建立了临时内核映射。在此释放它。
+	 */
 	pte_unmap(pte);
 out_unlock:
+	/**
+	 * 释放页表自旋锁。
+	 */
 	spin_unlock(&mm->page_table_lock);
 out:
 	return ret;
@@ -716,21 +783,40 @@ out_unlock:
 	spin_unlock(&mm->page_table_lock);
 }
 
+/**
+ * 回收匿名页框时，PFRA扫描anon_vma链表中的所有线性区，仔细检查是否每个区域都存有一个匿名页，而该页对应的页框就是目标页框。
+ * 本函数接收目标页框描述符作为参数。
+ */
 static int try_to_unmap_anon(struct page *page)
 {
 	struct anon_vma *anon_vma;
 	struct vm_area_struct *vma;
 	int ret = SWAP_AGAIN;
 
+	/**
+	 * 获得anon_vma数据结构的自旋锁。
+	 */
 	anon_vma = page_lock_anon_vma(page);
+	/**
+	 * 该页不是匿名页，其mapping字段中存放的不是anon_vma指针。
+	 */
 	if (!anon_vma)
 		return ret;
 
+	/**
+	 * 遍历anon_vma链表，对链表中的每一个vma线性区描述符，调用try_to_unmap_one函数。
+	 */
 	list_for_each_entry(vma, &anon_vma->head, anon_vma_node) {
 		ret = try_to_unmap_one(page, vma);
+		/**
+		 * 如果由于某种原因返回值为SWAP_FAIL，或者页描述符的_mapcount字段表明已经找到所有引用该页框的页表项，就停止扫描。
+		 */
 		if (ret == SWAP_FAIL || !page_mapped(page))
 			break;
 	}
+	/**
+	 * 释放自旋锁。
+	 */
 	spin_unlock(&anon_vma->lock);
 	return ret;
 }
@@ -744,6 +830,9 @@ static int try_to_unmap_anon(struct page *page)
  *
  * This function is only called from try_to_unmap for object-based pages.
  */
+/**
+ * 本函数由try_to_unmap调用，执行映射页的反向映射。
+ */
 static int try_to_unmap_file(struct page *page)
 {
 	struct address_space *mapping = page->mapping;
@@ -756,16 +845,36 @@ static int try_to_unmap_file(struct page *page)
 	unsigned long max_nl_size = 0;
 	unsigned int mapcount;
 
+	/**
+	 * 首先获得地址空间的自旋锁。
+	 */
 	spin_lock(&mapping->i_mmap_lock);
+	/**
+	 * 对优先搜索树执行vma_prio_tree_foreach进行搜索，搜索树的根存放在i_mmap字段。
+	 * 对发现的每一个vm_area_struct描述符，调用try_unmap_one，尝试对该页所在的线性区页表项清0.
+	 */
 	vma_prio_tree_foreach(vma, &iter, &mapping->i_mmap, pgoff, pgoff) {
 		ret = try_to_unmap_one(page, vma);
+		/**
+		 * 如果页描述符的_mapcount字段表明引用该页框的所有页表项都已经找到，或者出现错误，就结束搜索过程。
+		 */
 		if (ret == SWAP_FAIL || !page_mapped(page))
 			goto out;
 	}
 
+	/**
+	 * 运行到这里，说明上面的循环并没有搜索到所有页表项。
+	 * 这可能是映射是非线性的，这样函数无法清某些页表项清0.因为页描述符的index字段不再对应线性区中的页位置。
+	 * 现在开始对文件非线性映射的线性区进行穷尽搜索。
+	 *
+	 * i_mmap_nonlinear是文件非线性映射线性区的双向链表的根。如果该根为空，说明不是非线性映射，此时，可能是其他原因导致_mapcount不为0，退出。
+	 */
 	if (list_empty(&mapping->i_mmap_nonlinear))
 		goto out;
 
+	/**
+	 * 遍历非线性映射链表。
+	 */
 	list_for_each_entry(vma, &mapping->i_mmap_nonlinear,
 						shared.vm_set.list) {
 		if (vma->vm_flags & (VM_LOCKED|VM_RESERVED))
@@ -778,6 +887,9 @@ static int try_to_unmap_file(struct page *page)
 			max_nl_size = cursor;
 	}
 
+	/**
+	 * 所有非线性线性区都被锁住，不处理，直接退出。
+	 */
 	if (max_nl_size == 0) {	/* any nonlinears locked or reserved */
 		ret = SWAP_FAIL;
 		goto out;
@@ -799,6 +911,9 @@ static int try_to_unmap_file(struct page *page)
 	if (max_nl_cursor == 0)
 		max_nl_cursor = CLUSTER_SIZE;
 
+	/**
+	 * 这里对非线性线性区进行有限扫描。
+	 */
 	do {
 		list_for_each_entry(vma, &mapping->i_mmap_nonlinear,
 						shared.vm_set.list) {
@@ -808,6 +923,9 @@ static int try_to_unmap_file(struct page *page)
 			while (vma->vm_mm->rss &&
 				cursor < max_nl_cursor &&
 				cursor < vma->vm_end - vma->vm_start) {
+				/**
+				 * try_to_unmap_cluster会扫描该线性区线性地址对应的所有页表项，并尝试将其清0.
+				 */
 				try_to_unmap_cluster(cursor, &mapcount, vma);
 				cursor += CLUSTER_SIZE;
 				vma->vm_private_data = (void *) cursor;
@@ -831,6 +949,9 @@ static int try_to_unmap_file(struct page *page)
 			vma->vm_private_data = NULL;
 	}
 out:
+	/**
+	 * 释放自旋锁。
+	 */
 	spin_unlock(&mapping->i_mmap_lock);
 	return ret;
 }
@@ -846,6 +967,12 @@ out:
  * SWAP_SUCCESS	- we succeeded in removing all mappings
  * SWAP_AGAIN	- we missed a mapping, try again later
  * SWAP_FAIL	- the page is unswappable
+ */
+/**
+ * 接收页描述符指针为参数，尝试清空所有引用该页描述符对应页框的页表项。
+ * 		如果成功清除所有对该页框的引用，函数返回SWAP_SUCCESS。
+ *		如果有些引用不能清除，函数返回SWAP_AGAIN。
+ *		如果出错，函数返回SWAP_FAIL。
  */
 int try_to_unmap(struct page *page)
 {

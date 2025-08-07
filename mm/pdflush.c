@@ -43,6 +43,9 @@ static void start_one_pdflush_thread(void);
 /*
  * All the pdflush threads.  Protected by pdflush_lock
  */
+/**
+ * 所有pdflush内核线程的描述符链表。通过pdflush_lock自旋锁保护。
+ */
 static LIST_HEAD(pdflush_list);
 static DEFINE_SPINLOCK(pdflush_lock);
 
@@ -53,10 +56,16 @@ static DEFINE_SPINLOCK(pdflush_lock);
  * Readable by sysctl, but not writable.  Published to userspace at
  * /proc/sys/vm/nr_pdflush_threads.
  */
+/**
+ * 存放空闲pdflush线程的总数。
+ */
 int nr_pdflush_threads = 0;
 
 /*
  * The time at which the pdflush thread pool last went empty
+ */
+/**
+ * pdflush线程链表变为空的时间(以jiffies表示)
  */
 static unsigned long last_empty_jifs;
 
@@ -79,14 +88,35 @@ static unsigned long last_empty_jifs;
  * A structure for passing work to a pdflush thread.  Also for passing
  * state information between pdflush threads.  Protected by pdflush_lock.
  */
+/**
+ * 描述pdflush线程的描述符
+ */
 struct pdflush_work {
+	/**
+	 * 指向内核线程描述符的指针
+	 */
 	struct task_struct *who;	/* The thread */
+	/**
+	 * 内核线程所执行的回调函数。
+	 */
 	void (*fn)(unsigned long);	/* A callback function */
+	/**
+	 * 给回调函数的参数。
+	 */
 	unsigned long arg0;		/* An argument to the callback */
+	/**
+	 * 通过此结构链接到pdflush_list。
+	 */
 	struct list_head list;		/* On pdflush_list, when idle */
+	/**
+	 * 内核线程可用的时间。
+	 */
 	unsigned long when_i_went_to_sleep;
 };
 
+/**
+ * pdflus内核线程的执行函数。
+ */
 static int __pdflush(struct pdflush_work *my_work)
 {
 	current->flags |= PF_FLUSHER;
@@ -99,8 +129,14 @@ static int __pdflush(struct pdflush_work *my_work)
 	for ( ; ; ) {
 		struct pdflush_work *pdf;
 
+		/**
+		 *  pdflush线程刚执行时，即将自己插入空闲链表，并开始睡眠。
+		 */
 		set_current_state(TASK_INTERRUPTIBLE);
 		list_move(&my_work->list, &pdflush_list);
+		/**
+		 * 进程开始睡眠时间
+		 */
 		my_work->when_i_went_to_sleep = jiffies;
 		spin_unlock_irq(&pdflush_lock);
 
@@ -122,16 +158,25 @@ static int __pdflush(struct pdflush_work *my_work)
 		}
 		spin_unlock_irq(&pdflush_lock);
 
+		/**
+		 * 被其他过程唤醒后，执行回调函数进行刷新脏页。
+		 */
 		(*my_work->fn)(my_work->arg0);
 
 		/*
 		 * Thread creation: For how long have there been zero
 		 * available threads?
 		 */
+		/**
+		 * pdflush_list链表中的最后一项对应的pdflush内核线程空闲时间超过了1秒
+		 */
 		if (jiffies - last_empty_jifs > 1 * HZ) {
 			/* unlocked list_empty() test is OK here */
-			if (list_empty(&pdflush_list)) {
+			if (list_empty(&pdflush_list)) {/* 空闲链表为空 */
 				/* unlocked test is OK here */
+				/**
+				 * 系统中的pdflush线程数量小于8个，就新建一个pdflush线程。
+				 */
 				if (nr_pdflush_threads < MAX_PDFLUSH_THREADS)
 					start_one_pdflush_thread();
 			}
@@ -149,6 +194,9 @@ static int __pdflush(struct pdflush_work *my_work)
 		if (nr_pdflush_threads <= MIN_PDFLUSH_THREADS)
 			continue;
 		pdf = list_entry(pdflush_list.prev, struct pdflush_work, list);
+		/**
+		 * 如果空闲线程链表中上一个线程的空闲时间超过1秒，就退出线程。
+		 */
 		if (jiffies - pdf->when_i_went_to_sleep > 1 * HZ) {
 			/* Limit exit rate */
 			pdf->when_i_went_to_sleep = jiffies;
@@ -184,6 +232,11 @@ static int pdflush(void *dummy)
  * Returns zero if it indeed managed to find a worker thread, and passed your
  * payload to it.
  */
+/**
+ * 激活空闲的pdflush线程。
+ * fn:		由pdflush执行的函数。
+ * arg0:	参数
+ */
 int pdflush_operation(void (*fn)(unsigned long), unsigned long arg0)
 {
 	unsigned long flags;
@@ -193,18 +246,27 @@ int pdflush_operation(void (*fn)(unsigned long), unsigned long arg0)
 		BUG();		/* Hard to diagnose if it's deferred */
 
 	spin_lock_irqsave(&pdflush_lock, flags);
-	if (list_empty(&pdflush_list)) {
+	if (list_empty(&pdflush_list)) {/* 没有空闲的pdflush线程 */
 		spin_unlock_irqrestore(&pdflush_lock, flags);
 		ret = -1;
 	} else {
 		struct pdflush_work *pdf;
 
+		/**
+		 * 从空闲链表中取出第一个空闲pdflush线程。
+		 */
 		pdf = list_entry(pdflush_list.next, struct pdflush_work, list);
 		list_del_init(&pdf->list);
 		if (list_empty(&pdflush_list))
 			last_empty_jifs = jiffies;
+		/**
+		 * 设置内核线程的回调函数。
+		 */
 		pdf->fn = fn;
 		pdf->arg0 = arg0;
+		/**
+		 * 唤醒空闲线程。
+		 */
 		wake_up_process(pdf->who);
 		spin_unlock_irqrestore(&pdflush_lock, flags);
 	}

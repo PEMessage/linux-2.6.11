@@ -51,6 +51,12 @@ static void free_pool(mempool_t *pool)
  * functions might sleep - as long as the mempool_alloc function is not called
  * from IRQ contexts.
  */
+/**
+ * 创建一个新内存池
+ * min_nr-内存元素的个数。
+ * alloc_fn,free_fn-分配和释放内存的方法地址。
+ * pool_data-私有数据。
+ */
 mempool_t * mempool_create(int min_nr, mempool_alloc_t *alloc_fn,
 				mempool_free_t *free_fn, void *pool_data)
 {
@@ -104,6 +110,9 @@ EXPORT_SYMBOL(mempool_create);
  * Note, the caller must guarantee that no mempool_destroy is called
  * while this function is running. mempool_alloc() & mempool_free()
  * might be called (eg. from IRQ contexts) while this function executes.
+ */
+/**
+ * 重新设置内存池的大小。
  */
 int mempool_resize(mempool_t *pool, int new_min_nr, int gfp_mask)
 {
@@ -168,6 +177,9 @@ EXPORT_SYMBOL(mempool_resize);
  * has to guarantee that all elements have been returned to the pool (ie:
  * freed) prior to calling mempool_destroy().
  */
+/**
+ * 销毁内存池。
+ */
 void mempool_destroy(mempool_t *pool)
 {
 	if (pool->curr_nr != pool->min_nr)
@@ -187,6 +199,9 @@ EXPORT_SYMBOL(mempool_destroy);
  * *never* fails when called from process contexts. (it might
  * fail if called from an IRQ context.)
  */
+/**
+ * 从内存池中分配一个元素
+ */
 void * mempool_alloc(mempool_t *pool, int gfp_mask)
 {
 	void *element;
@@ -196,7 +211,13 @@ void * mempool_alloc(mempool_t *pool, int gfp_mask)
 
 	might_sleep_if(gfp_mask & __GFP_WAIT);
 repeat_alloc:
+	/**
+	 * 首先试图通过调用alloc函数从基本内存分配器分配一个内存元素。
+	 */
 	element = pool->alloc(gfp_nowait|__GFP_NOWARN, pool->pool_data);
+	/**
+	 * 如果从基本内存分配器中分配成功，就返回获得的内存元素而不涉及到内存池。
+	 */
 	if (likely(element != NULL))
 		return element;
 
@@ -205,6 +226,13 @@ repeat_alloc:
 	 * page reclaim then try harder to allocate an element.
 	 */
 	mb();
+	/**
+	 * 从基本内存池中分配元素失败，从内存池中分配。
+	 */
+
+	/**
+	 * 如果内存池中的对象太少，并且允许阻塞，就试图从基本内存分配器分配。
+	 */
 	if ((gfp_mask & __GFP_FS) && (gfp_mask != gfp_nowait) &&
 				(pool->curr_nr <= pool->min_nr/2)) {
 		element = pool->alloc(gfp_mask, pool->pool_data);
@@ -217,6 +245,10 @@ repeat_alloc:
 	 */
 	wakeup_bdflush(0);
 
+	/**
+	 * 运行到此，就真的需要从内存池中取得元素了。
+	 * 要么是从基本内存池中分配失败，要么是内存池中的元素还比较多。
+	 */
 	spin_lock_irqsave(&pool->lock, flags);
 	if (likely(pool->curr_nr)) {
 		element = remove_element(pool);
@@ -226,11 +258,22 @@ repeat_alloc:
 	spin_unlock_irqrestore(&pool->lock, flags);
 
 	/* We must not sleep in the GFP_ATOMIC case */
+	/**
+	 * 内存池中的对象也用完了。又不允许等待，那就返回NULL吧。
+	 */
 	if (!(gfp_mask & __GFP_WAIT))
 		return NULL;
 
+	/**
+	 * 内存池中的元素用完了，但是允许等待，由于前面已经唤醒了守护进程。
+	 * 现在需要的是让守护线程运行起来，调度一次。
+	 */
 	prepare_to_wait(&pool->wait, &wait, TASK_UNINTERRUPTIBLE);
 	mb();
+	/**
+	 * 在真正调度出去前，再次判断一下curr_nr，是否有其他进程在开中断后释放了元素。
+	 * 注意前面调用了mb()
+	 */
 	if (!pool->curr_nr)
 		io_schedule();
 	finish_wait(&pool->wait, &wait);
@@ -247,11 +290,17 @@ EXPORT_SYMBOL(mempool_alloc);
  *
  * this function only sleeps if the free_fn() function sleeps.
  */
+/**
+ * 释放一个元素到内存池。
+ */
 void mempool_free(void *element, mempool_t *pool)
 {
 	unsigned long flags;
 
 	mb();
+	/**
+	 * 如果内存池未满，就将元素加入到内存池。
+	 */
 	if (pool->curr_nr < pool->min_nr) {
 		spin_lock_irqsave(&pool->lock, flags);
 		if (pool->curr_nr < pool->min_nr) {
@@ -262,6 +311,9 @@ void mempool_free(void *element, mempool_t *pool)
 		}
 		spin_unlock_irqrestore(&pool->lock, flags);
 	}
+	/**
+	 * 否则释放到基本内存分配器中。
+	 */
 	pool->free(element, pool->pool_data);
 }
 EXPORT_SYMBOL(mempool_free);

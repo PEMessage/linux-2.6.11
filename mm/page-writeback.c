@@ -64,6 +64,9 @@ static inline long sync_writeback_pages(void)
 /*
  * Start background writeback (via pdflush) at this percentage
  */
+/**
+ * 当内存中的缓冲脏页超过此比例时，对页调整缓存中的页进行修改的函数会唤醒pdflush进程，执行回调函数backgroud_writeout
+ */
 int dirty_background_ratio = 10;
 
 /*
@@ -74,6 +77,11 @@ int vm_dirty_ratio = 40;
 /*
  * The interval between `kupdate'-style writebacks, in centiseconds
  * (hundredths of a second)
+ */
+/**
+ * 脏页在保留一段时间后，内核显式的开始IO传输，把脏页的内容写到磁盘。
+ * 这个工作委托给了被定期唤醒的pdflsh内核线程。这个线程被唤醒的时间由dirty_writeback_centisecs决定
+ * 一般是1/500秒，但是可以通过proc/sys/vm/dirty_writeback_centisecs调整。
  */
 int dirty_writeback_centisecs = 5 * 100;
 
@@ -293,9 +301,14 @@ EXPORT_SYMBOL(balance_dirty_pages_ratelimited);
  * writeback at least _min_pages, and keep writing until the amount of dirty
  * memory is less than the background threshold, or until we're all clean.
  */
+/**
+ * 系统的扫描页高速缓存以搜索要刷新的脏页,是pdflush的回调函数之一.
+ * _min_pages:	要刷新到磁盘的最少页数。
+ */
 static void background_writeout(unsigned long _min_pages)
 {
 	long min_pages = _min_pages;
+	
 	struct writeback_control wbc = {
 		.bdi		= NULL,
 		.sync_mode	= WB_SYNC_NONE,
@@ -316,10 +329,23 @@ static void background_writeout(unsigned long _min_pages)
 		wbc.encountered_congestion = 0;
 		wbc.nr_to_write = MAX_WRITEBACK_PAGES;
 		wbc.pages_skipped = 0;
+		/**
+		 * 调用writeback_inodes尝试写1024个脏页。
+		 */
 		writeback_inodes(&wbc);
+		/**
+		 * 检查有效写过的页的数量，并减少需要写的页的个数。
+		 */
 		min_pages -= MAX_WRITEBACK_PAGES - wbc.nr_to_write;
+		/**
+		 * 如果已经写过的页少于1024，或略过了一些页，则可能块设备的请求队列处于拥塞状态。
+		 */
 		if (wbc.nr_to_write > 0 || wbc.pages_skipped > 0) {
 			/* Wrote less than expected */
+			/**
+			 * 如果块设备的请求队列处于拥塞状态，使当前进程在特定的等待队列上睡眠100ms。
+			 * 或者使当前进程睡眠到队列变得不拥塞。
+			 */
 			blk_congestion_wait(WRITE, HZ/10);
 			if (!wbc.encountered_congestion)
 				break;
@@ -332,6 +358,15 @@ static void background_writeout(unsigned long _min_pages)
  * the whole world.  Returns 0 if a pdflush thread was dispatched.  Returns
  * -1 if all pdflush threads were busy.
  */
+/**
+ * 唤醒pdflush内核线程。
+ * 当内存不足，或者用户显示地请求刷新操作时，会执行此函数。
+ *     用户态进程发出sync系统调用。
+ *     grow_buffers函数分配一个新缓冲区页时失败。
+ *     页框回收算法调用free_more_memory或try_to_free_pages
+ *     mempoll_alloc函数分配一个新的内存池元素时失败。
+ * nr_pages:	应该刷新的脏页数量。0表示所有脏页都应该写回磁盘。
+ */
 int wakeup_bdflush(long nr_pages)
 {
 	if (nr_pages == 0) {
@@ -340,12 +375,18 @@ int wakeup_bdflush(long nr_pages)
 		get_writeback_state(&wbs);
 		nr_pages = wbs.nr_dirty + wbs.nr_unstable;
 	}
+	/**
+	 * 调用pdflush_operation唤醒空闲pdflush线程，并委托它执行background_writeout函数。
+	 */
 	return pdflush_operation(background_writeout, nr_pages);
 }
 
 static void wb_timer_fn(unsigned long unused);
 static void laptop_timer_fn(unsigned long unused);
 
+/**
+ * 回写定时器。
+ */
 static struct timer_list wb_timer =
 			TIMER_INITIALIZER(wb_timer_fn, 0, 0);
 static struct timer_list laptop_mode_wb_timer =
@@ -366,6 +407,9 @@ static struct timer_list laptop_mode_wb_timer =
  * older_than_this takes precedence over nr_to_write.  So we'll only write back
  * all dirty pages if they are all attached to "old" mappings.
  */
+/**
+ * 检查页高速缓存中中是否有"脏"了很长时间的页。
+ */
 static void wb_kupdate(unsigned long arg)
 {
 	unsigned long oldest_jif;
@@ -382,26 +426,46 @@ static void wb_kupdate(unsigned long arg)
 		.for_kupdate	= 1,
 	};
 
+	/**
+	 * 将脏的超级块写到磁盘中。
+	 * 确保了任何超级块脏的时间通常不会超过5S。
+	 */
 	sync_supers();
 
 	get_writeback_state(&wbs);
+	/**
+	 * 将当前时间减去30秒，早于此时间的页被认为是需要回写的页。避免这些页被饿死。
+	 * 也就是说，一个页保持为脏页的最长时间是30S。
+	 */
 	oldest_jif = jiffies - (dirty_expire_centisecs * HZ) / 100;
 	start_jif = jiffies;
 	next_jif = start_jif + (dirty_writeback_centisecs * HZ) / 100;
+	/**
+	 * 根据page_state确定在页高速缓存中脏页的大致数量。
+	 */
 	nr_to_write = wbs.nr_dirty + wbs.nr_unstable +
 			(inodes_stat.nr_inodes - inodes_stat.nr_unused);
+	/**
+	 * 直到脏页都被写到磁盘中才退出。
+	 */
 	while (nr_to_write > 0) {
 		wbc.encountered_congestion = 0;
 		wbc.nr_to_write = MAX_WRITEBACK_PAGES;
+		/**
+		 * 反复调用writeback_inodes将磁盘中的脏页写回到磁盘。
+		 */
 		writeback_inodes(&wbc);
 		if (wbc.nr_to_write > 0) {
-			if (wbc.encountered_congestion)
+			if (wbc.encountered_congestion)/* 如果请求队列变得拥塞，就睡眠一段时间 */
 				blk_congestion_wait(WRITE, HZ/10);
 			else
 				break;	/* All the old data is written */
 		}
 		nr_to_write -= MAX_WRITEBACK_PAGES - wbc.nr_to_write;
 	}
+	/**
+	 * 如果本次执行时间太长，导致下次定时器比当前时间晚了不到一秒，就强制在1秒后才开始下一次处理。
+	 */
 	if (time_before(next_jif, jiffies + HZ))
 		next_jif = jiffies + HZ;
 	if (dirty_writeback_centisecs)
@@ -424,8 +488,15 @@ int dirty_writeback_centisecs_handler(ctl_table *table, int write,
 	return 0;
 }
 
+/**
+ * 磁盘回写定时器函数。
+ */
 static void wb_timer_fn(unsigned long unused)
 {
+	/**
+	 * 本函数唤醒pdflush函数，并向它传递wb_kupdate
+	 * wb_kupdate函数遍历页调整缓存搜索陈旧的脏索引节点。
+	 */
 	if (pdflush_operation(wb_kupdate, 0) < 0)
 		mod_timer(&wb_timer, jiffies + HZ); /* delay 1 second */
 }

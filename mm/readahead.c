@@ -385,6 +385,9 @@ int do_page_cache_readahead(struct address_space *mapping, struct file *filp,
  * Returns 1 meaning 'success' if read is succesfull without switching off
  * readhaead mode. Otherwise return failure.
  */
+/**
+ * 预读
+ */
 static int
 blockable_page_cache_readahead(struct address_space *mapping, struct file *filp,
 			unsigned long offset, unsigned long nr_to_read,
@@ -407,6 +410,15 @@ blockable_page_cache_readahead(struct address_space *mapping, struct file *filp,
 /*
  * page_cache_readahead is the main function.  If performs the adaptive
  * readahead window size management and submits the readahead I/O.
+ */
+/**
+ * 处理文件预读。
+ * 它填写当前窗口和预读窗口，根据预读命中数更新当前窗口和预读窗口的大小。
+ * mapping:		描述页所有者的address_space对象的指针。
+ * ra:			包含该页的文件file_ra_state描述符指针。
+ * filp:		文件对象地址。
+ * offset:		文件内页的偏移量。
+ * req_size:	要完成当前读操作还需要读的页数。
  */
 unsigned long
 page_cache_readahead(struct address_space *mapping, struct file_ra_state *ra,

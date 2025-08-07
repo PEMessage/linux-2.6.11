@@ -49,17 +49,28 @@ static int should_release_swap_token(struct mm_struct *mm)
  * SMP lock contention and to check that the process that held
  * the token before is no longer thrashing.
  */
+/**
+ * 决定是否将交换标记赋给当前进程。在主缺页时调用:
+ *		当filemap_nopage函数发现请求页不在页高速缓存中时。
+ *		当do_swap_page函数从交换区读入一个新页时。
+ */
 void grab_swap_token(void)
 {
 	struct mm_struct *mm;
 	int reason;
 
 	/* We have the token. Let others know we still need it. */
+	/**
+	 * 已经有交换标记了，仅仅设置主缺页标记就行了。
+	 */
 	if (has_swap_token(current->mm)) {
 		current->mm->recent_pagein = 1;
 		return;
 	}
 
+	/**
+	 * 自从上次设置交换标记以来，已经过了两秒。
+	 */
 	if (time_after(jiffies, swap_token_check)) {
 
 		/* Can't get swapout protection if we exceed our RSS limit. */
@@ -67,6 +78,9 @@ void grab_swap_token(void)
 		//	return;
 
 		/* ... or if we recently held the token. */
+		/**
+		 * 上次调用后，当前拥有交换标记的进程最近没有再获得标记。
+		 */
 		if (time_before(jiffies, current->mm->swap_token_time))
 			return;
 

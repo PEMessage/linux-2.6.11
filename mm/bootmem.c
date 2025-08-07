@@ -369,6 +369,10 @@ unsigned long __init free_all_bootmem (void)
 	return(free_all_bootmem_core(NODE_DATA(0)));
 }
 
+/**
+ * 分配页中间目录
+ * 其中前448项是用RAM前896MB的物理地址填充，虽然有512项，但是后64项留给非连续分配内存
+ */
 void * __init __alloc_bootmem (unsigned long size, unsigned long align, unsigned long goal)
 {
 	pg_data_t *pgdat = pgdat_list;

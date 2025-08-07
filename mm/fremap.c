@@ -170,6 +170,14 @@ err_unlock:
  * protection is used. Arbitrary protections might be implemented in the
  * future.
  */
+/**
+ * 重新映射内存映射中的一些页。
+ * 		start:	调用进程共享文件内存映射区的线性地址。
+ * 		size:	文件重新映射部分的字节数。
+ *		prot:	未用，必须为0.
+ *		pgoff:	待映射文件初始页的页索引。
+ *		flags:	控制非线性映射的标志。
+ */
 asmlinkage long sys_remap_file_pages(unsigned long start, unsigned long size,
 	unsigned long __prot, unsigned long pgoff, unsigned long flags)
 {
@@ -210,14 +218,17 @@ asmlinkage long sys_remap_file_pages(unsigned long start, unsigned long size,
 	 * swapout cursor in a VM_NONLINEAR vma (unless VM_RESERVED
 	 * or VM_LOCKED, but VM_LOCKED could be revoked later on).
 	 */
-	if (vma && (vma->vm_flags & VM_SHARED) &&
-		(!vma->vm_private_data ||
+	if (vma && (vma->vm_flags & VM_SHARED) &&/* 必须是共享映射 */
+		(!vma->vm_private_data ||/* 线性区必须支持非线性映射 */
 			(vma->vm_flags & (VM_NONLINEAR|VM_RESERVED))) &&
 		vma->vm_ops && vma->vm_ops->populate &&
-			end > start && start >= vma->vm_start &&
+			end > start && start >= vma->vm_start &&/* 地址没有超出范围 */
 				end <= vma->vm_end) {
 
 		/* Must set VM_NONLINEAR before any pages are populated. */
+		/**
+		 * 将线性区插入文件的i_mmap_nonlinear链表。
+		 */
 		if (pgoff != linear_page_index(vma, start) &&
 		    !(vma->vm_flags & VM_NONLINEAR)) {
 			if (!has_write_lock) {
@@ -236,6 +247,9 @@ asmlinkage long sys_remap_file_pages(unsigned long start, unsigned long size,
 			spin_unlock(&mapping->i_mmap_lock);
 		}
 
+		/**
+		 * 调用线性区的populate方法。对于普通文件，该方法一般是由filemap_populate函数实现的。
+		 */
 		err = vma->vm_ops->populate(vma, start, size,
 					    vma->vm_page_prot,
 					    pgoff, flags & MAP_NONBLOCK);

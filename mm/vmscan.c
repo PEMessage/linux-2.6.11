@@ -50,27 +50,54 @@ typedef enum {
 	PAGE_CLEAN,
 } pageout_t;
 
+/**
+ * 回收操作
+ */
 struct scan_control {
 	/* Ask refill_inactive_zone, or shrink_cache to scan this many pages */
+	/**
+	 * 活动链表中待扫描的目标页数。
+	 */
 	unsigned long nr_to_scan;
 
 	/* Incremented by the number of inactive pages that were scanned */
+	/**
+	 * 当前已经扫描过的非活动页数。
+	 */
 	unsigned long nr_scanned;
 
 	/* Incremented by the number of pages reclaimed */
+	/**
+	 * 回收的页数。
+	 */
 	unsigned long nr_reclaimed;
 
+	/**
+	 * 用户态地址空间引用的页数。
+	 */
 	unsigned long nr_mapped;	/* From page_state */
 
 	/* How many pages shrink_cache() should reclaim */
+	/**
+	 * 待回收的目标页数。
+	 */
 	int nr_to_reclaim;
 
 	/* Ask shrink_caches, or shrink_zone to scan at this priority */
+	/**
+	 * 扫描优先级。范围从12到0，低优先级表示扫描更多的页。
+	 */
 	unsigned int priority;
 
 	/* This context's GFP mask */
+	/**
+	 * 调用进程传入的GFP掩码。
+	 */
 	unsigned int gfp_mask;
 
+	/**
+	 * 如果置位，则允许将脏页写回到磁盘。
+	 */
 	int may_writepage;
 };
 
@@ -121,11 +148,20 @@ struct shrinker {
 int vm_swappiness = 60;
 static long total_memory;
 
+/**
+ * 所有磁盘高速缓存压缩函数的双向链表。
+ */
 static LIST_HEAD(shrinker_list);
 static DECLARE_RWSEM(shrinker_rwsem);
 
 /*
  * Add a shrinker callback to be called from the vm
+ */
+/**
+ * 向PFRA注册shrinker函数。
+ * 首先分配一个shrinker类型的描述符，在该描述符中存放shrinker函数的地址，然后把描述符插入一个全局链表。
+ * 该函数还初始化shrinker的seeks字段，这个字段表示:在高速缓存中的元素一旦被删除，那么重建一个所需要的代价。
+ * 除了目录项高速缓存和索引节点高速缓存外，还有磁盘限额层、文件系统元信息块高速缓存和XFS日志文件系统。
  */
 struct shrinker *set_shrinker(int seeks, shrinker_t theshrinker)
 {
@@ -174,6 +210,9 @@ EXPORT_SYMBOL(remove_shrinker);
  * are eligible for the caller's allocation attempt.  It is used for balancing
  * slab reclaim versus page reclaim.
  */
+/**
+ * 从可压缩磁盘高速缓存回收页的PFRA函数。它由try_to_free_pages和balance_pgdat调用。
+ */
 static int shrink_slab(unsigned long scanned, unsigned int gfp_mask,
 			unsigned long lru_pages)
 {
@@ -185,11 +224,17 @@ static int shrink_slab(unsigned long scanned, unsigned int gfp_mask,
 	if (!down_read_trylock(&shrinker_rwsem))
 		return 0;
 
+	/**
+	 * 遍历所有的磁盘压缩处理函数。
+	 */
 	list_for_each_entry(shrinker, &shrinker_list, list) {
 		unsigned long long delta;
 		unsigned long total_scan;
 
 		delta = (4 * scanned) / shrinker->seeks;
+		/**
+		 * 传入0，得到磁盘高速缓存中总的可回收数。
+		 */
 		delta *= (*shrinker->shrinker)(0, gfp_mask);
 		do_div(delta, lru_pages + 1);
 		shrinker->nr += delta;
@@ -203,6 +248,9 @@ static int shrink_slab(unsigned long scanned, unsigned int gfp_mask,
 			long this_scan = SHRINK_BATCH;
 			int shrink_ret;
 
+			/**
+			 * 尝试回收一组页，至少128页。
+			 */
 			shrink_ret = (*shrinker->shrinker)(this_scan, gfp_mask);
 			if (shrink_ret == -1)
 				break;
@@ -285,6 +333,9 @@ static void handle_write_error(struct address_space *mapping,
 /*
  * pageout is called by shrink_list() for each dirty page. Calls ->writepage().
  */
+/**
+ * 当一个脏页需要写回磁盘时，本函数会被shrink_list调用。
+ */
 static pageout_t pageout(struct page *page, struct address_space *mapping)
 {
 	/*
@@ -304,15 +355,28 @@ static pageout_t pageout(struct page *page, struct address_space *mapping)
 	 * congestion state of the swapdevs.  Easy to fix, if needed.
 	 * See swapfile.c:page_queue_congested().
 	 */
+	/**
+	 * 检查页存放在页高速缓存还是交换高速缓存中。并检查页是否由页高速缓存与PFRA拥有。如果检查失败，就返回PAGE_KEEP。
+	 */
 	if (!is_page_cache_freeable(page))
 		return PAGE_KEEP;
 	if (!mapping)
 		return PAGE_KEEP;
+	/**
+	 * 检查address_sapce对象的writepage是否定义。
+	 */
 	if (mapping->a_ops->writepage == NULL)
 		return PAGE_ACTIVATE;
+	/**
+	 * 检查当前进程是否可以向块设备请求队列发出写请求。
+	 * kswapd和pdflush内核线程总可以发出写请求。而普通进程只有在请求队列不拥塞的情况下才能发出写请求。
+	 */
 	if (!may_write_to_queue(mapping->backing_dev_info))
 		return PAGE_KEEP;
 
+	/**
+	 * 检查页是否仍然是脏页。
+	 */
 	if (clear_page_dirty_for_io(page)) {
 		int res;
 		struct writeback_control wbc = {
@@ -323,6 +387,9 @@ static pageout_t pageout(struct page *page, struct address_space *mapping)
 		};
 
 		SetPageReclaim(page);
+		/**
+		 * 仍然是脏页，调用writepage将页写回。
+		 */
 		res = mapping->a_ops->writepage(page, &wbc);
 		if (res < 0)
 			handle_write_error(mapping, page, res);
@@ -344,6 +411,9 @@ static pageout_t pageout(struct page *page, struct address_space *mapping)
 /*
  * shrink_list adds the number of reclaimed pages to sc->nr_reclaimed
  */
+/**
+ * 这是页框回收算法的核心函数。它从page_list中尝试回收页。
+ */
 static int shrink_list(struct list_head *page_list, struct scan_control *sc)
 {
 	LIST_HEAD(ret_pages);
@@ -351,9 +421,18 @@ static int shrink_list(struct list_head *page_list, struct scan_control *sc)
 	int pgactivate = 0;
 	int reclaimed = 0;
 
+	/**
+	 * 增加一个调度点。
+	 */
 	cond_resched();
 
 	pagevec_init(&freed_pvec, 1);
+	/**
+	 * 循环处理page_list链表中的每一页。对其中每个元素，从链表中删除页描述符，并尝试回收该页框。对每个页，有三种处理结果:
+	 *		1:调用free_cold_page函数，将页释放到伙伴系统。
+	 *		2:页没有被回收，并被插回page_list链表，但是将PG_active标志保持清0.
+	 *		3:页没有被回收，并被插回page_list链表，但是将PG_active标志保持置位.
+	 */
 	while (!list_empty(page_list)) {
 		struct address_space *mapping;
 		struct page *page;
@@ -365,6 +444,9 @@ static int shrink_list(struct list_head *page_list, struct scan_control *sc)
 		page = lru_to_page(page_list);
 		list_del(&page->lru);
 
+		/**
+		 * 不回收锁定页。
+		 */
 		if (TestSetPageLocked(page))
 			goto keep;
 
@@ -375,9 +457,15 @@ static int shrink_list(struct list_head *page_list, struct scan_control *sc)
 		if (page_mapped(page) || PageSwapCache(page))
 			sc->nr_scanned++;
 
+		/**
+		 * 也不回收回写页。
+		 */
 		if (PageWriteback(page))
 			goto keep_locked;
 
+		/**
+		 * 检查该页最近是否被引用过。
+		 */
 		referenced = page_referenced(page, 1, sc->priority <= 0);
 		/* In active use or really unfreeable?  Activate it. */
 		if (referenced && page_mapping_inuse(page))
@@ -388,12 +476,19 @@ static int shrink_list(struct list_head *page_list, struct scan_control *sc)
 		 * Anonymous process memory has backing store?
 		 * Try to allocate it some swap space here.
 		 */
+		/**
+		 * 如果要回收匿名页，就需要为它在交换区保留一页新页槽，如果无法保留页槽，也不回收。
+		 */
 		if (PageAnon(page) && !PageSwapCache(page)) {
 			if (!add_to_swap(page))
 				goto activate_locked;
 		}
 #endif /* CONFIG_SWAP */
 
+		/**
+		 * 如果页在某个进程的用户态地址空间(页描述符的_mapcount字段大于等于0)。
+		 * 则调用try_to_unmap寻找引用该页的所有页表项，只有当这个函数返回SWAP_SUCCESS时，回收才继续。
+		 */
 		mapping = page_mapping(page);
 		may_enter_fs = (sc->gfp_mask & __GFP_FS) ||
 			(PageSwapCache(page) && (sc->gfp_mask & __GFP_IO));
@@ -403,7 +498,7 @@ static int shrink_list(struct list_head *page_list, struct scan_control *sc)
 		 * processes. Try to unmap it here.
 		 */
 		if (page_mapped(page) && mapping) {
-			switch (try_to_unmap(page)) {
+			switch (try_to_unmap(page)) {/* 将页加入交换高速缓存后，try_to_unmap确定引用匿名页的每个用户态页表项地址，然后将换出页标识符写入其中。 */
 			case SWAP_FAIL:
 				goto activate_locked;
 			case SWAP_AGAIN:
@@ -413,6 +508,10 @@ static int shrink_list(struct list_head *page_list, struct scan_control *sc)
 			}
 		}
 
+		/**
+		 * 如果是脏页，则写回磁盘前不能回收。
+		 * 为此，本函数调用pageout函数，只有当此函数不必进行写操作或写操作不久将结束时，回收才继续。
+		 */
 		if (PageDirty(page)) {
 			if (referenced)
 				goto keep_locked;
@@ -465,6 +564,9 @@ static int shrink_list(struct list_head *page_list, struct scan_control *sc)
 		 * process address space (page_count == 1) it can be freed.
 		 * Otherwise, leave the page on the LRU so it is swappable.
 		 */
+		/**
+		 * 如果页包含VFS缓冲区，则调用try_to_release_page释放关联的缓冲区首部。
+		 */
 		if (PagePrivate(page)) {
 			if (!try_to_release_page(page, sc->gfp_mask))
 				goto activate_locked;
@@ -482,12 +584,20 @@ static int shrink_list(struct list_head *page_list, struct scan_control *sc)
 		 * PageDirty _after_ making sure that the page is freeable and
 		 * not in use by anybody. 	(pagecache + us == 2)
 		 */
+		/**
+		 * 至此，一切都比较顺利，检查页的引用计数。如果等于2，那么这两个拥有者就是:页高速缓存(对匿名页来说，就是交换高速缓存)
+		 * 以及PFRA自身。这种情况下，如果页不为脏，那么页就可以回收。
+		 * 否则，只要引用计数不为2，或者页仍然为脏，那么就不回收页。
+		 */
 		if (page_count(page) != 2 || PageDirty(page)) {
 			spin_unlock_irq(&mapping->tree_lock);
 			goto keep_locked;
 		}
 
 #ifdef CONFIG_SWAP
+		/**
+		 * 在IO数据传输时，没有进程试图访问该页，就调用__delete_from_swap_cache从交换高速缓存中删除页框。
+		 */
 		if (PageSwapCache(page)) {
 			swp_entry_t swap = { .val = page->private };
 			__delete_from_swap_cache(page);
@@ -498,6 +608,9 @@ static int shrink_list(struct list_head *page_list, struct scan_control *sc)
 		}
 #endif /* CONFIG_SWAP */
 
+		/**
+		 * 至此，可以回收该内存页。首先根据页描述符的PG_swapcache标志的值，从页高速缓存或交换高速缓存删除页。
+		 */
 		__remove_from_page_cache(page);
 		spin_unlock_irq(&mapping->tree_lock);
 		__put_page(page);
@@ -505,10 +618,16 @@ static int shrink_list(struct list_head *page_list, struct scan_control *sc)
 free_it:
 		unlock_page(page);
 		reclaimed++;
+		/**
+		 * 最终会调用free_cold_page将页归还到伙伴系统。
+		 */
 		if (!pagevec_add(&freed_pvec, page))
 			__pagevec_release_nonlru(&freed_pvec);
 		continue;
 
+		/**
+		 * 由于某种原因，该页不能被释放(比如被锁定)，那么把页描述符放到局部链表中。最终会再放回page_list返回给上层函数。
+		 */
 activate_locked:
 		SetPageActive(page);
 		pgactivate++;
@@ -518,10 +637,17 @@ keep:
 		list_add(&page->lru, &ret_pages);
 		BUG_ON(PageLRU(page));
 	}
+
+	/**
+	 * 现在已经处理完page_list。将没有释放页放回page_list。
+	 */
 	list_splice(&ret_pages, page_list);
 	if (pagevec_count(&freed_pvec))
 		__pagevec_release_nonlru(&freed_pvec);
 	mod_page_state(pgactivate, pgactivate);
+	/**
+	 * 递增nr_reclaimed字段。
+	 */
 	sc->nr_reclaimed += reclaimed;
 	return reclaimed;
 }
@@ -536,6 +662,9 @@ keep:
  * For pagecache intensive workloads, the first loop here is the hottest spot
  * in the kernel (apart from the copy_*_user functions).
  */
+/**
+ * 这个辅助函数的主要目的是从管理区非活动链表取出一组页，把它们放入一个临时链表，然后调用shrink_list函数对这个链表中的每一个页进行有效的页框回收操作。
+ */
 static void shrink_cache(struct zone *zone, struct scan_control *sc)
 {
 	LIST_HEAD(page_list);
@@ -544,7 +673,13 @@ static void shrink_cache(struct zone *zone, struct scan_control *sc)
 
 	pagevec_init(&pvec, 1);
 
+	/**
+	 * 把仍然在pagevec数据结构中的页移入活动与非活动链表。
+	 */
 	lru_add_drain();
+	/**
+	 * 获得管理区的lru_lock自旋锁。
+	 */
 	spin_lock_irq(&zone->lru_lock);
 	while (max_scan > 0) {
 		struct page *page;
@@ -552,6 +687,9 @@ static void shrink_cache(struct zone *zone, struct scan_control *sc)
 		int nr_scan = 0;
 		int nr_freed;
 
+		/**
+		 * 处理非活动链表中的页，最多32页。
+		 */
 		while (nr_scan++ < SWAP_CLUSTER_MAX &&
 				!list_empty(&zone->inactive_list)) {
 			page = lru_to_page(&zone->inactive_list);
@@ -562,6 +700,9 @@ static void shrink_cache(struct zone *zone, struct scan_control *sc)
 			if (!TestClearPageLRU(page))
 				BUG();
 			list_del(&page->lru);
+			/**
+			 * 递增页的引用计数。如果页正在准备放到伙伴系统(计数为0)，则略过此页。
+			 */
 			if (get_page_testone(page)) {
 				/*
 				 * It is being freed elsewhere
@@ -571,11 +712,23 @@ static void shrink_cache(struct zone *zone, struct scan_control *sc)
 				list_add(&page->lru, &zone->inactive_list);
 				continue;
 			}
+			/**
+			 * 否则将页放到局部链表。
+			 */
 			list_add(&page->lru, &page_list);
 			nr_taken++;
 		}
+		/**
+		 * 调整nr_inactive计数，减去从非活动链表中删除的页数。
+		 */
 		zone->nr_inactive -= nr_taken;
+		/**
+		 * 递增pages_scanned计数，增量为在非活动链表中有效检查的页数。
+		 */
 		zone->pages_scanned += nr_scan;
+		/**
+		 * 释放lru_lock自旋锁。
+		 */
 		spin_unlock_irq(&zone->lru_lock);
 
 		if (nr_taken == 0)
@@ -586,21 +739,36 @@ static void shrink_cache(struct zone *zone, struct scan_control *sc)
 			mod_page_state_zone(zone, pgscan_kswapd, nr_scan);
 		else
 			mod_page_state_zone(zone, pgscan_direct, nr_scan);
+		/**
+		 * 调用shrink_list，回收链表中的页。
+		 */
 		nr_freed = shrink_list(&page_list, sc);
 		if (current_is_kswapd())
 			mod_page_state(kswapd_steal, nr_freed);
 		mod_page_state_zone(zone, pgsteal, nr_freed);
+		/**
+		 * 调整nr_to_reclaim计数，减去本次回收的页。
+		 */
 		sc->nr_to_reclaim -= nr_freed;
 
+		/**
+		 * 再次获得lru_lock自旋锁。
+		 */
 		spin_lock_irq(&zone->lru_lock);
 		/*
 		 * Put back any unfreeable pages.
+		 */
+		/**
+		 * 将page_list链表中没有被回收的页放回非活动链表或者活动链表。
 		 */
 		while (!list_empty(&page_list)) {
 			page = lru_to_page(&page_list);
 			if (TestSetPageLRU(page))
 				BUG();
 			list_del(&page->lru);
+			/**
+			 * 如果在shrink_list函数中将页面PG_active标志置位，那么将页放到活动链表。否则放到非活动链表。
+			 */
 			if (PageActive(page))
 				add_page_to_active_list(zone, page);
 			else
@@ -634,6 +802,13 @@ done:
  * The downside is that we have to touch page->_count against each page.
  * But we had to alter page->flags anyway.
  */
+/**
+ * 本函数由shrink_zone调用。它从活动链表将页移到非活动链表。如果函数的掠夺性过强，就会有过多的页从活动链表被移动到非活动链表。
+ * 这样，PFRA就会回收大量的页框，系统性能会受到影响。反过来，如果函数太懒惰，就没有足够的未用页来补充非活动链表，PFRA就不能回收内存。
+ * 因此，开始时，对每次调用，扫描非活动链表中少量的页，当PFRA很难回收内存时，函数在每次调用时就增加扫描活动的次数，也就是降低scan_control数据结构中priority字段的值。
+ *		zone:		指向一个内存管理区描述符。
+ *		sc:			指向一个scan_control结构。该结构存放着回收操作执行时的有关信息。
+ */
 static void
 refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 {
@@ -651,15 +826,27 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 	long distress;
 	long swap_tendency;
 
+	/**
+	 * 把仍留在pagevec数据结构中的所有页移入活动与非活动链表。
+	 */
 	lru_add_drain();
 	pgmoved = 0;
+	/**
+	 * 获得lru_lock自旋锁。
+	 */
 	spin_lock_irq(&zone->lru_lock);
+	/**
+	 * 对活动链表中的页进行首次链表，从链表的底部开始向上，一直执行下去，直到链表为空或者达到扫描的页数。
+	 */
 	while (pgscanned < nr_pages && !list_empty(&zone->active_list)) {
 		page = lru_to_page(&zone->active_list);
 		prefetchw_prev_lru_page(page, &zone->active_list, flags);
 		if (!TestClearPageLRU(page))
 			BUG();
 		list_del(&page->lru);
+		/**
+		 * 递增页引用计数，如果页框引用计数器是0，就将它放回活动链表。
+		 */
 		if (get_page_testone(page)) {
 			/*
 			 * It was already free!  release_pages() or put_page()
@@ -667,22 +854,38 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 			 * put the refcount back and put the page back on the
 			 * LRU
 			 */
+			/**
+			 * 引用计数为0的页框一定属于管理区的伙伴系统。释放页框时，会递减使用计数器，然后将页框从LRU链表删除并插入伙伴系统链表，并将页框从LRU链表删除并插入伙伴系统。
+			 * 在递减引用计数后，还没有从LRU中删除前，可能会进入此流程。
+			 */
 			__put_page(page);
 			SetPageLRU(page);
 			list_add(&page->lru, &zone->active_list);
 		} else {
+			/**
+			 * 将扫描到的页加入到临时链表中。
+			 */
 			list_add(&page->lru, &l_hold);
 			pgmoved++;
 		}
 		pgscanned++;
 	}
+	/**
+	 * 对扫描的页进行计数。
+	 */
 	zone->pages_scanned += pgscanned;
 	zone->nr_active -= pgmoved;
+	/**
+	 * 释放自旋锁。
+	 */
 	spin_unlock_irq(&zone->lru_lock);
 
 	/*
 	 * `distress' is a measure of how much trouble we're having reclaiming
 	 * pages.  0 -> no problems.  100 -> great trouble.
+	 */
+	/**
+	 * 计算交换倾向值=映射比例/2 + 负荷值 + 交换值。
 	 */
 	distress = 100 >> zone->prev_priority;
 
@@ -711,11 +914,23 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 	if (swap_tendency >= 100)
 		reclaim_mapped = 1;
 
+	/**
+	 * 对局部链表l_hold中的页运行第二次循环。将其中的页分到两个子链表l_active和l_inactive中。
+	 */
 	while (!list_empty(&l_hold)) {
 		cond_resched();
 		page = lru_to_page(&l_hold);
 		list_del(&page->lru);
+		/**
+		 * 如果页面是进程用户态地址空间的页。
+		 */
 		if (page_mapped(page)) {
+			/**
+			 * 如果reclaim_mapped为0，表示交换倾向值小于100
+			 * 或者是匿名页但是又没有激活的交换区
+			 * 或者page_referenced返回正值，表明该页的某个页表项最近被访问过。
+			 * 以上情况，都将页放入活动链表
+			 */
 			if (!reclaim_mapped ||
 			    (total_swap_pages == 0 && PageAnon(page)) ||
 			    page_referenced(page, 0, sc->priority <= 0)) {
@@ -723,12 +938,21 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 				continue;
 			}
 		}
+		/**
+		 * 不满足以上条件，将页放入非活动链表。
+		 */
 		list_add(&page->lru, &l_inactive);
 	}
 
 	pagevec_init(&pvec, 1);
 	pgmoved = 0;
+	/**
+	 * 再次获得lru_lock自旋锁。
+	 */
 	spin_lock_irq(&zone->lru_lock);
+	/**
+	 * 对非活动链表进行第三次循环。把页移入管理区的非活动链表。并更新非活动页计数值。
+	 */
 	while (!list_empty(&l_inactive)) {
 		page = lru_to_page(&l_inactive);
 		prefetchw_prev_lru_page(page, &l_inactive, flags);
@@ -757,6 +981,9 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 		spin_lock_irq(&zone->lru_lock);
 	}
 
+	/**
+	 * 对局部活动链表进行循环，把页移入管理区的活动链表，更新活动页计数。
+	 */
 	pgmoved = 0;
 	while (!list_empty(&l_active)) {
 		page = lru_to_page(&l_active);
@@ -775,6 +1002,9 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 		}
 	}
 	zone->nr_active += pgmoved;
+	/**
+	 * 释放自旋锁并返回。
+	 */
 	spin_unlock_irq(&zone->lru_lock);
 	pagevec_release(&pvec);
 
@@ -784,6 +1014,12 @@ refill_inactive_zone(struct zone *zone, struct scan_control *sc)
 
 /*
  * This is a basic per-zone page freer.  Used by both kswapd and direct reclaim.
+ */
+/**
+ * 对页高速缓存和用户态地址空间进行页回收。本函数的目标是从管理区非活动链表回收32页。
+ * 它每次在更大的一段管理区非活动链表中重复调用辅助函数shrink_cache。而且本函数重复调用refill_inactive_zone函数来补充管理区非活动链表。
+ *		zone:		要进行回收的管理区。
+ *		sc:			控制回收的参数。
  */
 static void
 shrink_zone(struct zone *zone, struct scan_control *sc)
@@ -795,23 +1031,44 @@ shrink_zone(struct zone *zone, struct scan_control *sc)
 	 * Add one to `nr_to_scan' just to make sure that the kernel will
 	 * slowly sift through the active list.
 	 */
+	/**
+	 * 增加扫描页数。如果优先级为0，那么就将所有活动页加入到扫描页中。
+	 */
 	zone->nr_scan_active += (zone->nr_active >> sc->priority) + 1;
+	/**
+	 * 如果可扫描活动页大于32，就将它赋给局部变量nr_active。
+	 */
 	nr_active = zone->nr_scan_active;
 	if (nr_active >= SWAP_CLUSTER_MAX)
 		zone->nr_scan_active = 0;
 	else
 		nr_active = 0;
 
+	/**
+	 * 增加扫描页数。如果优先级为0，那么就将所有非活动页加入到扫描页中。
+	 */
 	zone->nr_scan_inactive += (zone->nr_inactive >> sc->priority) + 1;
+	/**
+	 * 如果可扫描非活动页大于32，就将它赋给局部变量nr_inactive。
+	 */
 	nr_inactive = zone->nr_scan_inactive;
 	if (nr_inactive >= SWAP_CLUSTER_MAX)
 		zone->nr_scan_inactive = 0;
 	else
 		nr_inactive = 0;
 
+	/**
+	 * 设置控制参数的回收页数量为32。
+	 */
 	sc->nr_to_reclaim = SWAP_CLUSTER_MAX;
 
+	/**
+	 * 如果nr_active和nr_inactive都为0，则不做任何事情，当用户态进程没有分配任何页时才出现这种情况。
+	 */
 	while (nr_active || nr_inactive) {
+		/**
+		 * 如果nr_active为正，则补充非活动链表。最多补充32页。
+		 */
 		if (nr_active) {
 			sc->nr_to_scan = min(nr_active,
 					(unsigned long)SWAP_CLUSTER_MAX);
@@ -819,11 +1076,17 @@ shrink_zone(struct zone *zone, struct scan_control *sc)
 			refill_inactive_zone(zone, sc);
 		}
 
+		/**
+		 * 进行页回收
+		 */
 		if (nr_inactive) {
 			sc->nr_to_scan = min(nr_inactive,
 					(unsigned long)SWAP_CLUSTER_MAX);
 			nr_inactive -= sc->nr_to_scan;
 			shrink_cache(zone, sc);
+			/**
+			 * 如果成功回收超过32页，则退出。
+			 */
 			if (sc->nr_to_reclaim <= 0)
 				break;
 		}
@@ -846,24 +1109,42 @@ shrink_zone(struct zone *zone, struct scan_control *sc)
  * If a zone is deemed to be full of pinned pages then just give it a light
  * scan then give up on it.
  */
+/** 
+ * 由try_to_free_pages调用。对zones链表中的每个管理区调用shrink_zone函数。
+ */
 static void
 shrink_caches(struct zone **zones, struct scan_control *sc)
 {
 	int i;
 
+	/**
+	 * 遍历每个管理区，对其调用shrink_zone回收其内存。
+	 */
 	for (i = 0; zones[i] != NULL; i++) {
 		struct zone *zone = zones[i];
 
 		if (zone->present_pages == 0)
 			continue;
 
+		/**
+		 * 更新管理区的temp_priority，这是扫描操作的当前优先级。
+		 */
 		zone->temp_priority = sc->priority;
+		/**
+		 * 如果PFRA的上一次调用优先级高于当前优先级，说明管理进行页框回收变得更难了，则把当前优先级设置给prev_priority
+		 */
 		if (zone->prev_priority > sc->priority)
 			zone->prev_priority = sc->priority;
 
+		/**
+		 * 如果当前管理的all_unreclaimable置位，说明当前管理区已经扫描完所有页面，并且当前优先不是12，就略过当前管理区。
+		 */
 		if (zone->all_unreclaimable && sc->priority != DEF_PRIORITY)
 			continue;	/* Let kswapd poll it */
 
+		/**
+		 * 在当前管理区中进行回收。
+		 */
 		shrink_zone(zone, sc);
 	}
 }
@@ -881,6 +1162,14 @@ shrink_caches(struct zone **zones, struct scan_control *sc)
  * holds filesystem locks which prevent writeout this might not work, and the
  * allocation attempt will fail.
  */
+/**
+ * 内存紧缺回收，当从伙伴系统分配一个或多个页框时，调用本函数。
+ * 本函数的目标是通过重复调用shrink_caches和shrink_slab函数释放至少32个页框。每次调用后优先级会比前一次提高。
+ * 如果所有13次扫描都没能释放32个页框，它就删除一个进程，释放它的所有页框。
+ *		zones:		要回收的页所在的内存管理区链表。
+ *		gfp_mask:	用于失败的内存分配的一组分配标志。
+ *		order:		没有使用。
+ */
 int try_to_free_pages(struct zone **zones,
 		unsigned int gfp_mask, unsigned int order)
 {
@@ -892,11 +1181,17 @@ int try_to_free_pages(struct zone **zones,
 	unsigned long lru_pages = 0;
 	int i;
 
+	/**
+	 * 初始化scan_control结构，将gfp_mask存入。
+	 */ 
 	sc.gfp_mask = gfp_mask;
 	sc.may_writepage = 0;
 
 	inc_page_state(allocstall);
 
+	/**
+	 * 对每个管理区，将其temp_priority设为初始优先级，并计算所有管理区LRU链表中的总页数。
+	 */
 	for (i = 0; zones[i] != NULL; i++) {
 		struct zone *zone = zones[i];
 
@@ -904,17 +1199,35 @@ int try_to_free_pages(struct zone **zones,
 		lru_pages += zone->nr_active + zone->nr_inactive;
 	}
 
+	/**
+	 * 从优先级12到0，执行最多13次的循环。进行回收操作。
+	 */
 	for (priority = DEF_PRIORITY; priority >= 0; priority--) {
+		/**
+		 * 更新sc的一些字段，把用户态进程的总页数存入nr_mapped字段，把本次迭代的当前优先级存入priority字段。
+		 */
 		sc.nr_mapped = read_page_state(nr_mapped);
 		sc.nr_scanned = 0;
 		sc.nr_reclaimed = 0;
 		sc.priority = priority;
+		/**
+		 * shrink_caches扫描管理区的非活动页，
+		 */
 		shrink_caches(zones, &sc);
+		/**
+		 * shrink_slab从可压缩内核高速缓存中回收页。
+		 */
 		shrink_slab(sc.nr_scanned, gfp_mask, lru_pages);
+		/**
+		 * 如果reclaim_state非空，则将slab分配器高速缓存中回收的页数加到nr_reclaimed中。
+		 */
 		if (reclaim_state) {
 			sc.nr_reclaimed += reclaim_state->reclaimed_slab;
 			reclaim_state->reclaimed_slab = 0;
 		}
+		/**
+		 * 如果回收的页已经达到32个页(达到目标)，则跳出循环。
+		 */
 		if (sc.nr_reclaimed >= SWAP_CLUSTER_MAX) {
 			ret = 1;
 			goto out;
@@ -929,16 +1242,26 @@ int try_to_free_pages(struct zone **zones,
 		 * that's undesirable in laptop mode, where we *want* lumpy
 		 * writeout.  So in laptop mode, write out the whole world.
 		 */
+		/**
+		 * 如果没有回收32个页，但是已经扫描49页，则函数调用wakeup_bdflush激活pdflush内核线程。将页高速缓存中的一些脏页写入磁盘。
+		 */
 		if (total_scanned > SWAP_CLUSTER_MAX + SWAP_CLUSTER_MAX/2) {
 			wakeup_bdflush(laptop_mode ? 0 : total_scanned);
 			sc.may_writepage = 1;
 		}
 
 		/* Take a nap, wait for some writeback to complete */
+		/**
+		 * 如果已经完成4次扫描但是没有达到目标，则调用blk_congestion_wait挂起进程。
+		 * 一直到没有拥塞的WRITE请求队列或100ms超时到达。
+		 */
 		if (sc.nr_scanned && priority < DEF_PRIORITY - 2)
 			blk_congestion_wait(WRITE, HZ/10);
 	}
 out:
+	/**
+	 * 还原管理区描述符的prev_priority，此值存放在temp_priority中。
+	 */
 	for (i = 0; zones[i] != 0; i++)
 		zones[i]->prev_priority = zones[i]->temp_priority;
 	return ret;
@@ -969,6 +1292,9 @@ out:
  * the page allocator fallback scheme to ensure that aging of pages is balanced
  * across the zones.
  */
+/**
+ * 被kswapd调用，以定期回收内存节点的内存。
+ */
 static int balance_pgdat(pg_data_t *pgdat, int nr_pages, int order)
 {
 	int to_free = nr_pages;
@@ -982,18 +1308,27 @@ static int balance_pgdat(pg_data_t *pgdat, int nr_pages, int order)
 loop_again:
 	total_scanned = 0;
 	total_reclaimed = 0;
+	/**
+	 * 建立sc描述符。
+	 */
 	sc.gfp_mask = GFP_KERNEL;
 	sc.may_writepage = 0;
 	sc.nr_mapped = read_page_state(nr_mapped);
 
 	inc_page_state(pageoutrun);
 
+	/**
+	 * 将内存节点的每个管理区描述符的temp_priority设置成12.
+	 */
 	for (i = 0; i < pgdat->nr_zones; i++) {
 		struct zone *zone = pgdat->node_zones + i;
 
 		zone->temp_priority = DEF_PRIORITY;
 	}
 
+	/**
+	 * 执行一个循环，进行13次迭代，每次迭代时的优先级有所变化。
+	 */
 	for (priority = DEF_PRIORITY; priority >= 0; priority--) {
 		int end_zone = 0;	/* Inclusive.  0 = ZONE_DMA */
 		unsigned long lru_pages = 0;
@@ -1005,6 +1340,9 @@ loop_again:
 			 * Scan in the highmem->dma direction for the highest
 			 * zone which needs scanning
 			 */
+			/**
+			 * 扫描每个管理区，寻找空闲页框数不足的最高管理区。
+			 */
 			for (i = pgdat->nr_zones - 1; i >= 0; i--) {
 				struct zone *zone = pgdat->node_zones + i;
 
@@ -1015,17 +1353,27 @@ loop_again:
 						priority != DEF_PRIORITY)
 					continue;
 
+				/**
+				 * 某个管理区的可用内存低于水线，开始扫描过程。
+				 */
 				if (!zone_watermark_ok(zone, order,
 						zone->pages_high, 0, 0, 0)) {
 					end_zone = i;
 					goto scan;
 				}
 			}
+
+			/**
+			 * 所有管理区的可用内存都高于水线，退出。
+			 */
 			goto out;
 		} else {
 			end_zone = pgdat->nr_zones - 1;
 		}
 scan:
+		/**
+		 * 再次扫描管理区，计算所有活动链表和非活动链表上的所有页。
+		 */
 		for (i = 0; i <= end_zone; i++) {
 			struct zone *zone = pgdat->node_zones + i;
 
@@ -1041,12 +1389,18 @@ scan:
 		 * pages behind kswapd's direction of progress, which would
 		 * cause too much scanning of the lower zones.
 		 */
+		/**
+		 * 再次扫描管理区，进行内存回收。
+		 */
 		for (i = 0; i <= end_zone; i++) {
 			struct zone *zone = pgdat->node_zones + i;
 
 			if (zone->present_pages == 0)
 				continue;
 
+			/**
+			 * 已经扫描完所有页面，并且不是默认优先级，没有必要再对该管理区进行扫描。
+			 */
 			if (zone->all_unreclaimable && priority != DEF_PRIORITY)
 				continue;
 
@@ -1058,6 +1412,9 @@ scan:
 			zone->temp_priority = priority;
 			if (zone->prev_priority > priority)
 				zone->prev_priority = priority;
+			/**
+			 * 调用shrink_zone和shrink_slab回收内存。
+			 */
 			sc.nr_scanned = 0;
 			sc.nr_reclaimed = 0;
 			sc.priority = priority;
@@ -1098,15 +1455,24 @@ scan:
 		 * matches the direct reclaim path behaviour in terms of impact
 		 * on zone->*_priority.
 		 */
+		/**
+		 * 如果至少有32页被回收，就跳出循环。
+		 */
 		if (total_reclaimed >= SWAP_CLUSTER_MAX)
 			break;
 	}
 out:
+	/**
+	 * 更新管理区的prev_priority字段。
+	 */
 	for (i = 0; i < pgdat->nr_zones; i++) {
 		struct zone *zone = pgdat->node_zones + i;
 
 		zone->prev_priority = zone->temp_priority;
 	}
+	/**
+	 * 增加一个调度点。
+	 */
 	if (!all_zones_ok) {
 		cond_resched();
 		goto loop_again;
@@ -1128,6 +1494,9 @@ out:
  * If there are applications that are active memory-allocators
  * (most normal use), this basically shouldn't matter.
  */
+/**
+ * 每个NUMA节点都有一个kswapd内核线程。以周期性的从LRU链表中回收页。
+ */
 static int kswapd(void *p)
 {
 	unsigned long order;
@@ -1140,6 +1509,9 @@ static int kswapd(void *p)
 	cpumask_t cpumask;
 
 	daemonize("kswapd%d", pgdat->node_id);
+	/**
+	 * 将进程绑定到访问内存节点的CPU。
+	 */
 	cpumask = node_to_cpumask(pgdat->node_id);
 	if (!cpus_empty(cpumask))
 		set_cpus_allowed(tsk, cpumask);
@@ -1157,6 +1529,9 @@ static int kswapd(void *p)
 	 * us from recursively trying to free more memory as we're
 	 * trying to free the first piece of memory in the first place).
 	 */
+	/**
+	 * 由于回收线程也会分配内存，设置这两个标志后，就允许使用全部可用空闲内存。回收线程就不会在调用alloc_pages时分配不到内存了。
+	 */
 	tsk->flags |= PF_MEMALLOC|PF_KSWAPD;
 
 	order = 0;
@@ -1165,6 +1540,9 @@ static int kswapd(void *p)
 		if (current->flags & PF_FREEZE)
 			refrigerator(PF_FREEZE);
 
+		/**
+		 * 线程总是在kswapd_wait等待队列上等待被唤醒。
+		 */
 		prepare_to_wait(&pgdat->kswapd_wait, &wait, TASK_INTERRUPTIBLE);
 		new_order = pgdat->kswapd_max_order;
 		pgdat->kswapd_max_order = 0;
@@ -1178,8 +1556,15 @@ static int kswapd(void *p)
 			schedule();
 			order = pgdat->kswapd_max_order;
 		}
+
+		/**
+		 * 首先将自己从kswapd_wait队列中删除。
+		 */
 		finish_wait(&pgdat->kswapd_wait, &wait);
 
+		/**
+		 * balance_pgdat进行内存节点的回收工作。
+		 */
 		balance_pgdat(pgdat, 0, order);
 	}
 	return 0;

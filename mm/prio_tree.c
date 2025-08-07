@@ -94,6 +94,9 @@ void vma_prio_tree_add(struct vm_area_struct *vma, struct vm_area_struct *old)
 	}
 }
 
+/**
+ * 在优先搜索树中插入vma节点。
+ */
 void vma_prio_tree_insert(struct vm_area_struct *vma,
 			  struct prio_tree_root *root)
 {
@@ -110,6 +113,9 @@ void vma_prio_tree_insert(struct vm_area_struct *vma,
 	}
 }
 
+/**
+ * 在优先搜索树中删除vma节点。
+ */
 void vma_prio_tree_remove(struct vm_area_struct *vma,
 			  struct prio_tree_root *root)
 {

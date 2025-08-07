@@ -99,6 +99,11 @@ int rotate_reclaimable_page(struct page *page)
 /*
  * FIXME: speed this up?
  */
+/**
+ * 检查PG_active标志，如果没有置位(页在非活动链表中)，将页移到活动链表中。
+ * 依次调用del_page_from_inactive_list和add_page_to_active_list，最后将PG_active标志置位。
+ * 在移动页之前，获得管理区的lru_lock自旋锁。
+ */
 void fastcall activate_page(struct page *page)
 {
 	struct zone *zone = page_zone(page);
@@ -120,6 +125,15 @@ void fastcall activate_page(struct page *page)
  * inactive,referenced		->	active,unreferenced
  * active,unreferenced		->	active,referenced
  */
+/**
+ * 将一个页标记为访问过。只有当PG_referenced标志置位时，它把页从非活动链表移到活动链表。以下情况会调用本函数:
+ *		当按需装入进程的一个匿名页时。
+ *		当按需装入内存映射文件的一个页时。
+ *		当按需装入IPC共享内存区的一个页时。
+ *		当从文件读取数据页时。
+ *		当换入一个页时。
+ *		当在高速缓存中搜索一个缓冲区页时。
+ */
 void fastcall mark_page_accessed(struct page *page)
 {
 	if (!PageActive(page) && PageReferenced(page) && PageLRU(page)) {
@@ -139,6 +153,9 @@ EXPORT_SYMBOL(mark_page_accessed);
 static DEFINE_PER_CPU(struct pagevec, lru_add_pvecs) = { 0, };
 static DEFINE_PER_CPU(struct pagevec, lru_add_active_pvecs) = { 0, };
 
+/**
+ * 如果页不在LRU链表中，将PG_lru标志置位，得到管理区的lru_lock自谢锁，调用add_page_to_inactive_list把页插入管理区的非活动链表。
+ */
 void fastcall lru_cache_add(struct page *page)
 {
 	struct pagevec *pvec = &get_cpu_var(lru_add_pvecs);
@@ -149,6 +166,9 @@ void fastcall lru_cache_add(struct page *page)
 	put_cpu_var(lru_add_pvecs);
 }
 
+/**
+ * 如果页不在LRU链表中，将PG_lru和PG_active标志置位，得到管理区的lru_lock自旋锁，调用add_page_to_active_list把页插入管理区的活动链表。
+ */
 void fastcall lru_cache_add_active(struct page *page)
 {
 	struct pagevec *pvec = &get_cpu_var(lru_add_active_pvecs);

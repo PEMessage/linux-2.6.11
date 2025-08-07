@@ -62,6 +62,11 @@
 #ifndef CONFIG_DISCONTIGMEM
 /* use the per-pgdat data instead for discontigmem - mbligh */
 unsigned long max_mapnr;
+/**
+ * 内存映射数组。管理区描述符的zone_mem_map指向它的一个元素。
+ * 用于伙伴系统。
+ * 
+ */
 struct page *mem_map;
 
 EXPORT_SYMBOL(max_mapnr);
@@ -75,6 +80,9 @@ unsigned long num_physpages;
  * of ZONE_NORMAL.  Under CONFIG_DISCONTIG this means that max_low_pfn and
  * highstart_pfn must be the same; there must be no gap between ZONE_NORMAL
  * and ZONE_HIGHMEM.
+ */
+/**
+ * 高端内存的起始地址，被设置成896MB.
  */
 void * high_memory;
 unsigned long vmalloc_earlyreserve;
@@ -175,6 +183,9 @@ static inline void clear_pgd_range(struct mmu_gather *tlb, pgd_t *pgd, unsigned 
  * This function clears user-level page tables of a process.
  *
  * Must be called with pagetable lock held.
+ */
+/**
+ * 从线性地址start到end通过反复释放页表和清除页中间目录项来清除进程页表的内容
  */
 void clear_page_range(struct mmu_gather *tlb, unsigned long start, unsigned long end)
 {
@@ -410,6 +421,12 @@ static int copy_pud_range(struct mm_struct *dst_mm,  struct mm_struct *src_mm,
 	return err;
 }
 
+/**
+ * 在dump_mmap中，插入一个新的线性区描述符后，通过本过程创建必要的页表映射线性区所包含的一组页。
+ * 并且初始化新页表的表项。
+ * 与私有的、可写的页(VM_SHARED标志关闭，VM_MAYWRITE标志打开)所对应的任意页框都标记为对父子进程都是只读
+ * 以便这种页框能用写时复制机制进行处理。
+ */
 int copy_page_range(struct mm_struct *dst, struct mm_struct *src,
 		struct vm_area_struct *vma)
 {
@@ -854,7 +871,15 @@ untouched_anonymous_page(struct mm_struct* mm, struct vm_area_struct *vma,
 	return 0;
 }
 
-
+/**
+ * 得到用户空间缓冲区的页数组，并将其锁在内存中。这允许驱动程序随后对这些内存进行直接IO。
+ *		tsk:		指向执行IO的任务。
+ *		mm:			描述被映射地址空间的内存管理结构的指针。
+ *		start,len:	start是用户空间缓冲区的地址(页对齐)，len是页内的缓冲区长度。
+ *		write,force:如果write非零，对映射的页有写权限。force标志表示不考虑对指定内存页的保护，直接提供所请求的访问。
+ *		pages,vmas:	输出参数。如果调用成功，pages中包含了一个描述用户空间缓冲区page结构的指针列表，vmas包含了相应的VMA指针。
+ * 返回值是实际被映射的页数。
+ */
 int get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 		unsigned long start, int len, int write, int force,
 		struct page **pages, struct vm_area_struct **vmas)
@@ -1173,6 +1198,15 @@ static inline int remap_pud_range(struct mm_struct *mm, pud_t * pud,
 }
 
 /*  Note: this is only safe if the mm semaphore is held when called. */
+/**
+ * 为一段物理内存建立新的页表。
+ *		vma:			虚拟内存区域，在一定范围内的页将被映射到该区域。
+ *		virt_addr:		重新映射时的起始用户虚拟地址。该函数为处于virt_addr和virt_addr+size之间的虚拟地址建立页表。
+ *		pfn:			与物理内存对应的页帧号。虚拟内存将要被映射到该物理内存上。
+ *		size:			以字节为单位，被重新映射的区域大小。
+ *		prot:			新VMA要求的保护属性。
+ * 返回为0表示成功，负值表示错误。
+ */
 int remap_pfn_range(struct vm_area_struct *vma, unsigned long from,
 		    unsigned long pfn, unsigned long size, pgprot_t prot)
 {
@@ -1274,6 +1308,9 @@ static inline void break_cow(struct vm_area_struct * vma, struct page * new_page
  * We hold the mm semaphore and the page_table_lock on entry and exit
  * with the page_table_lock released.
  */
+/**
+ * 处理写保护的页，即写时复制技术。
+ */
 static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 	unsigned long address, pte_t *page_table, pmd_t *pmd, pte_t pte)
 {
@@ -1293,15 +1330,28 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 		spin_unlock(&mm->page_table_lock);
 		return VM_FAULT_OOM;
 	}
+	/**
+	 * 获得与缺页异常相关的页框描述符。
+	 */
 	old_page = pfn_to_page(pfn);
 
 	if (!TestSetPageLocked(old_page)) {
+		/**
+		 * 检查old_page的count字段
+		 * 当只有一个进程拥有该页时，它为1，当然，如果打开了页面交换，
+		 * 那么页交换时也可会在设置PG_private的同时增加count字段。
+		 * 所以can_share_swap_page判断了两个字段。
+		 * 反正，当count==1并且没有交换时，can_share_swap_page返回1，此时不必进行写时复制。
+		 */
 		int reuse = can_share_swap_page(old_page);
 		unlock_page(old_page);
-		if (reuse) {
+		if (reuse) {/*不必进行写时复制了*/
 			flush_cache_page(vma, address);
 			entry = maybe_mkwrite(pte_mkyoung(pte_mkdirty(pte)),
 					      vma);
+			/**
+			 * 标记页面为可写的。这样将不会引起进一步的异常。
+			 */
 			ptep_set_access_flags(vma, address, page_table, entry, 1);
 			update_mmu_cache(vma, address, entry);
 			pte_unmap(page_table);
@@ -1314,13 +1364,26 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 	/*
 	 * Ok, we need to copy. Oh, well..
 	 */
+	/**
+	 * 运行到这里，说明两个或者多个进程通过写时复制共享页框。
+	 * 在复制旧页前，需要调用page_cache_get，将old_page的引用计数加1。
+	 */
 	if (!PageReserved(old_page))
 		page_cache_get(old_page);
 	spin_unlock(&mm->page_table_lock);
 
 	if (unlikely(anon_vma_prepare(vma)))
 		goto no_new_page;
-	if (old_page == ZERO_PAGE(address)) {
+	/**
+	 * 其实是否对0页进行特殊处理是有原因的。
+	 * 它可以减少对旧页的引用。这样可以稍微减少一点硬件高速缓存的损失。
+	 * 当然，这样做能够带来多少作用是不知道的，谁能够写一个测试程序来证明这一点呢？？？
+	 * 想一想测不准原理吧。
+	 */
+	if (old_page == ZERO_PAGE(address)) {/*如果旧页框是0页*/
+		/**
+		 * 用__GFP_ZERO标志分配一个新页框。
+		 */
 		new_page = alloc_zeroed_user_highpage(vma, address);
 		if (!new_page)
 			goto no_new_page;
@@ -1328,6 +1391,9 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 		new_page = alloc_page_vma(GFP_HIGHUSER, vma, address);
 		if (!new_page)
 			goto no_new_page;
+		/**
+		 * 否则就复制页。
+		 */
 		copy_user_highpage(new_page, old_page, address);
 	}
 	/*
@@ -1335,6 +1401,10 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 	 */
 	spin_lock(&mm->page_table_lock);
 	page_table = pte_offset_map(pmd, address);
+	/**
+	 * 由于页框分配可能阻塞线程。所以现在通过pte_same比较页表项是否已经被改变。
+	 * 一般来说，是一样的，毕竟引起阻塞的时候相对少一些。
+	 */
 	if (likely(pte_same(*page_table, pte))) {
 		if (PageAnon(old_page))
 			mm->anon_rss--;
@@ -1344,7 +1414,14 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 			update_mem_hiwater();
 		} else
 			page_remove_rmap(old_page);
+		/**
+		 * 既然页表项没有被改变，而新页已经生效了，就调用break_cow，它会调用flush_cache_page刷新TLB。
+		 */
 		break_cow(vma, new_page, address, page_table);
+		/**
+		 * lru_cache_add_active将新页框插入到与页面交换相关的数据结构中。
+		 * 这样，新页就会参与页面交换了。
+		 */
 		lru_cache_add_active(new_page);
 		page_add_anon_rmap(new_page, vma, address);
 
@@ -1352,6 +1429,11 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct * vma,
 		new_page = old_page;
 	}
 	pte_unmap(page_table);
+	/**
+	 * 注意，new_page和old_page可能是同一个值了。
+	 * 这里可能会将old_page的引用计数减少两次。
+	 * 一次是安全性检查时加的。一次是为了说明：旧页已经不再被当前进程拥有了。
+	 */
 	page_cache_release(new_page);
 	page_cache_release(old_page);
 	spin_unlock(&mm->page_table_lock);
@@ -1685,28 +1767,68 @@ void swapin_readahead(swp_entry_t entry, unsigned long addr,struct vm_area_struc
  * We hold the mm semaphore and the page_table_lock on entry and
  * should release the pagetable lock on exit..
  */
+/**
+ * 当对一个已经被换到磁盘的页进行寻址时，就会发生页的换入。
+ * mm-引起缺页异常的进程的内存描述符地址。
+ * vma-address所在的线性区的线性区描述符地址。
+ * address-引起异常的线性地址。
+ * page_table-映射address的页表项的地址。
+ * pmd-映射address的页中间目录的址
+ * orig_pte-映射address的页表项的内容
+ * write_access-一个标志，表示试图执行的是读操作还是写操作
+ * 返回值：它从不返回0，如果页在交换高速缓存中就返回1（次错误）
+ * 如果页已经从交换区读入就返回2（主错误），如果在进行换入时发生错误就返回-1。
+ */
 static int do_swap_page(struct mm_struct * mm,
 	struct vm_area_struct * vma, unsigned long address,
 	pte_t *page_table, pmd_t *pmd, pte_t orig_pte, int write_access)
 {
 	struct page *page;
+	/**
+	 * 从orig_pte中获得换出页标识符。
+	 */
 	swp_entry_t entry = pte_to_swp_entry(orig_pte);
 	pte_t pte;
 	int ret = VM_FAULT_MINOR;
 
+	/**
+	 * pte_unmap释放任何页表的临时内核映射。当访问高端内存页表需要进行内核映射。
+	 */
 	pte_unmap(page_table);
+	/**
+	 * 释放内存描述符page_table_lock自旋锁（它是由调用者函数handle_pte_fault获取的）。
+	 */
 	spin_unlock(&mm->page_table_lock);
+	/**
+	 * 检查页是否在高速缓存中
+	 */
 	page = lookup_swap_cache(entry);
-	if (!page) {
+	if (!page) {/* 页不在高速缓存中 */
+		/**
+		 * swapin_readahead函数从交换区读取最多2n个页,当然也包含请求的页。
+		 * 每个页是由read_swap_cache_async读入的。
+		 */
  		swapin_readahead(entry, address, vma);
+		/**
+		 * 再次调用read_swap_cache_async换入所缺的页。
+		 * 重新调用一次是因为swapin_readahead可能失败。比如当page_cluster被设置为0时，或者要读取的一组页有缺陷页槽。
+		 * 而且，如果swapin_readahead成功了，read_swap_cache_async就会很快成功。
+		 */
  		page = read_swap_cache_async(entry, vma, address);
-		if (!page) {
+		if (!page) {/* 页还是没有被加到交换高速缓存。那么，再看看另一个控制路径是否换入了请求的页。 */
 			/*
 			 * Back out if somebody else faulted in this pte while
 			 * we released the page table lock.
 			 */
+			/**
+			 * 临时获得page_table_lock自旋锁。
+			 */
 			spin_lock(&mm->page_table_lock);
 			page_table = pte_offset_map(pmd, address);
+			/**
+			 * 比较page_table与orig_pte，如果二者有差异，说明该页已经被其他内核控制路径换入，则返回1（次错误）
+			 * 否则返回-1(失败)
+			 */
 			if (likely(pte_same(*page_table, orig_pte)))
 				ret = VM_FAULT_OOM;
 			else
@@ -1717,21 +1839,38 @@ static int do_swap_page(struct mm_struct * mm,
 		}
 
 		/* Had to read the page from swap area: Major fault */
+
+		/**
+		 * 当函数执行到这里时，说明页已经在高速缓存中
+		 * 调用grab_swap_token试图获得一个交换标记。
+		 */
 		ret = VM_FAULT_MAJOR;
 		inc_page_state(pgmajfault);
 		grab_swap_token();
 	}
 
+	/**
+	 * mark_page_accessed设置LRU标记。
+	 */	
 	mark_page_accessed(page);
+	/**
+	 * 锁住页
+	 */
 	lock_page(page);
 
 	/*
 	 * Back out if somebody else faulted in this pte while we
 	 * released the page table lock.
 	 */
+	/**
+	 * 检查另一个内核控制路径是否换入了所请求的页。
+	 */
 	spin_lock(&mm->page_table_lock);
 	page_table = pte_offset_map(pmd, address);
 	if (unlikely(!pte_same(*page_table, orig_pte))) {
+		/**
+		 * 另外一个控制路径已经换入了所请求的页。就释放自旋锁，打开页上的锁，并返回1（次错误）
+		 */
 		pte_unmap(page_table);
 		spin_unlock(&mm->page_table_lock);
 		unlock_page(page);
@@ -1741,26 +1880,48 @@ static int do_swap_page(struct mm_struct * mm,
 	}
 
 	/* The page isn't present yet, go ahead with the fault. */
-		
+	/**
+	 * swap_free减少entry对应的页槽的引用计数器。
+	 */
 	swap_free(entry);
+	/**
+	 * 检查高速缓存是否至少占满50%。如果是，则检查页是否仅被异常进程拥有。
+	 * 如果是，就从高速缓存中删去这一页。
+	 */
 	if (vm_swap_full())
 		remove_exclusive_swap_page(page);
 
+	/**
+	 * rss是内存页框数
+	 */
 	mm->rss++;
 	acct_update_integrals();
 	update_mem_hiwater();
 
+	/**
+	 * 更新页表项，这样进程就能够找到这一页了。
+	 */
 	pte = mk_pte(page, vma->vm_page_prot);
+
 	if (write_access && can_share_swap_page(page)) {
 		pte = maybe_mkwrite(pte_mkdirty(pte), vma);
 		write_access = 0;
 	}
+	/**
+	 * 打开页上的锁。
+	 */
 	unlock_page(page);
 
 	flush_icache_page(vma, page);
 	set_pte(page_table, pte);
+	/**
+	 * page_add_anon_rmap处理反向映射。
+	 */
 	page_add_anon_rmap(page, vma, address);
 
+	/**
+	 * 如果write_access参数等于1，则函数调用do_wp_page复制一份页框（参见写时复制）
+	 */
 	if (write_access) {
 		if (do_wp_page(mm, vma, address,
 				page_table, pmd, pte) == VM_FAULT_OOM)
@@ -1781,6 +1942,9 @@ out:
  * spinlock held to protect against concurrent faults in
  * multithreaded programs. 
  */
+/**
+ * 获得一个新的页框。
+ */
 static int
 do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		pte_t *page_table, pmd_t *pmd, int write_access,
@@ -1790,11 +1954,23 @@ do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	struct page * page = ZERO_PAGE(addr);
 
 	/* Read-only mapping of ZERO_PAGE. */
+	/**
+	 * 对读访问时，页的内容是无关紧要的。
+	 * 但是，第一次分给进程的页，最好还是填上0。以免旧页的信息被黑客利用。
+	 * 没有必要立即分配这样的页框。只需要把empty_zero_page页映射给进程就行了。
+	 * 并且将页标记为只读，当进程试图写这个页时，再启动写时复制机制。
+	 */
 	entry = pte_wrprotect(mk_pte(ZERO_PAGE(addr), vma->vm_page_prot));
 
 	/* ..except if it's a write access */
 	if (write_access) {
 		/* Allocate our own private page. */
+		/**
+		 * 释放临时内核映射。
+		 * 在调用handle_pte_fault函数之前，由pte_offset_map所建立页表项的高端内存物理地址。
+		 * pte_offset_map宏是和pte_unmap配对使用的。
+		 * pte_unmap必须在alloc_page前释放。因为alloc_page可能阻塞当前进程？？
+		 */
 		pte_unmap(page_table);
 		spin_unlock(&mm->page_table_lock);
 
@@ -1813,12 +1989,23 @@ do_anonymous_page(struct mm_struct *mm, struct vm_area_struct *vma,
 			spin_unlock(&mm->page_table_lock);
 			goto out;
 		}
+		/**
+		 * 递增rss字段，它记录了分配给进程的页框总数。
+		 */
 		mm->rss++;
 		acct_update_integrals();
 		update_mem_hiwater();
+		/**
+		 * 标记页框为既脏又可写。
+		 * 如果调试程序试图往被跟踪进程只读线性区中的页中写数据。内核不会设置相关标志。
+		 * maybe_mkwrite会处理这种特殊情况。
+		 */
 		entry = maybe_mkwrite(pte_mkdirty(mk_pte(page,
 							 vma->vm_page_prot)),
 				      vma);
+		/**
+		 * lru_cache_add_active把新页框插入与交换相关的数据结构中。
+		 */
 		lru_cache_add_active(page);
 		SetPageReferenced(page);
 		page_add_anon_rmap(page, vma, addr);
@@ -1848,6 +2035,10 @@ no_mem:
  * This is called with the MM semaphore held and the page table
  * spinlock held. Exit with the spinlock released.
  */
+/**
+ * 当被访问的页不在主存中时，如果页从没有访问过，或者映射了磁盘文件
+ * 那么pte_none宏会返回1，handle_pte_fault函数会调用本函数装入所缺的页。
+ */
 static int
 do_no_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	unsigned long address, int write_access, pte_t *page_table, pmd_t *pmd)
@@ -1859,9 +2050,21 @@ do_no_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	int ret = VM_FAULT_MINOR;
 	int anon = 0;
 
+	/**
+	 * vma->vm_ops || !vma->vm_ops->nopage,这是判断线性区是否映射了一个磁盘文件。
+	 * 这两个值只要某一个为空，说明没有映射磁盘文件。也就是说：它是一个匿名映射。
+	 * nopage指向装入页的函数。
+	 * 当没有映射时，就调用do_anonymous_page获得一个新的页框。
+	 */
 	if (!vma->vm_ops || !vma->vm_ops->nopage)
+		/**
+		 * do_anonymous_page获得一个新的页框。分别处理写请求和读讨还。
+		 */
 		return do_anonymous_page(mm, vma, page_table,
 					pmd, write_access, address);
+	/**
+	 * 否则，就是一个文件映射。进行请求调页处理。
+	 */
 	pte_unmap(page_table);
 	spin_unlock(&mm->page_table_lock);
 
@@ -1872,6 +2075,9 @@ do_no_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	}
 retry:
 	cond_resched();
+	/**
+	 * 线性区定义了nopage方法，则回调此方法以返回所请求页的页框的地址。
+	 */
 	new_page = vma->vm_ops->nopage(vma, address & PAGE_MASK, &ret);
 	/*
 	 * No smp_rmb is needed here as long as there's a full
@@ -1890,16 +2096,25 @@ retry:
 	/*
 	 * Should we do an early C-O-W break?
 	 */
+	/**
+	 * 进程试图对页进行写入，而该内存映射是私有的，需要取消内存映射。
+	 */
 	if (write_access && !(vma->vm_flags & VM_SHARED)) {
 		struct page *page;
 
 		if (unlikely(anon_vma_prepare(vma)))
 			goto oom;
+		/**
+		 * 分配一个新页。并将读取的页拷贝一份到新页中。。
+		 */
 		page = alloc_page_vma(GFP_HIGHUSER, vma, address);
 		if (!page)
 			goto oom;
 		copy_user_highpage(page, new_page, address);
 		page_cache_release(new_page);
+		/**
+		 * 在后面的步骤中，使用新页而不是nopage方法返回的页，这样，后者就不会被用户态进程修改。
+		 */
 		new_page = page;
 		anon = 1;
 	}
@@ -1909,6 +2124,9 @@ retry:
 	 * For a file-backed vma, someone could have truncated or otherwise
 	 * invalidated this page.  If unmap_mapping_range got called,
 	 * retry getting the page.
+	 */
+	/**
+	 * 如果某个其他进程删改或者作废了该页(truncate_count用于此种检查),则跳转回去，尝试再次获得该页。
 	 */
 	if (mapping && unlikely(sequence != mapping->truncate_count)) {
 		sequence = mapping->truncate_count;
@@ -1931,12 +2149,18 @@ retry:
 	/* Only go through if we didn't race with anybody else... */
 	if (pte_none(*page_table)) {
 		if (!PageReserved(new_page))
-			++mm->rss;
+			++mm->rss;/* 增加进程的rss字段，以表示一个新页框已经分配给进程。 */
 		acct_update_integrals();
 		update_mem_hiwater();
 
 		flush_icache_page(vma, new_page);
+		/**
+		 * 用新页框 的地址以及线性区的vm_page_prot字段中所包含的页访问权来设置缺页所在的地址对应的页表项。
+		 */
 		entry = mk_pte(new_page, vma->vm_page_prot);
+		/**
+		 * 如果进程试图对这个页进行写入，则把页表项的read/write和dirty设置为1.
+		 */
 		if (write_access)
 			entry = maybe_mkwrite(pte_mkdirty(entry), vma);
 		set_pte(page_table, entry);
@@ -1969,6 +2193,11 @@ oom:
  * Fault of a previously existing named mapping. Repopulate the pte
  * from the encoded file_pte if possible. This enables swappable
  * nonlinear vmas.
+ */
+/**
+ * 被handle_pte_fault调用。
+ * 从页表项的高位中取出所请求文件页的索引。
+ * 并调用线性区的populate方法从磁盘读入页并更新页表项本身。
  */
 static int do_file_page(struct mm_struct * mm, struct vm_area_struct * vma,
 	unsigned long address, int write_access, pte_t *pte, pmd_t *pmd)
@@ -2021,6 +2250,9 @@ static int do_file_page(struct mm_struct * mm, struct vm_area_struct * vma,
  * We enter with the pagetable spinlock held, we are supposed to
  * release it when done.
  */
+/**
+ * handle_pte_fault函数检查address地址所对应的页表项。并决定如何为进程分配一个新页框。
+ */
 static inline int handle_pte_fault(struct mm_struct *mm,
 	struct vm_area_struct * vma, unsigned long address,
 	int write_access, pte_t *pte, pmd_t *pmd)
@@ -2028,21 +2260,41 @@ static inline int handle_pte_fault(struct mm_struct *mm,
 	pte_t entry;
 
 	entry = *pte;
+	/**
+	 * 页还不存在，内核分配一个新的页框并适当的初始化。
+	 * 即请求调页。
+	 */
 	if (!pte_present(entry)) {
 		/*
 		 * If it truly wasn't present, we know that kswapd
 		 * and the PTE updates will not touch it later. So
 		 * drop the lock.
 		 */
+		/**
+		 * pte_none返回1，说明页从未被进程访问且没有映射磁盘文件。
+		 */
 		if (pte_none(entry))
 			return do_no_page(mm, vma, address, write_access, pte, pmd);
+		/**
+		 * pte_file返回1，说明页属于非线性磁盘文件的映射。
+		 */
 		if (pte_file(entry))
 			return do_file_page(mm, vma, address, write_access, pte, pmd);
+
+		/**
+		 * 这个页曾经被访问过，但是其内容被临时保存在磁盘上。
+		 */
 		return do_swap_page(mm, vma, address, pte, pmd, entry, write_access);
 	}
 
+	/**
+	 * 页存在，但是为只读。就分配一个新的页框，并把旧页框的数据复制到新页框。即COW
+	 */
 	if (write_access) {
 		if (!pte_write(entry))
+			/**
+			 * 在x86中，总是会调用do_wp_page，此时访问权限是写允许（write_access），而页框是写保护的
+			 */
 			return do_wp_page(mm, vma, address, pte, pmd, entry);
 
 		entry = pte_mkdirty(entry);
@@ -2057,6 +2309,13 @@ static inline int handle_pte_fault(struct mm_struct *mm,
 
 /*
  * By the time we get here, we already hold the mm semaphore
+ */
+/**
+ * 当程序缺页时，调用此过程分配新的页框。
+ * mm-异常发生时，正在CPU上运行的进程的内存描述符
+ * vma-指向引起异常的线性地址所在线性区的描述符。
+ * address-引起异常的地址。
+ * write_access-如果tsk试图向address写，则为1，否则为0。
  */
 int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct * vma,
 		unsigned long address, int write_access)
@@ -2077,6 +2336,9 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct * vma,
 	 * We need the page table lock to synchronize with kswapd
 	 * and the SMP-safe atomic PTE updates.
 	 */
+	/**
+	 * pgd_offset和pud_alloc检查映射address的页中间目录和页表是否存在。
+	 */
 	pgd = pgd_offset(mm, address);
 	spin_lock(&mm->page_table_lock);
 
@@ -2091,7 +2353,10 @@ int handle_mm_fault(struct mm_struct *mm, struct vm_area_struct * vma,
 	pte = pte_alloc_map(mm, pmd, address);
 	if (!pte)
 		goto oom;
-	
+
+	/**
+	 * handle_pte_fault函数检查address地址所对应的页表项。并决定如何为进程分配一个新页框。
+	 */
 	return handle_pte_fault(mm, vma, address, write_access, pte, pmd);
 
  oom:
@@ -2211,6 +2476,9 @@ int make_pages_present(unsigned long addr, unsigned long end)
 
 /* 
  * Map a vmalloc()-space virtual address to the physical page.
+ */
+/**
+ * 得到vmalloc分配的虚拟地址对应的物理地址。
  */
 struct page * vmalloc_to_page(void * vmalloc_addr)
 {

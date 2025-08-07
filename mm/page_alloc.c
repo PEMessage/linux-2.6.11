@@ -40,9 +40,18 @@
 /* MCD - HACK: Find somewhere to initialize this EARLY, or make this initializer cleaner */
 nodemask_t node_online_map = { { [0] = 1UL } };
 nodemask_t node_possible_map = NODE_MASK_ALL;
+/**
+ * 内核将物理内存分为几个结点。
+ * 每个结点上的内存，对当前CPU来说，其访问时间是相等的。
+ * pgdat_list是这些结点的单向列表。
+ * 对x86来说，不支持NUMA，所以这个链表只有一个结点。这个结点保存在contig_page_data中。
+ */
 struct pglist_data *pgdat_list;
 unsigned long totalram_pages;
 unsigned long totalhigh_pages;
+/**
+ * 所有活动交换区中可用的页槽数目。
+ */
 long nr_swap_pages;
 /*
  * results with 256, 32 in the lowmem_reserve sysctl:
@@ -65,6 +74,12 @@ struct zone *zone_table[1 << (ZONES_SHIFT + NODES_SHIFT)];
 EXPORT_SYMBOL(zone_table);
 
 static char *zone_names[MAX_NR_ZONES] = { "DMA", "Normal", "HighMem" };
+/**
+ * 内核保留内存池大小。
+ * 一般等于sqrt(16*内核直接映射内存大小)
+ * 但是不能小于128也不能大于65536
+ * 管理员可以通过写入/proc/sys/vm/min_free_kbytes来改变这个值。
+ */
 int min_free_kbytes = 1024;
 
 unsigned long __initdata nr_kernel_pages;
@@ -232,12 +247,26 @@ static inline int page_is_buddy(struct page *page, int order)
  *
  * -- wli
  */
-
+/**
+ * 按照伙伴系统的策略释放页框。
+ * page-被释放块中所包含的第一个页框描述符的地址。
+ * zone-管理区描述符的地址。
+ * order-块大小的对数。
+ * base-纯粹由于效率的原因而引入。其实可以从其他三个参数计算得出。
+ * 该函数假定调用者已经禁止本地中断并获得了自旋锁。
+ */
 static inline void __free_pages_bulk (struct page *page, struct page *base,
 		struct zone *zone, unsigned int order)
 {
+	/**
+	 * page_idx包含块中第一个页框的下标。
+	 * 这是相对于管理区中的第一个页框而言的。
+	 */
 	unsigned long page_idx;
 	struct page *coalesced;
+	/**
+	 * order_size用于增加管理区中空闲页框的计数器。
+	 */
 	int order_size = 1 << order;
 
 	if (unlikely(order))
@@ -245,29 +274,67 @@ static inline void __free_pages_bulk (struct page *page, struct page *base,
 
 	page_idx = page - base;
 
+	/**
+	 * 大小为2^k的块，它的线性地址都是2^k * 2 ^ 12的整数倍。
+	 * 相应的，它在管理区的偏移应该是2^k倍。
+	 */
 	BUG_ON(page_idx & (order_size - 1));
 	BUG_ON(bad_range(zone, page));
 
+	/**
+	 * 增加管理区的空闲页数
+	 */
 	zone->free_pages += order_size;
+	/**
+	 * 最多循环10 - order次。每次都将一个块和它的伙伴进行合并。
+	 * 每次从最小的块开始，向上合并。
+	 */
 	while (order < MAX_ORDER-1) {
 		struct free_area *area;
 		struct page *buddy;
 		int buddy_idx;
 
+		/**
+		 * 最小块的下标。它是要合并的块的伙伴。
+		 * 注意异或操作的用法，是如何用来寻找伙伴的。
+		 */
 		buddy_idx = (page_idx ^ (1 << order));
+		/**
+		 * 通过伙伴的下标找到页描述符的地址。
+		 */
 		buddy = base + buddy_idx;
 		if (bad_range(zone, buddy))
 			break;
+		/**
+		 * 判断伙伴块是否是大小为order的空闲页框的第一个页。
+		 * 首先，伙伴的第一个页必须是空闲的(_count == -1)
+		 * 同时，必须属于动态内存(PG_reserved被清0,PG_reserved为1表示留给内核或者没有使用)
+		 * 最后，其private字段必须是order
+		 */
 		if (!page_is_buddy(buddy, order))
 			break;
+		/**
+		 * 运行到这里，说明伙伴块可以与当前块合并。
+		 */
 		/* Move the buddy up one level. */
+		/**
+		 * 伙伴将被合并，将它从现有链表中取下。
+		 */
 		list_del(&buddy->lru);
 		area = zone->free_area + order;
 		area->nr_free--;
 		rmv_page_order(buddy);
 		page_idx &= buddy_idx;
+		/**
+		 * 将合并了的块再与它的伙伴进行合并。
+		 */
 		order++;
 	}
+
+	/**
+	 * 伙伴不能与当前块合并。
+	 * 将块插入适当的链表，并以块大小的order更新第一个页框的private字段。
+	 */
 	coalesced = base + page_idx;
 	set_page_order(coalesced, order);
 	list_add(&coalesced->lru, &zone->free_area[order].free_list);
@@ -428,25 +495,53 @@ static void prep_new_page(struct page *page, int order)
  * Do the hard work of removing an element from the buddy allocator.
  * Call me with the zone->lock already held.
  */
+/**
+ * 在管理区中找到一个空闲块。
+ * 它需要两个参数：管理区描述符的地址和order。Order表示请求的空闲页块大小的对数值。
+ * 如果页框被成功分配，则返回第一个被分配的页框的页描述符。否则返回NULL。
+ * 本函数假设调用者已经禁止和本地中断并获得了自旋锁。
+ */
 static struct page *__rmqueue(struct zone *zone, unsigned int order)
 {
 	struct free_area * area;
 	unsigned int current_order;
 	struct page *page;
 
+	/**
+	 * 从所请求的order开始，扫描每个可用块链表进行循环搜索。
+	 */
 	for (current_order = order; current_order < MAX_ORDER; ++current_order) {
 		area = zone->free_area + current_order;
+		/**
+		 * 对应的空闲块链表为空，在更大的空闲块链表中进行循环搜索。
+		 */
 		if (list_empty(&area->free_list))
 			continue;
 
+		/**
+		 * 运行到此，说明有合适的空闲块。
+		 */
 		page = list_entry(area->free_list.next, struct page, lru);
+		/**
+		 * 首先在空闲块链表中删除第一个页框描述符。
+		 */
 		list_del(&page->lru);
 		rmv_page_order(page);
 		area->nr_free--;
+		/**
+		 * 并减少空闲管理区的空闲页数量。
+		 */
 		zone->free_pages -= 1UL << order;
+		/**
+		 * 如果2^order空闲块链表中没有合适的空闲块，那么就是从更大的空闲链表中分配的。
+		 * 将剩余的空闲块分散到合适的链表中去。
+		 */
 		return expand(zone, page, order, current_order, area);
 	}
 
+	/**
+	 * 直到循环结束都没有找到合适的空闲块，就返回NULL。
+	 */
 	return NULL;
 }
 
@@ -566,8 +661,16 @@ static void zone_statistics(struct zonelist *zonelist, struct zone *z)
  * Free a 0-order page
  */
 static void FASTCALL(free_hot_cold_page(struct page *page, int cold));
+/**
+ * 释放单个页框到页框高速缓存。
+ * page-要释放的页框描述符地址。
+ * cold-释放到热高速缓存还是冷高速缓存中
+ */
 static void fastcall free_hot_cold_page(struct page *page, int cold)
 {
+	/**
+	 * page_zone从page->flag中，获得page所在的内存管理区描述符。
+	 */
 	struct zone *zone = page_zone(page);
 	struct per_cpu_pages *pcp;
 	unsigned long flags;
@@ -579,10 +682,21 @@ static void fastcall free_hot_cold_page(struct page *page, int cold)
 	if (PageAnon(page))
 		page->mapping = NULL;
 	free_pages_check(__FUNCTION__, page);
+	/**
+	 * 冷高速缓存还是热高速缓存??
+	 */
 	pcp = &zone->pageset[get_cpu()].pcp[cold];
 	local_irq_save(flags);
+	/**
+	 * 如果缓存的页框太多，就清除一些。
+	 * 调用free_pages_bulk将这些页框释放给伙伴系统。
+	 * 当然，需要更新一下count计数。
+	 */
 	if (pcp->count >= pcp->high)
 		pcp->count -= free_pages_bulk(zone, pcp->batch, &pcp->list, 0);
+	/**
+	 * 将释放的页框加到高速缓存链表上。并增加count字段。
+	 */
 	list_add(&page->lru, &pcp->list);
 	pcp->count++;
 	local_irq_restore(flags);
@@ -613,6 +727,13 @@ static inline void prep_zero_page(struct page *page, int order, int gfp_flags)
  * we cheat by calling it from here, in the order > 0 path.  Saves a branch
  * or two.
  */
+/**
+ * 返回第一个被分配的页框的页描述符。如果内存管理区没有所请求大小的一组连续页框，则返回NULL。
+ * 在指定的内存管理区中分配页框。它使用每CPU页框高速缓存来处理单一页框请求。
+ * zone:内存管理区描述符的地址。
+ * order：请求分配的内存大小的对数,0表示分配一个页框。
+ * gfp_flags:分配标志，如果gfp_flags中的__GFP_COLD标志被置位，那么页框应当从冷高速缓存中获取，否则应当从热高速缓存中获取（只对单一页框请求有意义。）
+ */
 static struct page *
 buffered_rmqueue(struct zone *zone, int order, int gfp_flags)
 {
@@ -620,34 +741,67 @@ buffered_rmqueue(struct zone *zone, int order, int gfp_flags)
 	struct page *page = NULL;
 	int cold = !!(gfp_flags & __GFP_COLD);
 
+	/**
+	 * 如果order!=0，则每CPU页框高速缓存就不能被使用。
+	 */
 	if (order == 0) {
 		struct per_cpu_pages *pcp;
 
+		/**
+		 * 检查由__GFP_COLD标志所标识的内存管理区本地CPU高速缓存是否需要被补充。
+		 * 其count字段小于或者等于low
+		 */
 		pcp = &zone->pageset[get_cpu()].pcp[cold];
 		local_irq_save(flags);
+		/**
+		 * 当前缓存中的页框数低于low，需要从伙伴系统中补充页框。
+		 * 调用rmqueue_bulk函数从伙伴系统中分配batch个单一页框
+		 * rmqueue_bulk反复调用__rmqueue，直到缓存的页框达到low。
+		 */
 		if (pcp->count <= pcp->low)
 			pcp->count += rmqueue_bulk(zone, 0,
 						pcp->batch, &pcp->list);
+		/**
+		 * 如果count为正，函数从高速缓存链表中获得一个页框。
+		 * count减1
+		 */
 		if (pcp->count) {
 			page = list_entry(pcp->list.next, struct page, lru);
 			list_del(&page->lru);
 			pcp->count--;
 		}
 		local_irq_restore(flags);
+		/**
+		 * 没有和get_cpu配对使用呢？
+		 * 这就是内核，外层一定调用了get_cpu。这种代码看起来头疼。
+		 */
 		put_cpu();
 	}
 
+	/**
+	 * 内存请求没有得到满足，或者是因为请求跨越了几个连续页框，或者是因为被选中的页框高速缓存为空。
+	 * 调用__rmqueue函数(因为已经保护了，直接调用__rmqueue即可)从伙伴系统中分配所请求的页框。
+	 */
 	if (page == NULL) {
 		spin_lock_irqsave(&zone->lock, flags);
 		page = __rmqueue(zone, order);
 		spin_unlock_irqrestore(&zone->lock, flags);
 	}
 
+	/**
+	 * 如果内存请求得到满足，函数就初始化（第一个）页框的页描述符
+	 */
 	if (page != NULL) {
 		BUG_ON(bad_range(zone, page));
+		/**
+		 * 将第一个页清除一些标志，将private字段置0，并将页框引用计数器置1。
+		 */
 		mod_page_state_zone(zone, pgalloc, 1 << order);
 		prep_new_page(page, order);
 
+		/**
+		 * 如果__GFP_ZERO标志被置位，则将被分配的区域填充0。
+		 */
 		if (gfp_flags & __GFP_ZERO)
 			prep_zero_page(page, order, gfp_flags);
 
@@ -661,6 +815,14 @@ buffered_rmqueue(struct zone *zone, int order, int gfp_flags)
  * Return 1 if free pages are above 'mark'. This takes into account the order
  * of the allocation.
  */
+/**
+ * zone_watermark_ok辅助函数接收几个参数，它们决定内存管理区中空闲页框个数的阀值min。
+ * 特别的，如果满足下列两个条件，则该函数返回1：
+ *     1、除了被分配的页框外，在内存管理区中至少还有min个空闲页框，不包括为内存不足保留的页框（zone的lowmem_reserve字段）。
+ *     2、除了被分配的页框外，这里在order至少为k的块中，起码还有min/2^k个空闲页框。其中对每个k，取值在1和order之间。
+ *
+ * 作为参数传递的基本值可以是内存管理区界值pages_min,pages_low,pages_high中的任意一个。
+ */
 int zone_watermark_ok(struct zone *z, int order, unsigned long mark,
 		      int classzone_idx, int can_try_harder, int gfp_high)
 {
@@ -668,8 +830,18 @@ int zone_watermark_ok(struct zone *z, int order, unsigned long mark,
 	long min = mark, free_pages = z->free_pages - (1 << order) + 1;
 	int o;
 
+	/**
+	 * 如果gfp_high标志被置位。则base除2。
+	 * 注意这里不是：min /= 2;
+	 * 一般来说，如果gfp_mask的__GFP_WAIT标志被置位，那么这个标志就会为1
+	 * 换句话说，就是指从高端内存中分配。
+	 */
 	if (gfp_high)
 		min -= min / 2;
+	/**
+	 * 如果作为参数传递的can_try_harder标志被置位，这个值再减少1/4
+	 * can_try_harder=1一般是当：gfp_mask中的__GFP_WAIT标志被置位，或者当前进程是一个实时进程并且在进程上下文中已经完成了内存分配。
+	 */
 	if (can_try_harder)
 		min -= min / 4;
 
@@ -690,6 +862,12 @@ int zone_watermark_ok(struct zone *z, int order, unsigned long mark,
 
 /*
  * This is the 'heart' of the zoned buddy allocator.
+ */
+/**
+ * 请求分配一组连续页框，它是管理区分配器的核心
+ * gfp_mask：在内存分配请求中指定的标志
+ * order：   连续分配的页框数量的对数(实际分配的是2^order个连续的页框)
+ * zonelist: zonelist数据结构的指针。该结构按优先次序描述了适于内存分配的内存管理区
  */
 struct page * fastcall
 __alloc_pages(unsigned int gfp_mask, unsigned int order,
@@ -726,8 +904,22 @@ __alloc_pages(unsigned int gfp_mask, unsigned int order,
 
  restart:
 	/* Go through the zonelist once, looking for a zone with enough free */
+	/**
+ 	 * 扫描包含在zonelist数据结构中的每个内存管理区
+	 */
 	for (i = 0; (z = zones[i]) != NULL; i++) {
+		/**
+		 * 对于每个内存管理区，该函数将空闲页框的个数与一个阀值进行比较
+		 * 该值取决于内存分配标志、当前进程的类型及管理区被函数检查的次数。
+		 * 实际上，如果空闲内存不足，那么每个内存管理区一般会被检查几次。
+		 * 每一次在所请求的空闲内存最低量的基础上使用更低的值进行扫描。
+		 * 因此，这段循环代码会被复制几次，而变化很小。
+		 */
 
+		/**
+		 * zone_watermark_ok辅助函数接收几个参数，它们决定内存管理区中空闲页框个数的阀值min。
+		 * 这是对内存管理区的第一次扫描，在第一次扫描中，阀值设置为z->pages_lo
+		 */
 		if (!zone_watermark_ok(z, order, z->pages_low,
 				       classzone_idx, 0, 0))
 			continue;
@@ -737,12 +929,21 @@ __alloc_pages(unsigned int gfp_mask, unsigned int order,
 			goto got_pg;
 	}
 
+	/**
+	 * 一般来说，应当在上一次扫描时得到内存。
+	 * 运行到此，表示内存已经紧张了（xie.baoyou注：没有连续的页框可供分配了）
+	 * 就唤醒kswapd内核线程来异步的开始回收页框。
+	 */
 	for (i = 0; (z = zones[i]) != NULL; i++)
 		wakeup_kswapd(z, order);
 
 	/*
 	 * Go through the zonelist again. Let __GFP_HIGH and allocations
 	 * coming from realtime tasks to go deeper into reserves
+	 */
+	/**
+	 * 执行对内存管理区的第二次扫描，将值z->pages_min作为阀值传入。这个值已经在上一步的基础上降低了。
+	 * 当然，实际的min值还是要由can_try_harder和gfp_high确定。z->pages_min仅仅是一个参考值而已。
 	 */
 	for (i = 0; (z = zones[i]) != NULL; i++) {
 		if (!zone_watermark_ok(z, order, z->pages_min,
@@ -756,28 +957,62 @@ __alloc_pages(unsigned int gfp_mask, unsigned int order,
 	}
 
 	/* This allocation should allow future memory freeing. */
+	/**
+	 * 上一步都还没有获得内存，系统内存肯定是不足了。
+	 */
+
+	/**
+	 * 如果产生内存分配的内核控制路径不是一个中断处理程序或者可延迟函数，
+	 * 并且它试图回收页框（PF_MEMALLOC，TIF_MEMDIE标志被置位）,那么才对内存管理区进行第三次扫描。
+	 */
 	if (((p->flags & PF_MEMALLOC) || unlikely(test_thread_flag(TIF_MEMDIE))) && !in_interrupt()) {
 		/* go through the zonelist yet again, ignoring mins */
 		for (i = 0; (z = zones[i]) != NULL; i++) {
+			/**
+			 * 本次扫描就不调用zone_watermark_ok，它忽略阀值，这样才能从预留的页中分配页。
+			 * 允许这样做，因为是这个进程想要归还页框，那就暂借一点给它吧（呵呵，舍不得孩子套不到狼）。
+			 */
 			page = buffered_rmqueue(z, order, gfp_mask);
 			if (page)
 				goto got_pg;
 		}
+
+		/**
+		 * 老天保佑，不要运行到这里来，实在是没有内存了。
+		 * 不论是高端内存区还是普通内存区、还是DMA内存区，甚至这些管理区中保留的内存都没有了。
+		 * 意味着我们的家底都完了。
+		 */
 		goto nopage;
 	}
 
 	/* Atomic allocations - we can't balance anything */
+	/**
+	 * 如果gfp_mask的__GFP_WAIT标志没有被置位，函数就返回NULL。
+	 */
 	if (!wait)
 		goto nopage;
 
 rebalance:
+	/**
+	 * 如果当前进程能够被阻塞，调用cond_resched检查是否有其他进程需要CPU
+	 */
 	cond_resched();
 
 	/* We now go into synchronous reclaim */
+	/**
+	 * 设置PF_MEMALLOC标志来表示进程已经准备好执行内存回收。
+	 */
 	p->flags |= PF_MEMALLOC;
 	reclaim_state.reclaimed_slab = 0;
+	/**
+	 * 将reclaim_state数据结构指针存入reclaim_state。这个结构只包含一个字段reclaimed_slab，初始值为0
+	 */
 	p->reclaim_state = &reclaim_state;
 
+	/**
+	 * 调用try_to_free_pages寻找一些页框来回收。
+	 * 这个函数可能会阻塞当前进程。一旦返回，就重设PF_MEMALLOC，并再次调用cond_resched
+	 */
 	did_some_progress = try_to_free_pages(zones, gfp_mask, order);
 
 	p->reclaim_state = NULL;
@@ -785,6 +1020,9 @@ rebalance:
 
 	cond_resched();
 
+	/**
+	 * 如果已经回收了一些页框，那么执行第二遍扫描类似的操作。
+	 */
 	if (likely(did_some_progress)) {
 		/*
 		 * Go through the zonelist yet one more time, keep
@@ -809,6 +1047,18 @@ rebalance:
 		 * a parallel oom killing, we must fail if we're still
 		 * under heavy pressure.
 		 */
+		/**
+		 * 没有释放任何页框，说明内核遇到很大麻烦了。因为内存少又不能释放页框。
+		 * 如果允许杀死进程：__GFP_FS被置位并且__GFP_NORETRY标志为0。
+		 * 那就开始准备杀死进程吧。
+		 */
+
+		/**
+		 * 再扫描一次内存管理区。
+		 * 这样做有点莫名其妙，既然申请少一点的内存都不行，为什么还要传入z->pages_high？？它看起来更不会成功。
+		 * 其实这样做还是有道理的：实际上，只有另一个内核控制路径已经杀死一个进程来回收它的内存后，这步才会成功。
+		 * 因此，这步避免了两个（而不是一个）无辜的进程被杀死。
+		 */
 		for (i = 0; (z = zones[i]) != NULL; i++) {
 			if (!zone_watermark_ok(z, order, z->pages_high,
 					       classzone_idx, 0, 0))
@@ -819,7 +1069,13 @@ rebalance:
 				goto got_pg;
 		}
 
+		/**
+		 * 还是不行，就杀死一些进程再试吧。
+		 */
 		out_of_memory(gfp_mask);
+		/**
+		 * let's go on
+		 */
 		goto restart;
 	}
 
@@ -830,6 +1086,10 @@ rebalance:
 	 * In this implementation, __GFP_REPEAT means __GFP_NOFAIL for order
 	 * <= 3, but that may not be true in other implementations.
 	 */
+	/**
+	 * 如果内存分配请求不能被满足，那么函数决定是否应当继续扫描内存管理区。
+	 * 如果__GFP_NORETRY被清除，并且内存分配请求跨越了多达8个页框或者__GFP_REPEAT被置位，或者__GFP_NOFAIL被置位。
+	 */
 	do_retry = 0;
 	if (!(gfp_mask & __GFP_NORETRY)) {
 		if ((order <= 3) || (gfp_mask & __GFP_REPEAT))
@@ -837,11 +1097,16 @@ rebalance:
 		if (gfp_mask & __GFP_NOFAIL)
 			do_retry = 1;
 	}
+	/**
+	 * 要重试，就调用blk_congestion_wait使进程休眠一会。再跳到rebalance重试。
+	 */
 	if (do_retry) {
 		blk_congestion_wait(WRITE, HZ/50);
 		goto rebalance;
 	}
-
+	/**
+	 * 既然不用重试，那就执行到nopage返回NULL了。
+	 */
 nopage:
 	if (!(gfp_mask & __GFP_NOWARN) && printk_ratelimit()) {
 		printk(KERN_WARNING "%s: page allocation failure."
@@ -860,6 +1125,9 @@ EXPORT_SYMBOL(__alloc_pages);
 /*
  * Common helper functions.
  */
+/**
+ * 类似于alloc_pages，但是它返回第一个所分配页的线性地址。
+ */
 fastcall unsigned long __get_free_pages(unsigned int gfp_mask, unsigned int order)
 {
 	struct page * page;
@@ -871,6 +1139,9 @@ fastcall unsigned long __get_free_pages(unsigned int gfp_mask, unsigned int orde
 
 EXPORT_SYMBOL(__get_free_pages);
 
+/**
+ * 用于获取填满0的页框。
+ */
 fastcall unsigned long get_zeroed_page(unsigned int gfp_mask)
 {
 	struct page * page;
@@ -896,7 +1167,12 @@ void __pagevec_free(struct pagevec *pvec)
 	while (--i >= 0)
 		free_hot_cold_page(pvec->pages[i], pvec->cold);
 }
-
+/**
+ * 首先检查page指向的页描述符。
+ * 如果该页框未被保留，就把描述符的count字段减1
+ * 如果count变为0,就假定从与page对应的页框开始的2^order个连续页框不再被使用。
+ * 这种情况下，该函数释放页框。
+ */
 fastcall void __free_pages(struct page *page, unsigned int order)
 {
 	if (!PageReserved(page) && put_page_testzero(page)) {
@@ -908,7 +1184,9 @@ fastcall void __free_pages(struct page *page, unsigned int order)
 }
 
 EXPORT_SYMBOL(__free_pages);
-
+/**
+ * 类似于__free_pages，但是它接收的参数为要释放的第一个页框的线性地址。
+ */
 fastcall void free_pages(unsigned long addr, unsigned int order)
 {
 	if (addr != 0) {
@@ -1452,6 +1730,9 @@ static void __init build_zonelists(pg_data_t *pgdat)
 
 #endif	/* CONFIG_NUMA */
 
+/**
+ * 初始化内存管理区。
+ */
 void __init build_all_zonelists(void)
 {
 	int i;
@@ -1706,6 +1987,12 @@ void __init free_area_init_node(int nid, struct pglist_data *pgdat,
 
 #ifndef CONFIG_DISCONTIGMEM
 static bootmem_data_t contig_bootmem_data;
+/**
+ * 支持NUMA。
+ * 对IBM来说，虽然并不真正需要NUMA支持，但是：即使NUMA的支持没有编译进内核，LINUX还是使用结点管理NUMA。
+ * 不过，这是一个单独的结点。它包含了系统中所有的物理内存。
+ * 这个元素由contig_page_data表示。它包含在一个只有一个结点的链表中，这个链表被pgdat_list指向。
+ */
 struct pglist_data contig_page_data = { .bdata = &contig_bootmem_data };
 
 EXPORT_SYMBOL(contig_page_data);

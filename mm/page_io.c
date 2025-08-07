@@ -44,6 +44,11 @@ static struct bio *get_swap_bio(int gfp_flags, pgoff_t index,
 	return bio;
 }
 
+/**
+ * 页交换IO结束后，就会调用end_swap_bio_write
+ * 这个函数唤醒正等待页PG_writeback标志清0的所有进程。
+ * 它还会清除PG_writeback标志和基树中的相关标记。并释放用于IO传输的BIO描述符。
+ */
 static int end_swap_bio_write(struct bio *bio, unsigned int bytes_done, int err)
 {
 	const int uptodate = test_bit(BIO_UPTODATE, &bio->bi_flags);
@@ -82,15 +87,27 @@ static int end_swap_bio_read(struct bio *bio, unsigned int bytes_done, int err)
  * We may have stale swap cache pages in memory: notice
  * them here and get rid of the unnecessary final write.
  */
+/**
+ * shrink_list函数激活交换页的IO传输过程。它检查页框的PG_dirty标志，然后执行pageout函数。
+ * 交换高速缓存的writepage方法为本函数。因此，最终的IO传输过程由本函数完成。
+ */
 int swap_writepage(struct page *page, struct writeback_control *wbc)
 {
 	struct bio *bio;
 	int ret = 0, rw = WRITE;
 
+	/**
+	 * 检查是否有一个用户态进程引用该页。如果没有就从交换高速缓存删除该页。并返回0.
+	 * 做这个检查的原因是:一个进程可能会与PFRA发生竞争并在shrink_list检查完后释放一页。
+	 */
 	if (remove_exclusive_swap_page(page)) {
 		unlock_page(page);
 		goto out;
 	}
+	/**
+	 * 分配并初始化一个BIO描述符。
+	 * 从换出页标识符算出交换区描述符地址。然后搜索交换子区链表，以找到页槽的磁盘扇区。
+	 */
 	bio = get_swap_bio(GFP_NOIO, page->private, page, end_swap_bio_write);
 	if (bio == NULL) {
 		set_page_dirty(page);
@@ -101,8 +118,16 @@ int swap_writepage(struct page *page, struct writeback_control *wbc)
 	if (wbc->sync_mode == WB_SYNC_ALL)
 		rw |= (1 << BIO_RW_SYNC);
 	inc_page_state(pswpout);
+	/**
+	 * 设置页的的writeback标志。
+	 */
 	set_page_writeback(page);
 	unlock_page(page);
+	/**
+	 * 提交写请求。
+	 * 当IO传输完毕后，执行end_swap_bio_write，该函数唤醒等待页PG_writeback标志清0的所有进程。
+	 * 清除PG_writeback标志和基树中的相关标志，并释放IO描述符。
+	 */
 	submit_bio(rw, bio);
 out:
 	return ret;
