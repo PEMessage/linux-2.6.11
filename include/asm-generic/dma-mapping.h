@@ -25,6 +25,9 @@ dma_supported(struct device *dev, u64 mask)
 	return pci_dma_supported(to_pci_dev(dev), mask);
 }
 
+/**
+ * 设置一个设备的DMA寻址范围。
+ */
 static inline int
 dma_set_mask(struct device *dev, u64 dma_mask)
 {
@@ -51,6 +54,10 @@ dma_free_coherent(struct device *dev, size_t size, void *cpu_addr,
 	pci_free_consistent(to_pci_dev(dev), size, cpu_addr, dma_handle);
 }
 
+/**
+ * 映射单个流式缓冲区。
+ * 返回值是总线地址。
+ */
 static inline dma_addr_t
 dma_map_single(struct device *dev, void *cpu_addr, size_t size,
 	       enum dma_data_direction direction)
@@ -60,6 +67,9 @@ dma_map_single(struct device *dev, void *cpu_addr, size_t size,
 	return pci_map_single(to_pci_dev(dev), cpu_addr, size, (int)direction);
 }
 
+/**
+ * 解除单个DMA流式映射。这个函数可能会处理回弹缓冲区。
+ */
 static inline void
 dma_unmap_single(struct device *dev, dma_addr_t dma_addr, size_t size,
 		 enum dma_data_direction direction)
@@ -69,6 +79,11 @@ dma_unmap_single(struct device *dev, dma_addr_t dma_addr, size_t size,
 	pci_unmap_single(to_pci_dev(dev), dma_addr, size, (int)direction);
 }
 
+/**
+ * 将单页映射为一个流式DAM映射。
+ * offset和size用于映射一页中的一部分。
+ * 如果分配的页是缓存流水线的一部分，则映射部分页会引起一致性问题。
+ */
 static inline dma_addr_t
 dma_map_page(struct device *dev, struct page *page,
 	     unsigned long offset, size_t size,
@@ -79,6 +94,9 @@ dma_map_page(struct device *dev, struct page *page,
 	return pci_map_page(to_pci_dev(dev), page, offset, size, (int)direction);
 }
 
+/**
+ * 解除一个单页DMA映射。
+ */
 static inline void
 dma_unmap_page(struct device *dev, dma_addr_t dma_address, size_t size,
 	       enum dma_data_direction direction)
@@ -106,6 +124,10 @@ dma_unmap_sg(struct device *dev, struct scatterlist *sg, int nhwentries,
 	pci_unmap_sg(to_pci_dev(dev), sg, nhwentries, (int)direction);
 }
 
+/**
+ * 当驱动程序不经过撤销流式映射，而想访问DMA缓冲区中的内容时，使用本函数。
+ * 这样CPU将暂时拥有该缓冲区。
+ */
 static inline void
 dma_sync_single_for_cpu(struct device *dev, dma_addr_t dma_handle, size_t size,
 			enum dma_data_direction direction)
@@ -116,6 +138,9 @@ dma_sync_single_for_cpu(struct device *dev, dma_addr_t dma_handle, size_t size,
 				    size, (int)direction);
 }
 
+/**
+ * 将DMA流式缓冲区交还给设备。
+ */
 static inline void
 dma_sync_single_for_device(struct device *dev, dma_addr_t dma_handle, size_t size,
 			   enum dma_data_direction direction)

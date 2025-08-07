@@ -15,6 +15,13 @@ pci_dma_supported(struct pci_dev *hwdev, u64 mask)
 	return dma_supported(hwdev == NULL ? NULL : &hwdev->dev, mask);
 }
 
+/**
+ * 建立一致性映射。
+ *		hwdev:		device结构。
+ *		size:		所需要的缓冲区的大小。
+ *		dma_handle:	保存相关的总线地址。
+ * 返回值是缓冲区的内核虚拟地址。
+ */
 static inline void *
 pci_alloc_consistent(struct pci_dev *hwdev, size_t size,
 		     dma_addr_t *dma_handle)
@@ -77,6 +84,9 @@ pci_dma_sync_single_for_cpu(struct pci_dev *hwdev, dma_addr_t dma_handle,
 	dma_sync_single_for_cpu(hwdev == NULL ? NULL : &hwdev->dev, dma_handle, size, (enum dma_data_direction)direction);
 }
 
+/**
+ * 刷新与DMA缓冲区对应的高速缓存行。
+ */
 static inline void
 pci_dma_sync_single_for_device(struct pci_dev *hwdev, dma_addr_t dma_handle,
 		    size_t size, int direction)
@@ -84,6 +94,9 @@ pci_dma_sync_single_for_device(struct pci_dev *hwdev, dma_addr_t dma_handle,
 	dma_sync_single_for_device(hwdev == NULL ? NULL : &hwdev->dev, dma_handle, size, (enum dma_data_direction)direction);
 }
 
+/**
+ * 使高速缓存行无效。
+ */
 static inline void
 pci_dma_sync_sg_for_cpu(struct pci_dev *hwdev, struct scatterlist *sg,
 		int nelems, int direction)

@@ -39,10 +39,22 @@ typedef union sigval {
 #ifndef HAVE_ARCH_SIGINFO_T
 
 typedef struct siginfo {
+	/**
+	 * 信号编号
+	 */
 	int si_signo;
+	/**
+	 * 引起信号产生的指令的出错码。没有出错码则为0。
+	 */
 	int si_errno;
+	/**
+	 * 发送者代码。
+	 */
 	int si_code;
 
+	/**
+	 * 依赖于信号类型的信息联合体。
+	 */
 	union {
 		int _pad[SI_PAD_SIZE];
 
@@ -141,13 +153,31 @@ typedef struct siginfo {
  * si_code values
  * Digital reserves positive values for kernel-generated signals.
  */
+/**
+ * KILL和raise。
+ */
 #define SI_USER		0		/* sent by kill, sigsend, raise */
+/**
+ * 一般内核函数。
+ */
 #define SI_KERNEL	0x80		/* sent by the kernel from somewhere */
+/**
+ * sigqueue调用
+ */
 #define SI_QUEUE	-1		/* sent by sigqueue */
+/**
+ * 定时器到期。
+ */
 #define SI_TIMER __SI_CODE(__SI_TIMER,-2) /* sent by timer expiration */
 #define SI_MESGQ __SI_CODE(__SI_MESGQ,-3) /* sent by real time mesq state change */
+/**
+ * 异步IO完成。
+ */
 #define SI_ASYNCIO	-4		/* sent by AIO completion */
 #define SI_SIGIO	-5		/* sent by queued SIGIO */
+/**
+ * tkill和tgkill
+ */
 #define SI_TKILL	-6		/* sent by tkill system call */
 #define SI_DETHREAD	-7		/* sent by execve() killing subsidiary threads */
 
@@ -216,11 +246,17 @@ typedef struct siginfo {
 /*
  * SIGPOLL si_codes
  */
+/* 输入数据有效 */
 #define POLL_IN		(__SI_POLL|1)	/* data input available */
+/* 输出缓冲区有效 */
 #define POLL_OUT	(__SI_POLL|2)	/* output buffers available */
+/* 输入消息可用 */
 #define POLL_MSG	(__SI_POLL|3)	/* input message available */
+/* IO异常 */
 #define POLL_ERR	(__SI_POLL|4)	/* i/o error */
+/* 高优先级输入有效 */
 #define POLL_PRI	(__SI_POLL|5)	/* high priority input available */
+/* 设备挂起或文件关闭，无法继续写 */
 #define POLL_HUP	(__SI_POLL|6)	/* device disconnected */
 #define NSIGPOLL	6
 
