@@ -1253,6 +1253,10 @@ int copy_semundo(unsigned long clone_flags, struct task_struct *tsk)
  * The current implementation does not do so. The POSIX standard
  * and SVID should be consulted to determine what behavior is mandated.
  */
+/**
+ * 从进程描述符中分离出与信号量相关的数据结构。
+ * 如果没有其他进程共享该结构，还删除所有这些数据结构。
+ */
 void exit_sem(struct task_struct *tsk)
 {
 	struct sem_undo_list *undo_list;
