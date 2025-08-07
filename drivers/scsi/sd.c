@@ -91,17 +91,29 @@
 
 static void scsi_disk_release(struct kref *kref);
 
+/* SCSI磁盘描述符 */
 struct scsi_disk {
+	/* 驱动描述符，总是sd_template */
 	struct scsi_driver *driver;	/* always &sd_template */
+	/* SCSI设备描述符 */
 	struct scsi_device *device;
+	/* 结构引用计数 */
 	struct kref	kref;
+	/* 通用磁盘信息 */
 	struct gendisk	*disk;
+	/* 打开(使用计数器) */
 	unsigned int	openers;	/* protected by BKL for now, yuck */
+	/* 磁盘容量，以512字节为单位。通过READ CAPACITY */
 	sector_t	capacity;	/* size in 512-byte sectors */
+	/* SCSI磁盘索引，系统内唯一，用来确定通用磁盘的设备号和设备名 */
 	u32		index;
+	/* 为1表示这个磁盘有介质存在 */
 	u8		media_present;
+	/* 磁盘设备是否写保护 */
 	u8		write_prot;
+	/* Write cache enbale状态，如果为1，说明写操作的时候可以使用cache。如果为0，则必须等待真正写到介质上才能返回成功 */
 	unsigned	WCE : 1;	/* state of disk WCE bit */
+	/* Read cache disable状态。未使用。 */
 	unsigned	RCD : 1;	/* state of disk RCD bit, unused */
 };
 
@@ -901,6 +913,7 @@ static int media_not_present(struct scsi_disk *sdkp, struct scsi_request *srp)
 /*
  * spinup disk - called only in sd_revalidate_disk()
  */
+/* 发送命令使磁盘转起来 */
 static void
 sd_spinup_disk(struct scsi_disk *sdkp, char *diskname,
 	       struct scsi_request *SRpnt, unsigned char *buffer) {
@@ -1363,6 +1376,7 @@ defaults:
  *	performs disk spin up, read_capacity, etc.
  *	@disk: struct gendisk we care about
  **/
+/* 校验磁盘，获得磁盘参数信息 */
 static int sd_revalidate_disk(struct gendisk *disk)
 {
 	struct scsi_disk *sdkp = scsi_disk(disk);
@@ -1376,9 +1390,10 @@ static int sd_revalidate_disk(struct gendisk *disk)
 	 * If the device is offline, don't try and read capacity or any
 	 * of the other niceties.
 	 */
-	if (!scsi_device_online(sdp))
+	if (!scsi_device_online(sdp))/* 设备不在线，退出 */
 		goto out;
 
+	/* 分配SCSI请求描述符，后续的探测都通过SCSI进行 */
 	sreq = scsi_allocate_request(sdp, GFP_KERNEL);
 	if (!sreq) {
 		printk(KERN_WARNING "(sd_revalidate_disk:) Request allocation "
@@ -1386,6 +1401,7 @@ static int sd_revalidate_disk(struct gendisk *disk)
 		goto out;
 	}
 
+	/* 接收响应的缓冲区 */
 	buffer = kmalloc(512, GFP_KERNEL | __GFP_DMA);
 	if (!buffer) {
 		printk(KERN_WARNING "(sd_revalidate_disk:) Memory allocation "
@@ -1401,20 +1417,24 @@ static int sd_revalidate_disk(struct gendisk *disk)
 	sdkp->WCE = 0;
 	sdkp->RCD = 0;
 
+	/* 发送命令使磁盘转起来 */
 	sd_spinup_disk(sdkp, disk->disk_name, sreq, buffer);
 
 	/*
 	 * Without media there is no reason to ask; moreover, some devices
 	 * react badly if we do.
 	 */
-	if (sdkp->media_present) {
+	if (sdkp->media_present) {/* 有磁盘介质存在 */
+		/* 读取磁盘容量 */
 		sd_read_capacity(sdkp, disk->disk_name, sreq, buffer);
-		if (sdp->removable)
+		if (sdp->removable)/* 读取磁盘保护标志 */
 			sd_read_write_protect_flag(sdkp, disk->disk_name,
 					sreq, buffer);
+		/* 读取缓存类型 */
 		sd_read_cache_type(sdkp, disk->disk_name, sreq, buffer);
 	}
-		
+
+	/* 设置通用结构中的磁盘的容量 */
 	set_capacity(disk, sdkp->capacity);
 	kfree(buffer);
 
@@ -1442,6 +1462,7 @@ static int sd_revalidate_disk(struct gendisk *disk)
  *	Assume sd_attach is not re-entrant (for time being)
  *	Also think about sd_attach() and sd_remove() running coincidentally.
  **/
+/* SCSI磁盘驱动入口，由于SCSI总线并不匹配驱动和设备，因此传入的设备并不一定能被该驱动管理 */
 static int sd_probe(struct device *dev)
 {
 	struct scsi_device *sdp = to_scsi_device(dev);
@@ -1451,6 +1472,7 @@ static int sd_probe(struct device *dev)
 	int error;
 
 	error = -ENODEV;
+	/* 如果SCSI设备不是磁盘或者磁光盘，则退出 */
 	if ((sdp->type != TYPE_DISK) && (sdp->type != TYPE_MOD))
 		goto out;
 
@@ -1458,6 +1480,7 @@ static int sd_probe(struct device *dev)
 			 sdp->host->host_no, sdp->channel, sdp->id, sdp->lun));
 
 	error = -ENOMEM;
+	/* 分配一个scsi_disk描述符 */
 	sdkp = kmalloc(sizeof(*sdkp), GFP_KERNEL);
 	if (!sdkp)
 		goto out;
@@ -1465,10 +1488,12 @@ static int sd_probe(struct device *dev)
 	memset (sdkp, 0, sizeof(*sdkp));
 	kref_init(&sdkp->kref);
 
+	/* 分配通用磁盘描述符，SCSI磁盘最多16个分区 */
 	gd = alloc_disk(16);
 	if (!gd)
 		goto out_free;
 
+	/* 分配磁盘名，如sda-sdz，sdaa-sdzz */
 	if (!idr_pre_get(&sd_index_idr, GFP_KERNEL))
 		goto out_put;
 
@@ -1476,6 +1501,7 @@ static int sd_probe(struct device *dev)
 	error = idr_get_new(&sd_index_idr, NULL, &index);
 	spin_unlock(&sd_index_lock);
 
+	/* 设备数量太多，退出 */
 	if (index >= SD_MAX_DISKS)
 		error = -EBUSY;
 	if (error)
@@ -1487,16 +1513,19 @@ static int sd_probe(struct device *dev)
 	sdkp->index = index;
 	sdkp->openers = 0;
 
+	/* 设置超时时间 */
 	if (!sdp->timeout) {
 		if (sdp->type == TYPE_DISK)
 			sdp->timeout = SD_TIMEOUT;
-		else
+		else/* 磁光盘超时时间应当长一点 */
 			sdp->timeout = SD_MOD_TIMEOUT;
 	}
 
+	/* 计算设备的主次设备号，特殊的计算方法是为了与2.4兼容 */
 	gd->major = sd_major((index & 0xf0) >> 4);
 	gd->first_minor = ((index & 0xf) << 4) | (index & 0xfff00);
 	gd->minors = 16;
+	/* 设置磁盘回调 */
 	gd->fops = &sd_fops;
 
 	if (index < 26) {
@@ -1514,8 +1543,10 @@ static int sd_probe(struct device *dev)
 
 	strcpy(gd->devfs_name, sdp->devfs_name);
 
+	/* 将驱动、设备、通用磁盘数据结构关联起来 */
 	gd->private_data = &sdkp->driver;
 
+	/* 发送SCSI命令获取设备信息并设置描述符字段 */
 	sd_revalidate_disk(gd);
 
 	gd->driverfs_dev = &sdp->sdev_gendev;
@@ -1525,6 +1556,7 @@ static int sd_probe(struct device *dev)
 	gd->queue = sdkp->device->request_queue;
 
 	dev_set_drvdata(dev, sdkp);
+	/* 将该设备添加到通用块IO系统中 */
 	add_disk(gd);
 
 	printk(KERN_NOTICE "Attached scsi %sdisk %s at scsi%d, channel %d, "

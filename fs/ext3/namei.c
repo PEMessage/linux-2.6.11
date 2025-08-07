@@ -1629,6 +1629,11 @@ static int ext3_add_nondir(handle_t *handle,
  * If the create succeeds, we fill in the inode information
  * with d_instantiate(). 
  */
+/**
+ * 创建一个新文件
+ *	dir:		父目录的inode
+ *	dentry:	新的目录项，但是还没有与inode关联
+ */
 static int ext3_create (struct inode * dir, struct dentry * dentry, int mode,
 		struct nameidata *nd)
 {
@@ -1637,6 +1642,9 @@ static int ext3_create (struct inode * dir, struct dentry * dentry, int mode,
 	int err, retries = 0;
 
 retry:
+	/**
+	 * 获得原子操作描述符
+	 */
 	handle = ext3_journal_start(dir, EXT3_DATA_TRANS_BLOCKS +
 					EXT3_INDEX_EXTRA_TRANS_BLOCKS + 3 +
 					2*EXT3_QUOTA_INIT_BLOCKS);
@@ -1646,14 +1654,28 @@ retry:
 	if (IS_DIRSYNC(dir))
 		handle->h_sync = 1;
 
+	/**
+	 * 在目录dir所在的块组中分配一个新的inode
+	 * 即在块组的inode位图中寻找一个为0的位，然后标记为1
+	 */
 	inode = ext3_new_inode (handle, dir, mode);
 	err = PTR_ERR(inode);
-	if (!IS_ERR(inode)) {
+	if (!IS_ERR(inode)) {/* 文件 */
+		/**
+		 * 设置文件操作回调函数
+		 */
 		inode->i_op = &ext3_file_inode_operations;
 		inode->i_fop = &ext3_file_operations;
 		ext3_set_aops(inode);
+		/**
+		 * 将新分配的inode与目录项关联起来
+		 * 这样可以查找到文件
+		 */
 		err = ext3_add_nondir(handle, dentry, inode);
 	}
+	/**
+	 *  关闭原子操作描述符
+	 */
 	ext3_journal_stop(handle);
 	if (err == -ENOSPC && ext3_should_retry_alloc(dir->i_sb, &retries))
 		goto retry;
@@ -1853,6 +1875,9 @@ static int empty_dir (struct inode * inode)
  * At filesystem recovery time, we walk this list deleting unlinked
  * inodes and truncating linked inodes in ext3_orphan_cleanup().
  */
+/**
+ * 将orphan inode添加到磁盘和内存链表中。
+ */
 int ext3_orphan_add(handle_t *handle, struct inode *inode)
 {
 	struct super_block *sb = inode->i_sb;
@@ -1860,6 +1885,9 @@ int ext3_orphan_add(handle_t *handle, struct inode *inode)
 	int err = 0, rc;
 
 	lock_super(sb);
+	/**
+	 * 已经将它加入到链表中了。
+	 */
 	if (!list_empty(&EXT3_I(inode)->i_orphan))
 		goto out_unlock;
 
@@ -1885,7 +1913,14 @@ int ext3_orphan_add(handle_t *handle, struct inode *inode)
 		goto out_unlock;
 
 	/* Insert this inode at the head of the on-disk orphan list... */
+	/**
+	 * 将超级块中保存的第一个orphan节点链接到inode。
+	 */
 	NEXT_ORPHAN(inode) = le32_to_cpu(EXT3_SB(sb)->s_es->s_last_orphan);
+	/**
+	 * 将当前节点作为第一个节点。
+	 * 即头插法。
+	 */
 	EXT3_SB(sb)->s_es->s_last_orphan = cpu_to_le32(inode->i_ino);
 	err = ext3_journal_dirty_metadata(handle, EXT3_SB(sb)->s_sbh);
 	rc = ext3_mark_iloc_dirty(handle, inode, &iloc);
@@ -1900,6 +1935,9 @@ int ext3_orphan_add(handle_t *handle, struct inode *inode)
 	 *
 	 * This is safe: on error we're going to ignore the orphan list
 	 * anyway on the next recovery. */
+	/**
+	 * 将orphan节点链接到内存链表中。
+	 */
 	if (!err)
 		list_add(&EXT3_I(inode)->i_orphan, &EXT3_SB(sb)->s_orphan);
 
@@ -1916,6 +1954,9 @@ out_unlock:
  * ext3_orphan_del() removes an unlinked or truncated inode from the list
  * of such inodes stored on disk, because it is finally being cleaned up.
  */
+/**
+ * 在磁盘和内存中删除orphan节点。
+ */
 int ext3_orphan_del(handle_t *handle, struct inode *inode)
 {
 	struct list_head *prev;
@@ -1926,12 +1967,21 @@ int ext3_orphan_del(handle_t *handle, struct inode *inode)
 	int err = 0;
 
 	lock_super(inode->i_sb);
+	/**
+	 * 不是orphan节点。
+	 */
 	if (list_empty(&ei->i_orphan)) {
 		unlock_super(inode->i_sb);
 		return 0;
 	}
 
+	/**
+	 *  取磁盘中保存的下一个节点。
+	 */
 	ino_next = NEXT_ORPHAN(inode);
+	/**
+	 * 取内存中的上一个节点。
+	 */
 	prev = ei->i_orphan.prev;
 	sbi = EXT3_SB(inode->i_sb);
 
@@ -1950,12 +2000,14 @@ int ext3_orphan_del(handle_t *handle, struct inode *inode)
 	if (err)
 		goto out_err;
 
+	/* 第一个orphan 节点 */
 	if (prev == &sbi->s_orphan) {
 		jbd_debug(4, "superblock will point to %lu\n", ino_next);
 		BUFFER_TRACE(sbi->s_sbh, "get_write_access");
 		err = ext3_journal_get_write_access(handle, sbi->s_sbh);
 		if (err)
 			goto out_brelse;
+		/* 修改头节点，删除当前节点*/
 		sbi->s_es->s_last_orphan = cpu_to_le32(ino_next);
 		err = ext3_journal_dirty_metadata(handle, sbi->s_sbh);
 	} else {
@@ -1968,6 +2020,7 @@ int ext3_orphan_del(handle_t *handle, struct inode *inode)
 		err = ext3_reserve_inode_write(handle, i_prev, &iloc2);
 		if (err)
 			goto out_brelse;
+		/* 修改前一节点的i_dtime，使其指向下一个节点 */
 		NEXT_ORPHAN(i_prev) = ino_next;
 		err = ext3_mark_iloc_dirty(handle, i_prev, &iloc2);
 	}
@@ -2088,7 +2141,11 @@ static int ext3_unlink(struct inode * dir, struct dentry *dentry)
 	ext3_update_dx_flag(dir);
 	ext3_mark_inode_dirty(handle, dir);
 	inode->i_nlink--;
-	if (!inode->i_nlink)
+	if (!inode->i_nlink) /* 链接计数为0 */
+		/**
+		 * 将当前节点添加了orphan链表中
+		 * 以备iput结束引用时彻底删除 
+		 */
 		ext3_orphan_add(handle, inode);
 	inode->i_ctime = dir->i_ctime;
 	ext3_mark_inode_dirty(handle, inode);

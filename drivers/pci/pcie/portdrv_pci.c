@@ -105,7 +105,13 @@ static int __init pcie_portdrv_init(void)
 {
 	int retval = 0;
 
-	pcie_port_bus_register();
+	/**
+	 * 首先在/sys/bus/中建立pci_express目录
+	 */
+ 	pcie_port_bus_register();
+	/**
+	 * 注册pcie总线驱动。
+	 */
 	retval = pci_module_init(&pcie_portdrv);
 	if (retval)
 		pcie_port_bus_unregister();

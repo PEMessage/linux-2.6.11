@@ -38,11 +38,16 @@
 /*
  * List of devices that a metadevice uses and should open/close.
  */
+/* 映射设备的目标设备，即物理磁盘 */
 struct dm_dev {
+	/* 物理磁盘设备链表，指向同一链表的兄弟 */
 	struct list_head list;
 
+	/* 引用计数 */
 	atomic_t count;
+	/* 文件访问模式 */
 	int mode;
+	/* 块设备的描述符 */
 	struct block_device *bdev;
 };
 

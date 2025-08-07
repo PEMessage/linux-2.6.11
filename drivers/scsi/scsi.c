@@ -519,6 +519,7 @@ void scsi_log_completion(struct scsi_cmnd *cmd, int disposition)
  *
  * Notes:
  */
+/* 将SCSI命令描述符分给低层驱动 */
 int scsi_dispatch_cmd(struct scsi_cmnd *cmd)
 {
 	struct Scsi_Host *host = cmd->device->host;
@@ -527,10 +528,11 @@ int scsi_dispatch_cmd(struct scsi_cmnd *cmd)
 	int rtn = 0;
 
 	/* check if the device is still usable */
-	if (unlikely(cmd->device->sdev_state == SDEV_DEL)) {
+	if (unlikely(cmd->device->sdev_state == SDEV_DEL)) {/* 设备是否可用 */
 		/* in SDEV_DEL we error all commands. DID_NO_CONNECT
 		 * returns an immediate error upwards, and signals
 		 * that the device is no longer present */
+		/* 返回错误并通知上层将其结束 */
 		cmd->result = DID_NO_CONNECT << 16;
 		scsi_done(cmd);
 		/* return 0 (because the command has been processed) */
@@ -538,14 +540,14 @@ int scsi_dispatch_cmd(struct scsi_cmnd *cmd)
 	}
 
 	/* Check to see if the scsi lld put this device into state SDEV_BLOCK. */
-	if (unlikely(cmd->device->sdev_state == SDEV_BLOCK)) {
+	if (unlikely(cmd->device->sdev_state == SDEV_BLOCK)) {/* 驱动已经阻塞了设备 */
 		/* 
 		 * in SDEV_BLOCK, the command is just put back on the device
 		 * queue.  The suspend state has already blocked the queue so
 		 * future requests should not occur until the device 
 		 * transitions out of the suspend state.
 		 */
-		scsi_queue_insert(cmd, SCSI_MLQUEUE_DEVICE_BUSY);
+		scsi_queue_insert(cmd, SCSI_MLQUEUE_DEVICE_BUSY);/* 将命令放回设备队列 */
 
 		SCSI_LOG_MLQUEUE(3, printk("queuecommand : device blocked \n"));
 
@@ -558,7 +560,7 @@ int scsi_dispatch_cmd(struct scsi_cmnd *cmd)
 
 	/* Assign a unique nonzero serial_number. */
 	/* XXX(hch): this is racy */
-	if (++serial_number == 0)
+	if (++serial_number == 0)/* 计算该命令的编号 */
 		serial_number = 1;
 	cmd->serial_number = serial_number;
 	cmd->pid = scsi_pid++;
@@ -566,7 +568,7 @@ int scsi_dispatch_cmd(struct scsi_cmnd *cmd)
 	/* 
 	 * If SCSI-2 or lower, store the LUN value in cmnd.
 	 */
-	if (cmd->device->scsi_level <= SCSI_2) {
+	if (cmd->device->scsi_level <= SCSI_2) {/* 对于SCSI-2及以下的设备，计算LUN值 */
 		cmd->cmnd[1] = (cmd->cmnd[1] & 0x1f) |
 			       (cmd->device->lun << 5 & 0xe0);
 	}
@@ -577,7 +579,7 @@ int scsi_dispatch_cmd(struct scsi_cmnd *cmd)
 	 */
 	timeout = host->last_reset + MIN_RESET_DELAY;
 
-	if (host->resetting && time_before(jiffies, timeout)) {
+	if (host->resetting && time_before(jiffies, timeout)) {/* 如果主机复位后，没有超过2秒的时间 */
 		int ticks_remaining = timeout - jiffies;
 		/*
 		 * NOTE: This may be executed from within an interrupt
@@ -588,14 +590,14 @@ int scsi_dispatch_cmd(struct scsi_cmnd *cmd)
 		 * interrupt handler (assuming there is one irq-level per
 		 * host).
 		 */
-		while (--ticks_remaining >= 0)
+		while (--ticks_remaining >= 0)/* 这里延迟时间后，清除标志 */
 			mdelay(1 + 999 / HZ);
 		host->resetting = 0;
 	}
 
 	scsi_add_timer(cmd, cmd->timeout_per_command, scsi_times_out);
 
-	scsi_log_send(cmd);
+	scsi_log_send(cmd);/* 打印日志信息 */
 
 	/*
 	 * We will use a queued command if possible, otherwise we will
@@ -609,24 +611,25 @@ int scsi_dispatch_cmd(struct scsi_cmnd *cmd)
 	 * Before we queue this command, check if the command
 	 * length exceeds what the host adapter can handle.
 	 */
-	if (CDB_SIZE(cmd) > cmd->device->host->max_cmd_len) {
+	if (CDB_SIZE(cmd) > cmd->device->host->max_cmd_len) {/* 命令超过了主机适配器可以处理的最大长度 */
 		SCSI_LOG_MLQUEUE(3,
 				printk("queuecommand : command too long.\n"));
 		cmd->result = (DID_ABORT << 16);
 
-		scsi_done(cmd);
+		scsi_done(cmd)/* 设置错误码后通知上层 */
 		goto out;
 	}
 
-	spin_lock_irqsave(host->host_lock, flags);
-	if (unlikely(test_bit(SHOST_CANCEL, &host->shost_state))) {
+	spin_lock_irqsave(host->host_lock, flags);/* 获取主机锁 */
+	if (unlikely(test_bit(SHOST_CANCEL, &host->shost_state))) {/* 其他地方已经将主机适配器设置为删除状态了 */
 		cmd->result = (DID_NO_CONNECT << 16);
-		scsi_done(cmd);
+		scsi_done(cmd);/* 通知上层 */
 	} else {
+		/* 调用主机适配器的回调函数将命令排入低层驱动 */
 		rtn = host->hostt->queuecommand(cmd, scsi_done);
 	}
 	spin_unlock_irqrestore(host->host_lock, flags);
-	if (rtn) {
+	if (rtn) {/* 如果底层驱动失败，则将命令重新排入队列 */
 		scsi_queue_insert(cmd,
 				(rtn == SCSI_MLQUEUE_DEVICE_BUSY) ?
 				 rtn : SCSI_MLQUEUE_HOST_BUSY);
@@ -729,6 +732,7 @@ static DEFINE_PER_CPU(struct list_head, scsi_done_q);
  *
  * This function is interrupt context safe.
  */
+/* 当中断处理函数发现某个SCSI命令完成时，调用此函数通知块设备层 */
 void scsi_done(struct scsi_cmnd *cmd)
 {
 	/*
@@ -739,13 +743,14 @@ void scsi_done(struct scsi_cmnd *cmd)
 	 * that function could really be.  It might be on another processor,
 	 * etc, etc.
 	 */
-	if (!scsi_delete_timer(cmd))
+	if (!scsi_delete_timer(cmd))/* 删除错误定时器 */
 		return;
 	__scsi_done(cmd);
 }
 
 /* Private entry to scsi_done() to complete a command when the timer
  * isn't running --- used by scsi_times_out */
+/* 当中断处理函数发现某个SCSI命令完成时，调用此函数通知块设备层 */
 void __scsi_done(struct scsi_cmnd *cmd)
 {
 	unsigned long flags;
@@ -764,8 +769,9 @@ void __scsi_done(struct scsi_cmnd *cmd)
 	 * and need no spinlock.
 	 */
 	local_irq_save(flags);
+	/* 将SCSI命令添加到本CPU的完成队列中 */
 	list_add_tail(&cmd->eh_entry, &__get_cpu_var(scsi_done_q));
-	raise_softirq_irqoff(SCSI_SOFTIRQ);
+	raise_softirq_irqoff(SCSI_SOFTIRQ);/* 触发软中断 */
 	local_irq_restore(flags);
 }
 
@@ -783,30 +789,32 @@ static void scsi_softirq(struct softirq_action *h)
 	int disposition;
 	LIST_HEAD(local_q);
 
+	/* 关中断情况下将完成队列中的数据移动到临时链表中 */
 	local_irq_disable();
 	list_splice_init(&__get_cpu_var(scsi_done_q), &local_q);
 	local_irq_enable();
 
-	while (!list_empty(&local_q)) {
+	while (!list_empty(&local_q)) {/* 处理临时链表中的所有命令 */
 		struct scsi_cmnd *cmd = list_entry(local_q.next,
 						   struct scsi_cmnd, eh_entry);
-		list_del_init(&cmd->eh_entry);
+		list_del_init(&cmd->eh_entry);/* 摘除队头中的命令 */
 
+		/* 根据命令的处理结果，决定下一步的处理方式 */
 		disposition = scsi_decide_disposition(cmd);
-		scsi_log_completion(cmd, disposition);
+		scsi_log_completion(cmd, disposition);/* 记录调试日志 */
 		switch (disposition) {
 		case SUCCESS:
-			scsi_finish_command(cmd);
+			scsi_finish_command(cmd);/* 结束命令 */
 			break;
 		case NEEDS_RETRY:
-			scsi_retry_command(cmd);
+			scsi_retry_command(cmd);/* 立即重试命令 */
 			break;
 		case ADD_TO_MLQUEUE:
-			scsi_queue_insert(cmd, SCSI_MLQUEUE_DEVICE_BUSY);
+			scsi_queue_insert(cmd, SCSI_MLQUEUE_DEVICE_BUSY);/* 延时重试命令 */
 			break;
 		default:
-			if (!scsi_eh_scmd_add(cmd, 0))
-				scsi_finish_command(cmd);
+			if (!scsi_eh_scmd_add(cmd, 0))/* 进入主机错误处理流程 */
+				scsi_finish_command(cmd);/* 不能进行错误处理，强制结束这个SCSI命令 */
 		}
 	}
 }
@@ -844,12 +852,14 @@ int scsi_retry_command(struct scsi_cmnd *cmd)
  *              request, waking processes that are waiting on results,
  *              etc.
  */
+/* 不管命令是否成功完成，本函数都结束这个SCSI命令 */
 void scsi_finish_command(struct scsi_cmnd *cmd)
 {
 	struct scsi_device *sdev = cmd->device;
 	struct Scsi_Host *shost = sdev->host;
 	struct scsi_request *sreq;
 
+	/* 递减传给主机适配器、目标节点、SCSI设备的命令数，如果需要还唤醒主机适配器的错误恢复线程 */
 	scsi_device_unbusy(sdev);
 
         /*
@@ -860,6 +870,7 @@ void scsi_finish_command(struct scsi_cmnd *cmd)
 	 *
 	 * XXX(hch): What about locking?
          */
+     /* 阻塞计数不为0，则上层不能发送命令给驱动。这里将其清0，表示SCSI层可以下发命令了 */
         shost->host_blocked = 0;
         sdev->device_blocked = 0;
 
@@ -867,7 +878,7 @@ void scsi_finish_command(struct scsi_cmnd *cmd)
 	 * If we have valid sense information, then some kind of recovery
 	 * must have taken place.  Make a note of this.
 	 */
-	if (SCSI_SENSE_VALID(cmd))
+	if (SCSI_SENSE_VALID(cmd))/* 有效的感测信息，表示某些恢复过程正在进行，记录下这个标志 */
 		cmd->result |= (DRIVER_SENSE << 24);
 
 	SCSI_LOG_MLCOMPLETE(4, printk("Notifying upper driver of completion "
@@ -1247,25 +1258,32 @@ MODULE_LICENSE("GPL");
 module_param(scsi_logging_level, int, S_IRUGO|S_IWUSR);
 MODULE_PARM_DESC(scsi_logging_level, "a bit mask of logging levels");
 
+/* SCSI子系统初始化 */
 static int __init init_scsi(void)
 {
 	int error, i;
 
+	/* 初始化存储池 */
 	error = scsi_init_queue();
 	if (error)
 		return error;
+	/* 初始化proc系统中与SCSI有关的目录项 */
 	error = scsi_init_procfs();
 	if (error)
 		goto cleanup_queue;
+	/* 设置SCSI动态设备信息列表 */
 	error = scsi_init_devinfo();
 	if (error)
 		goto cleanup_procfs;
+	/* 注册shost_class类 */
 	error = scsi_init_hosts();
 	if (error)
 		goto cleanup_devlist;
+	/* 注册SCSI系统控制表 */
 	error = scsi_init_sysctl();
 	if (error)
 		goto cleanup_hosts;
+	/* 注册SCSI总线类型及sdev_class类 */
 	error = scsi_sysfs_register();
 	if (error)
 		goto cleanup_sysctl;

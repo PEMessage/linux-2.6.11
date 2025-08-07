@@ -12,21 +12,29 @@
 #include <linux/bio.h>
 #include <linux/slab.h>
 
+/* 组成条带的设备 */
 struct stripe {
+	/* 条带所在的底层设备 */
 	struct dm_dev *dev;
+	/* 条带在底层设备的起始扇区编号 */
 	sector_t physical_start;
 };
 
+/* 条带映射私有数据结构 */
 struct stripe_c {
+	/* 组成条带的设备数 */
 	uint32_t stripes;
 
 	/* The size of this target / num. stripes */
+	/* 组成目标的块设备的有效长度 */
 	sector_t stripe_width;
 
 	/* stripe chunk size */
+	/* 用于计算条带长度，假设块长度为2^n，则chunk_shift为1<<(n+1)，chunk_mask为0x11...1，即2^n-1 */
 	uint32_t chunk_shift;
 	sector_t chunk_mask;
 
+	/* 条带数组 */
 	struct stripe stripe[0];
 };
 
@@ -67,6 +75,7 @@ static int get_stripe(struct dm_target *ti, struct stripe_c *sc,
  * Construct a striped mapping.
  * <number of stripes> <chunk size (2^^n)> [<dev_path> <offset>]+
  */
+/* 条带映射的构造函数 */
 static int stripe_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	struct stripe_c *sc;
@@ -77,18 +86,18 @@ static int stripe_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	int r;
 	unsigned int i;
 
-	if (argc < 2) {
+	if (argc < 2) {/* 至少有number_of_stripes和chunk_size两个参数 */
 		ti->error = "dm-stripe: Not enough arguments";
 		return -EINVAL;
 	}
 
-	stripes = simple_strtoul(argv[0], &end, 10);
+	stripes = simple_strtoul(argv[0], &end, 10);/* 解析条带数量 */
 	if (*end) {
 		ti->error = "dm-stripe: Invalid stripe count";
 		return -EINVAL;
 	}
 
-	chunk_size = simple_strtoul(argv[1], &end, 10);
+	chunk_size = simple_strtoul(argv[1], &end, 10);/* 解析条带长度 */
 	if (*end) {
 		ti->error = "dm-stripe: Invalid chunk_size";
 		return -EINVAL;
@@ -97,14 +106,14 @@ static int stripe_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	/*
 	 * chunk_size is a power of two
 	 */
-	if (!chunk_size || (chunk_size & (chunk_size - 1)) ||
+	if (!chunk_size || (chunk_size & (chunk_size - 1)) ||/* 条带不应当为0，也必须是2的幂，并且不能小于一个页面 */
 	    (chunk_size < (PAGE_SIZE >> SECTOR_SHIFT))) {
 		ti->error = "dm-stripe: Invalid chunk size";
 		return -EINVAL;
 	}
 
 	width = ti->len;
-	if (sector_div(width, stripes)) {
+	if (sector_div(width, stripes)) {/* 映射目标长度必须能够整除条带数 */
 		ti->error = "dm-stripe: Target length not divisable by "
 		    "number of stripes";
 		return -EINVAL;
@@ -113,13 +122,13 @@ static int stripe_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	/*
 	 * Do we have enough arguments for that many stripes ?
 	 */
-	if (argc != (2 + 2 * stripes)) {
+	if (argc != (2 + 2 * stripes)) {/* 条带数必须与后面的参数数目匹配 */
 		ti->error = "dm-stripe: Not enough destinations "
 			"specified";
 		return -EINVAL;
 	}
 
-	sc = alloc_context(stripes);
+	sc = alloc_context(stripes);/* 分配条带私有数据结构 */
 	if (!sc) {
 		ti->error = "dm-stripe: Memory allocation for striped context "
 		    "failed";
@@ -130,6 +139,7 @@ static int stripe_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	sc->stripe_width = width;
 	ti->split_io = chunk_size;
 
+	/* 计算chunk_mask和chunk_shift，用于快速计算 */
 	sc->chunk_mask = ((sector_t) chunk_size) - 1;
 	for (sc->chunk_shift = 0; chunk_size; sc->chunk_shift++)
 		chunk_size >>= 1;
@@ -138,7 +148,7 @@ static int stripe_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	/*
 	 * Get the stripe destinations.
 	 */
-	for (i = 0; i < stripes; i++) {
+	for (i = 0; i < stripes; i++) {/* 解析条带设备 */
 		argv += 2;
 
 		r = get_stripe(ti, sc, i, argv);
@@ -156,6 +166,7 @@ static int stripe_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	return 0;
 }
 
+/* 析构函数，释放条带映射私有数据结构并解除对设备的引用 */
 static void stripe_dtr(struct dm_target *ti)
 {
 	unsigned int i;
@@ -172,11 +183,16 @@ static int stripe_map(struct dm_target *ti, struct bio *bio,
 {
 	struct stripe_c *sc = (struct stripe_c *) ti->private;
 
+	/* 计算BIO在目标中偏移 */
 	sector_t offset = bio->bi_sector - ti->begin;
+	/* 计算条带号 */
 	sector_t chunk = offset >> sc->chunk_shift;
+	/* 根据条带号计算设备编号 */
 	uint32_t stripe = sector_div(chunk, sc->stripes);
 
+	/* 转换设备为条带映射中的设备 */
 	bio->bi_bdev = sc->stripe[stripe].dev->bdev;
+	/* 转换扇区号 */
 	bio->bi_sector = sc->stripe[stripe].physical_start +
 	    (chunk << sc->chunk_shift) + (offset & sc->chunk_mask);
 	return 1;

@@ -150,6 +150,9 @@ int usb_unbind_interface(struct device *dev)
  * usb_register_dev() to enable that functionality.  This function no longer
  * takes care of that.
  */
+/**
+ * 注册USB设备驱动。
+ */
 int usb_register(struct usb_driver *new_driver)
 {
 	int retval = 0;
@@ -189,6 +192,9 @@ int usb_register(struct usb_driver *new_driver)
  * NOTE: If you called usb_register_dev(), you still need to call
  * usb_deregister_dev() to clean up your driver's allocated minor numbers,
  * this * call will no longer do it for you.
+ */
+/**
+ * 卸载USB设备驱动。
  */
 void usb_deregister(struct usb_driver *driver)
 {

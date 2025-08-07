@@ -179,6 +179,12 @@ etherh_setif(struct net_device *dev)
 	case PROD_I3_ETHERLAN600A:
 		addr = (void *)dev->base_addr + EN0_RCNTHI;
 
+		/**
+		 * 有些设备可以支持多种接口（最常见的组合是 BNC+RJ45），用户可以根据需要来选择使用哪种接口。
+		 * 如果配置命令没有指定设备的接口类型，设备驱动就使用缺省的类型。
+		 * 在某些情况下，一个设备驱动可以处理多种接口类型；
+		 * 在这种情况下，设备驱动可以按一定的顺序来测试每个接口的类型。下面的代码片断展示了一个设备驱动如何根据配置来设置接口的类型：
+		 */
 		switch (dev->if_port) {
 		case IF_PORT_10BASE2:
 			writeb((readb(addr) & 0xf8) | 1, addr);

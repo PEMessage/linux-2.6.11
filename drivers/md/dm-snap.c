@@ -38,14 +38,18 @@
  */
 #define SNAPSHOT_PAGES 256
 
+/* 待处理的例外 */
 struct pending_exception {
+	/* 例外信息 */
 	struct exception e;
 
 	/*
 	 * Origin buffers waiting for this to complete are held
 	 * in a bio list
 	 */
+	/* 快照源的通用块层请求，为了等待这个例外而保存在这个bio链表中 */
 	struct bio_list origin_bios;
+	/* 对快照的通用块层请求 */
 	struct bio_list snapshot_bios;
 
 	/*
@@ -56,12 +60,14 @@ struct pending_exception {
 	struct list_head siblings;
 
 	/* Pointer back to snapshot context */
+	/* 指向所属的快照 */
 	struct dm_snapshot *snap;
 
 	/*
 	 * 1 indicates the exception has already been sent to
 	 * kcopyd.
 	 */
+	/* 如果为1，表明例外已经被发送给复制进程 */
 	int started;
 };
 
@@ -76,13 +82,17 @@ static mempool_t *pending_pool;
 /*
  * One of these per registered origin, held in the snapshot_origins hash
  */
+/* 快照源数据结构 */
 struct origin {
 	/* The origin device */
+	/* 快照源块设备描述符 */
 	struct block_device *bdev;
 
+	/* 链入快照源哈希表 */
 	struct list_head hash_list;
 
 	/* List of snapshots for this origin */
+	/* 快照源的快照链表表头 */
 	struct list_head snapshots;
 };
 
@@ -146,32 +156,34 @@ static void __insert_origin(struct origin *o)
  * Make a note of the snapshot and its origin so we can look it
  * up when the origin has a write on it.
  */
+/* 注册快照 */
 static int register_snapshot(struct dm_snapshot *snap)
 {
 	struct origin *o;
 	struct block_device *bdev = snap->origin->bdev;
 
-	down_write(&_origins_lock);
-	o = __lookup_origin(bdev);
+	down_write(&_origins_lock);/* 获得快照源锁 */
+	o = __lookup_origin(bdev);/* 在全局快照源哈希表中查找和块设备描述符对应的快照源结构 */
 
-	if (!o) {
+	if (!o) {/* 快照源不存在 */
 		/* New origin */
-		o = kmalloc(sizeof(*o), GFP_KERNEL);
-		if (!o) {
+		o = kmalloc(sizeof(*o), GFP_KERNEL);/* 分配一个新的快照源结构 */
+		if (!o) {/* 分配失败，退出 */
 			up_write(&_origins_lock);
 			return -ENOMEM;
 		}
 
 		/* Initialise the struct */
-		INIT_LIST_HEAD(&o->snapshots);
+		INIT_LIST_HEAD(&o->snapshots);/* 将快照源插入哈希表 */
 		o->bdev = bdev;
 
 		__insert_origin(o);
 	}
 
+	/* 将快照添加快照源的链表中 */
 	list_add_tail(&snap->list, &o->snapshots);
 
-	up_write(&_origins_lock);
+	up_write(&_origins_lock);/* 释放锁 */
 	return 0;
 }
 
@@ -374,6 +386,7 @@ static inline ulong round_up(ulong n, ulong size)
 /*
  * Construct a snapshot mapping: <origin_dev> <COW-dev> <p/n> <chunk-size>
  */
+/* 快照构造函数 */
 static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	struct dm_snapshot *s;
@@ -385,22 +398,24 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	char *value;
 	int blocksize;
 
-	if (argc < 4) {
+	if (argc < 4) {/* 参数健康性检查 */
 		ti->error = "dm-snapshot: requires exactly 4 arguments";
 		r = -EINVAL;
 		goto bad1;
 	}
 
+	/* 解析orig和COW设备 */
 	origin_path = argv[0];
 	cow_path = argv[1];
 	persistent = toupper(*argv[2]);
 
-	if (persistent != 'P' && persistent != 'N') {
+	if (persistent != 'P' && persistent != 'N') {/* 解析持续化参数 */
 		ti->error = "Persistent flag is not P or N";
 		r = -EINVAL;
 		goto bad1;
 	}
 
+	/* 解析chunk长度 */
 	chunk_size = simple_strtoul(argv[3], &value, 10);
 	if (chunk_size == 0 || value == NULL) {
 		ti->error = "Invalid chunk size";
@@ -408,6 +423,7 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto bad1;
 	}
 
+	/* 分配快照描述符 */
 	s = kmalloc(sizeof(*s), GFP_KERNEL);
 	if (s == NULL) {
 		ti->error = "Cannot allocate snapshot context private "
@@ -416,12 +432,14 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto bad1;
 	}
 
+	/* 获得源设备描述符 */
 	r = dm_get_device(ti, origin_path, 0, ti->len, FMODE_READ, &s->origin);
 	if (r) {
 		ti->error = "Cannot get origin device";
 		goto bad2;
 	}
 
+	/* 获得COW设备描述符 */
 	r = dm_get_device(ti, cow_path, 0, 0,
 			  FMODE_READ | FMODE_WRITE, &s->cow);
 	if (r) {
@@ -463,6 +481,7 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	s->table = ti->table;
 
 	/* Allocate hash table for COW data */
+	/* 初始化例外哈希表 */
 	if (init_hash_tables(s)) {
 		ti->error = "Unable to allocate hash table space";
 		r = -ENOMEM;
@@ -475,6 +494,7 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	 */
 	s->store.snap = s;
 
+	/* 创建例外仓库 */
 	if (persistent == 'P')
 		r = dm_create_persistent(&s->store, chunk_size);
 	else
@@ -486,6 +506,7 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		goto bad4;
 	}
 
+	/* 创建内核复制线程的客户端 */
 	r = kcopyd_client_create(SNAPSHOT_PAGES, &s->kcopyd_client);
 	if (r) {
 		ti->error = "Could not create kcopyd client";
@@ -493,7 +514,7 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 
 	/* Add snapshot to the list of snapshots for this origin */
-	if (register_snapshot(s)) {
+	if (register_snapshot(s)) {/* 注册快照，将它加到快照源设备的链表中 */
 		r = -EINVAL;
 		ti->error = "Cannot register snapshot origin";
 		goto bad6;
@@ -593,15 +614,17 @@ static struct bio *__flush_bios(struct pending_exception *pe)
 	return NULL;
 }
 
+/* 当复制失败，或者例外提交失败，或者例外提交成功后，调用此函数进行善后处理 */
 static void pending_complete(struct pending_exception *pe, int success)
 {
 	struct exception *e;
 	struct dm_snapshot *s = pe->snap;
 	struct bio *flush = NULL;
 
+	/* 成功 */
 	if (success) {
-		e = alloc_exception();
-		if (!e) {
+		e = alloc_exception();/* 分配例外描述符 */
+		if (!e) {/* 如果失败，将快照标记为失败 */
 			DMWARN("Unable to allocate exception.");
 			down_write(&s->lock);
 			s->store.drop_snapshot(&s->store);
@@ -619,7 +642,9 @@ static void pending_complete(struct pending_exception *pe, int success)
 		 * in-flight exception from the list.
 		 */
 		down_write(&s->lock);
+		/* 将例外添加到完成哈希表 */
 		insert_exception(&s->complete, e);
+		/* 将例外从挂起哈希表中删除 */
 		remove_exception(&pe->e);
 		flush = __flush_bios(pe);
 
@@ -632,6 +657,7 @@ static void pending_complete(struct pending_exception *pe, int success)
 		down_write(&s->lock);
 		if (s->valid)
 			DMERR("Error reading/writing snapshot");
+		/* 失败后标记快照为无效 */
 		s->store.drop_snapshot(&s->store);
 		s->valid = 0;
 		remove_exception(&pe->e);
@@ -650,6 +676,7 @@ static void pending_complete(struct pending_exception *pe, int success)
 		flush_bios(flush);
 }
 
+/* 例外处理完成后，调用此函数 */
 static void commit_callback(void *context, int success)
 {
 	struct pending_exception *pe = (struct pending_exception *) context;
@@ -660,16 +687,18 @@ static void commit_callback(void *context, int success)
  * Called when the copy I/O has finished.  kcopyd actually runs
  * this code so don't block.
  */
+/* 当复制完成后，回调此函数，进行快照源的处理 */
 static void copy_callback(int read_err, unsigned int write_err, void *context)
 {
 	struct pending_exception *pe = (struct pending_exception *) context;
 	struct dm_snapshot *s = pe->snap;
 
-	if (read_err || write_err)
+	if (read_err || write_err)/* 复制不成功 */
 		pending_complete(pe, 0);
 
 	else
 		/* Update the metadata if we are persistent */
+		/* 复制成功后，提交例外。处理元数据。 */
 		s->store.commit_exception(&s->store, &pe->e, commit_callback,
 					  pe);
 }
@@ -677,6 +706,7 @@ static void copy_callback(int read_err, unsigned int write_err, void *context)
 /*
  * Dispatches the copy operation to kcopyd.
  */
+/* 将复制操作提交给kcopyd线程 */
 static inline void start_copy(struct pending_exception *pe)
 {
 	struct dm_snapshot *s = pe->snap;
@@ -686,6 +716,7 @@ static inline void start_copy(struct pending_exception *pe)
 
 	dev_size = get_dev_size(bdev);
 
+	/* 设置复制源和复制目的 */
 	src.bdev = bdev;
 	src.sector = chunk_to_sector(s, pe->e.old_chunk);
 	src.count = min(s->chunk_size, dev_size - src.sector);
@@ -695,6 +726,7 @@ static inline void start_copy(struct pending_exception *pe)
 	dest.count = src.count;
 
 	/* Hand over to kcopyd */
+	/* 通知kcopyd处理复制工作 */
 	kcopyd_copy(s->kcopyd_client,
 		    &src, 1, &dest, 0, copy_callback, pe);
 }
@@ -764,6 +796,7 @@ static inline void remap_exception(struct dm_snapshot *s, struct exception *e,
 		(bio->bi_sector & s->chunk_mask);
 }
 
+/* 处理快照读写 */
 static int snapshot_map(struct dm_target *ti, struct bio *bio,
 			union map_info *map_context)
 {
@@ -773,10 +806,11 @@ static int snapshot_map(struct dm_target *ti, struct bio *bio,
 	chunk_t chunk;
 	struct pending_exception *pe;
 
+	/* 计算请求对应的chunk号 */
 	chunk = sector_to_chunk(s, bio->bi_sector);
 
 	/* Full snapshots are not usable */
-	if (!s->valid)
+	if (!s->valid)/* 快照设备不可用 */
 		return -1;
 
 	/*
@@ -784,32 +818,36 @@ static int snapshot_map(struct dm_target *ti, struct bio *bio,
 	 * flags so we should only get this if we are
 	 * writeable.
 	 */
-	if (bio_rw(bio) == WRITE) {
+	if (bio_rw(bio) == WRITE) {/* 写操作 */
 
 		/* FIXME: should only take write lock if we need
 		 * to copy an exception */
-		down_write(&s->lock);
+		down_write(&s->lock);/* 获取快照的锁 */
 
 		/* If the block is already remapped - use that, else remap it */
-		e = lookup_exception(&s->complete, chunk);
-		if (e) {
+		e = lookup_exception(&s->complete, chunk);/* 在已经完成的例外表中搜索 */
+		if (e) {/* 该请求已经在完成例外表中 */
+			/* 直接重定向到COW设备 */
 			remap_exception(s, e, bio);
 			up_write(&s->lock);
 
-		} else {
+		} else {/* 请求的chunk还没有完成映射 */
+			/* 在待处理例外中查找，没有则创建一个 */
 			pe = __find_pending_exception(s, bio);
 
-			if (!pe) {
+			if (!pe) {/* 失败，将快照设置为无效 */
 				if (s->store.drop_snapshot)
 					s->store.drop_snapshot(&s->store);
 				s->valid = 0;
 				r = -EIO;
 				up_write(&s->lock);
 			} else {
+				/* 重新映射，向COW写 */
 				remap_exception(s, &pe->e, bio);
+				/* 将BIO添加到待处理例外链表中 */
 				bio_list_add(&pe->snapshot_bios, bio);
 
-				if (!pe->started) {
+				if (!pe->started) {/* 如果还没有启动，就启动复制过程 */
 					/* this is protected by snap->lock */
 					pe->started = 1;
 					up_write(&s->lock);
@@ -834,8 +872,9 @@ static int snapshot_map(struct dm_target *ti, struct bio *bio,
 		/* See if it it has been remapped */
 		e = lookup_exception(&s->complete, chunk);
 		if (e)
+			/* 直接重定向到COW设备 */
 			remap_exception(s, e, bio);
-		else
+		else/* 直接用映射源的读完成请求 */
 			bio->bi_bdev = s->origin->bdev;
 
 		up_read(&s->lock);
@@ -928,18 +967,20 @@ static int __origin_write(struct list_head *snapshots, struct bio *bio)
 	chunk_t chunk;
 
 	/* Do all the snapshots on this origin */
+	/* 遍历快照源的所有快照 */
 	list_for_each_entry (snap, snapshots, list) {
 
 		/* Only deal with valid snapshots */
 		if (!snap->valid)
 			continue;
 
-		down_write(&snap->lock);
+		down_write(&snap->lock);/* 获取快照锁 */
 
 		/*
 		 * Remember, different snapshots can have
 		 * different chunk sizes.
 		 */
+		/* 将IO转换为快照中的chunk */
 		chunk = sector_to_chunk(snap, bio->bi_sector);
 
 		/*
@@ -947,10 +988,13 @@ static int __origin_write(struct list_head *snapshots, struct bio *bio)
 		 * is already remapped in this snapshot
 		 * and trigger an exception if not.
 		 */
+		/* 在快照的例外表中查找是否已经存在该chunk */
 		e = lookup_exception(&snap->complete, chunk);
 		if (!e) {
+			/* 在挂起的例外表中查找 */
 			pe = __find_pending_exception(snap, bio);
-			if (!pe) {
+			if (!pe) {/* 查找失败，说明快照已经满 */
+				/* 删除这个快照，并将其有效位置0 */
 				snap->store.drop_snapshot(&snap->store);
 				snap->valid = 0;
 
@@ -970,6 +1014,7 @@ static int __origin_write(struct list_head *snapshots, struct bio *bio)
 	/*
 	 * Now that we have a complete pe list we can start the copying.
 	 */
+	/* 存在一个完整的链表 */
 	if (last) {
 		pe = last;
 		do {
@@ -979,6 +1024,7 @@ static int __origin_write(struct list_head *snapshots, struct bio *bio)
 			if (!pe->started) {
 				pe->started = 1;
 				up_write(&pe->snap->lock);
+				/* 开始复制 */
 				start_copy(pe);
 			} else
 				up_write(&pe->snap->lock);
@@ -995,14 +1041,17 @@ static int __origin_write(struct list_head *snapshots, struct bio *bio)
 /*
  * Called on a write from the origin driver.
  */
+/* 对快照源进行写时，进行首写复制 */
 static int do_origin(struct dm_dev *origin, struct bio *bio)
 {
 	struct origin *o;
 	int r = 1;
 
 	down_read(&_origins_lock);
+	/* 查找快照源数据描述符 */
 	o = __lookup_origin(origin->bdev);
 	if (o)
+		/* 将快照源中的数据写到快照链表的所有快照中 */
 		r = __origin_write(&o->snapshots, bio);
 	up_read(&_origins_lock);
 
@@ -1018,16 +1067,18 @@ static int do_origin(struct dm_dev *origin, struct bio *bio)
  * The context for an origin is merely a 'struct dm_dev *'
  * pointing to the real device.
  */
+/* 快照源构造函数 */
 static int origin_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	int r;
 	struct dm_dev *dev;
 
-	if (argc != 1) {
+	if (argc != 1) {/* 只有低层设备路径参数 */
 		ti->error = "dm-origin: incorrect number of arguments";
 		return -EINVAL;
 	}
 
+	/* 获得低层设备描述符 */
 	r = dm_get_device(ti, argv[0], 0, ti->len,
 			  dm_table_get_mode(ti->table), &dev);
 	if (r) {
@@ -1035,7 +1086,7 @@ static int origin_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		return r;
 	}
 
-	ti->private = dev;
+	ti->private = dev;/* 将低层设备描述符保存在private域中 */
 	return 0;
 }
 
@@ -1045,6 +1096,7 @@ static void origin_dtr(struct dm_target *ti)
 	dm_put_device(ti, dev);
 }
 
+/* 对快照源的读写 */
 static int origin_map(struct dm_target *ti, struct bio *bio,
 		      union map_info *map_context)
 {
@@ -1052,6 +1104,7 @@ static int origin_map(struct dm_target *ti, struct bio *bio,
 	bio->bi_bdev = dev->bdev;
 
 	/* Only tell snapshots if this is a write */
+	/* 对读操作来说，直接返回即可，否则调用do_origin进行首写复制 */
 	return (bio_rw(bio) == WRITE) ? do_origin(dev, bio) : 1;
 }
 

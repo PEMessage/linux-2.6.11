@@ -94,6 +94,7 @@ EXPORT_SYMBOL(scsi_remove_host);
  * Return value: 
  * 	0 on success / != 0 for error
  **/
+/* 将主机适配器添加到系统中 */
 int scsi_add_host(struct Scsi_Host *shost, struct device *dev)
 {
 	struct scsi_host_template *sht = shost->hostt;
@@ -102,15 +103,18 @@ int scsi_add_host(struct Scsi_Host *shost, struct device *dev)
 	printk(KERN_INFO "scsi%d : %s\n", shost->host_no,
 			sht->info ? sht->info(shost) : sht->name);
 
+	/* 队列深度不能无限制，必须为大于0的值 */
 	if (!shost->can_queue) {
 		printk(KERN_ERR "%s: can_queue = 0 no longer supported\n",
 				sht->name);
 		goto out;
 	}
 
+	/* 设置父设备 */
 	if (!shost->shost_gendev.parent)
 		shost->shost_gendev.parent = dev ? dev : &platform_bus;
 
+	/* 将内嵌设备添加到系统中 */
 	error = device_add(&shost->shost_gendev);
 	if (error)
 		goto out;
@@ -129,6 +133,7 @@ int scsi_add_host(struct Scsi_Host *shost, struct device *dev)
 					 GFP_KERNEL)) == NULL)
 		goto out_del_classdev;
 
+	/* 将主机适配器添加到子系统 */
 	error = scsi_sysfs_add_host(shost);
 	if (error)
 		goto out_destroy_host;
@@ -187,14 +192,15 @@ static void scsi_host_dev_release(struct device *dev)
  * Return value:
  * 	Pointer to a new Scsi_Host
  **/
+/* 分配一个主机适配器描述符并进行基本的初始化 */
 struct Scsi_Host *scsi_host_alloc(struct scsi_host_template *sht, int privsize)
 {
 	struct Scsi_Host *shost;
 	int gfp_mask = GFP_KERNEL, rval;
 	DECLARE_COMPLETION(complete);
 
-	if (sht->unchecked_isa_dma && privsize)
-		gfp_mask |= __GFP_DMA;
+	if (sht->unchecked_isa_dma && privsize)/* 老式设备只支持DMA地址 */
+		gfp_mask |= __GFP_DMA;/* 增加此标志表示从DMA区域分配 */
 
         /* Check to see if this host has any error handling facilities */
         if (!sht->eh_strategy_handler && !sht->eh_abort_handler &&
@@ -208,6 +214,7 @@ struct Scsi_Host *scsi_host_alloc(struct scsi_host_template *sht, int privsize)
 		dump_stack();
         }
 
+	/* 分配描述符 */
 	shost = kmalloc(sizeof(struct Scsi_Host) + privsize, gfp_mask);
 	if (!shost)
 		return NULL;
@@ -222,10 +229,12 @@ struct Scsi_Host *scsi_host_alloc(struct scsi_host_template *sht, int privsize)
 
 	init_MUTEX(&shost->scan_mutex);
 
+	/* 主机适配器全局编号 */
 	shost->host_no = scsi_host_next_hn++; /* XXX(hch): still racy */
 	shost->dma_channel = 0xff;
 
 	/* These three are default values which can be overridden */
+	/* 默认值，驱动中可能改写 */
 	shost->max_channel = 0;
 	shost->max_id = 8;
 	shost->max_lun = 8;
@@ -274,11 +283,13 @@ struct Scsi_Host *scsi_host_alloc(struct scsi_host_template *sht, int privsize)
 	if (rval)
 		goto fail_kfree;
 
+	/* 初始化内嵌通用设备 */
 	device_initialize(&shost->shost_gendev);
 	snprintf(shost->shost_gendev.bus_id, BUS_ID_SIZE, "host%d",
 		shost->host_no);
 	shost->shost_gendev.release = scsi_host_dev_release;
 
+	/* 初始化内嵌类设备 */
 	class_device_initialize(&shost->shost_classdev);
 	shost->shost_classdev.dev = &shost->shost_gendev;
 	shost->shost_classdev.class = &shost_class;
@@ -286,12 +297,14 @@ struct Scsi_Host *scsi_host_alloc(struct scsi_host_template *sht, int privsize)
 		  shost->host_no);
 
 	shost->eh_notify = &complete;
+	/* 创建并运行错误恢复线程 */
 	rval = kernel_thread(scsi_error_handler, shost, 0);
 	if (rval < 0)
 		goto fail_destroy_freelist;
 	wait_for_completion(&complete);
 	shost->eh_notify = NULL;
 
+	/* 在proc中为主机适配器添加一个目录 */
 	scsi_proc_hostdir_add(shost->hostt);
 	return shost;
 

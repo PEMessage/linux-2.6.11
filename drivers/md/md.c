@@ -1447,43 +1447,45 @@ static int analyze_sbs(mddev_t * mddev)
 
 int mdp_major = 0;
 
+/* 当用户空间打开SCSI设备时调用 */
 static struct kobject *md_probe(dev_t dev, int *part, void *data)
 {
 	static DECLARE_MUTEX(disks_sem);
+	/* 查找或者创建mddev对象 */
 	mddev_t *mddev = mddev_find(dev);
 	struct gendisk *disk;
-	int partitioned = (MAJOR(dev) != MD_MAJOR);
+	int partitioned = (MAJOR(dev) != MD_MAJOR);/* 根据主设备号判断是否有分区 */
 	int shift = partitioned ? MdpMinorShift : 0;
 	int unit = MINOR(dev) >> shift;
 
-	if (!mddev)
+	if (!mddev)/* 没有找到与设备号对应的mddev，退出 */
 		return NULL;
 
 	down(&disks_sem);
-	if (mddev->gendisk) {
+	if (mddev->gendisk) {/* 如果设备已经存在，就退出 */
 		up(&disks_sem);
 		mddev_put(mddev);
 		return NULL;
 	}
-	disk = alloc_disk(1 << shift);
+	disk = alloc_disk(1 << shift);/* 分配通用磁盘对象 */
 	if (!disk) {
 		up(&disks_sem);
 		mddev_put(mddev);
 		return NULL;
 	}
-	disk->major = MAJOR(dev);
+	disk->major = MAJOR(dev);/* 设置磁盘设备号 */
 	disk->first_minor = unit << shift;
-	if (partitioned) {
+	if (partitioned) {/* 设置磁盘名称 */
 		sprintf(disk->disk_name, "md_d%d", unit);
 		sprintf(disk->devfs_name, "md/d%d", unit);
 	} else {
 		sprintf(disk->disk_name, "md%d", unit);
 		sprintf(disk->devfs_name, "md/%d", unit);
 	}
-	disk->fops = &md_fops;
+	disk->fops = &md_fops;/* 设置磁盘操作表 */
 	disk->private_data = mddev;
 	disk->queue = mddev->queue;
-	add_disk(disk);
+	add_disk(disk);/* 将磁盘添加到系统中 */
 	mddev->gendisk = disk;
 	up(&disks_sem);
 	return NULL;
@@ -1509,18 +1511,18 @@ static int do_md_run(mddev_t * mddev)
 	struct gendisk *disk;
 	char b[BDEVNAME_SIZE];
 
-	if (list_empty(&mddev->disks)) {
+	if (list_empty(&mddev->disks)) {/* 还没有磁盘设备，退出 */
 		MD_BUG();
 		return -EINVAL;
 	}
 
-	if (mddev->pers)
+	if (mddev->pers)/* 还没有与级别设置绑定，退出 */
 		return -EBUSY;
 
 	/*
 	 * Analyze all RAID superblock(s)
 	 */
-	if (!mddev->raid_disks && analyze_sbs(mddev)) {
+	if (!mddev->raid_disks && analyze_sbs(mddev)) {/* 如果没有磁盘就读取超级块加载它 */
 		MD_BUG();
 		return -EINVAL;
 	}
@@ -1580,7 +1582,7 @@ static int do_md_run(mddev_t * mddev)
 	}
 
 #ifdef CONFIG_KMOD
-	if (!pers[pnum])
+	if (!pers[pnum])/* 如果RAID级别指针还不存在，说明没有加载该RAID级别的模块，加载它 */
 	{
 		request_module("md-personality-%d", pnum);
 	}
@@ -1612,12 +1614,12 @@ static int do_md_run(mddev_t * mddev)
 		return -EINVAL;
 	}
 
-	mddev->pers = pers[pnum];
+	mddev->pers = pers[pnum];/* 记录该RAID级别的回调指针 */
 	spin_unlock(&pers_lock);
 
 	mddev->resync_max_sectors = mddev->size << 1; /* may be over-ridden by personality */
 
-	err = mddev->pers->run(mddev);
+	err = mddev->pers->run(mddev);/* 回调RAID级别的RUN函数启动设备 */
 	if (err) {
 		printk(KERN_ERR "md: pers->run() failed ...\n");
 		module_put(mddev->pers->owner);
@@ -1633,7 +1635,7 @@ static int do_md_run(mddev_t * mddev)
 	
 	set_bit(MD_RECOVERY_NEEDED, &mddev->recovery);
 	
-	if (mddev->sb_dirty)
+	if (mddev->sb_dirty)/* 将超级块信息更新到磁盘上 */
 		md_update_sb(mddev);
 
 	set_capacity(disk, mddev->array_size<<1);
@@ -2030,18 +2032,20 @@ static int get_disk_info(mddev_t * mddev, void __user * arg)
 	return 0;
 }
 
+/* 向现有磁阵添加新的磁盘 */
 static int add_new_disk(mddev_t * mddev, mdu_disk_info_t *info)
 {
 	char b[BDEVNAME_SIZE], b2[BDEVNAME_SIZE];
 	mdk_rdev_t *rdev;
 	dev_t dev = MKDEV(info->major,info->minor);
 
-	if (info->major != MAJOR(dev) || info->minor != MINOR(dev))
+	if (info->major != MAJOR(dev) || info->minor != MINOR(dev))/* 设备号不匹配 */
 		return -EOVERFLOW;
 
-	if (!mddev->raid_disks) {
+	if (!mddev->raid_disks) {/* 新方式，组装阵列 */
 		int err;
 		/* expecting a device which has a superblock */
+		/* 读取超级块信息，并校验超级块是否完好，从而导入磁盘 */
 		rdev = md_import_device(dev, mddev->major_version, mddev->minor_version);
 		if (IS_ERR(rdev)) {
 			printk(KERN_WARNING 
@@ -2049,12 +2053,13 @@ static int add_new_disk(mddev_t * mddev, mdu_disk_info_t *info)
 				PTR_ERR(rdev));
 			return PTR_ERR(rdev);
 		}
-		if (!list_empty(&mddev->disks)) {
+		if (!list_empty(&mddev->disks)) {/* 已经存在磁盘列表了 */
 			mdk_rdev_t *rdev0 = list_entry(mddev->disks.next,
 							mdk_rdev_t, same_set);
+			/* 读取第一个磁盘的超级块，并与磁盘超级块进行比较 */
 			int err = super_types[mddev->major_version]
 				.load_super(rdev, rdev0, mddev->minor_version);
-			if (err < 0) {
+			if (err < 0) {/* 比较时发现错误 */
 				printk(KERN_WARNING 
 					"md: %s has different UUID to %s\n",
 					bdevname(rdev->bdev,b), 
@@ -2063,6 +2068,7 @@ static int add_new_disk(mddev_t * mddev, mdu_disk_info_t *info)
 				return -EINVAL;
 			}
 		}
+		/* 将磁盘添加到磁阵中 */
 		err = bind_rdev_to_array(rdev, mddev);
 		if (err)
 			export_rdev(rdev);
@@ -2074,9 +2080,9 @@ static int add_new_disk(mddev_t * mddev, mdu_disk_info_t *info)
 	 * to add "hot spares".  They must already have a superblock
 	 * written
 	 */
-	if (mddev->pers) {
+	if (mddev->pers) {/* 处理磁盘热插拨 */
 		int err;
-		if (!mddev->pers->hot_add_disk) {
+		if (!mddev->pers->hot_add_disk) {/* 不支持热插拨 */
 			printk(KERN_WARNING 
 				"%s: personality does not support diskops!\n",
 			       mdname(mddev));
@@ -2092,6 +2098,7 @@ static int add_new_disk(mddev_t * mddev, mdu_disk_info_t *info)
 		}
 		rdev->in_sync = 0; /* just to be sure */
 		rdev->raid_disk = -1;
+		/* 将磁盘添加到磁阵中 */
 		err = bind_rdev_to_array(rdev, mddev);
 		if (err)
 			export_rdev(rdev);
@@ -2103,14 +2110,16 @@ static int add_new_disk(mddev_t * mddev, mdu_disk_info_t *info)
 	/* otherwise, add_new_disk is only allowed
 	 * for major_version==0 superblocks
 	 */
-	if (mddev->major_version != 0) {
+	/* 以下代码处理创建磁阵而不是组装磁阵的情况 */
+	if (mddev->major_version != 0) {/* 校验版本号，必须为0 */
 		printk(KERN_WARNING "%s: ADD_NEW_DISK not supported\n",
 		       mdname(mddev));
 		return -EINVAL;
 	}
 
-	if (!(info->state & (1<<MD_DISK_FAULTY))) {
+	if (!(info->state & (1<<MD_DISK_FAULTY))) {/* 只能处理状态良好的磁盘 */
 		int err;
+		/* 导入磁盘，传入-1就不会从磁盘上加载超级块 */
 		rdev = md_import_device (dev, -1, 0);
 		if (IS_ERR(rdev)) {
 			printk(KERN_WARNING 
@@ -2118,6 +2127,7 @@ static int add_new_disk(mddev_t * mddev, mdu_disk_info_t *info)
 				PTR_ERR(rdev));
 			return PTR_ERR(rdev);
 		}
+		/* 根据传入参数初始化磁盘字段 */
 		rdev->desc_nr = info->number;
 		if (info->raid_disk < mddev->raid_disks)
 			rdev->raid_disk = info->raid_disk;
@@ -2130,12 +2140,14 @@ static int add_new_disk(mddev_t * mddev, mdu_disk_info_t *info)
 		else
 			rdev->in_sync = 0;
 
+		/* 将磁盘添加到磁阵中 */
 		err = bind_rdev_to_array(rdev, mddev);
 		if (err) {
 			export_rdev(rdev);
 			return err;
 		}
 
+		/* 根据磁盘设备的长度计算RAID超级块保存在该磁盘上的起始扇区编号，以及磁盘的有效长度 */
 		if (!mddev->persistent) {
 			printk(KERN_INFO "md: nonpersistent superblock ...\n");
 			rdev->sb_offset = rdev->bdev->bd_inode->i_size >> BLOCK_SIZE_BITS;
@@ -2284,9 +2296,9 @@ abort_export:
 static int set_array_info(mddev_t * mddev, mdu_array_info_t *info)
 {
 
-	if (info->raid_disks == 0) {
+	if (info->raid_disks == 0) {/* 最新的使用方式，组装阵列 */
 		/* just setting version number for superblock loading */
-		if (info->major_version < 0 ||
+		if (info->major_version < 0 ||/* 主版本号不合法 */
 		    info->major_version >= sizeof(super_types)/sizeof(super_types[0]) ||
 		    super_types[info->major_version].name == NULL) {
 			/* maybe try to auto-load a module? */
@@ -2295,11 +2307,13 @@ static int set_array_info(mddev_t * mddev, mdu_array_info_t *info)
 				info->major_version);
 			return -EINVAL;
 		}
+		/* 记录下主版本、次版本号和补丁号 */
 		mddev->major_version = info->major_version;
 		mddev->minor_version = info->minor_version;
 		mddev->patch_version = info->patch_version;
 		return 0;
 	}
+	/* 创建新的阵列，这是0.90.0类型的阵列 */
 	mddev->major_version = MD_MAJOR_VERSION;
 	mddev->minor_version = MD_MINOR_VERSION;
 	mddev->patch_version = MD_PATCHLEVEL_VERSION;
@@ -2455,6 +2469,7 @@ static int set_disk_faulty(mddev_t *mddev, dev_t dev)
 	return 0;
 }
 
+/* SCSI设备IOCTL实现 */
 static int md_ioctl(struct inode *inode, struct file *file,
 			unsigned int cmd, unsigned long arg)
 {
@@ -2532,7 +2547,7 @@ static int md_ioctl(struct inode *inode, struct file *file,
 
 	switch (cmd)
 	{
-		case SET_ARRAY_INFO:
+		case SET_ARRAY_INFO:/* 创建SCSI设备 */
 			{
 				mdu_array_info_t info;
 				if (!arg)
@@ -2541,7 +2556,7 @@ static int md_ioctl(struct inode *inode, struct file *file,
 					err = -EFAULT;
 					goto abort_unlock;
 				}
-				if (mddev->pers) {
+				if (mddev->pers) {/* 设备已经创建过，更新其信息 */
 					err = update_array_info(mddev, &info);
 					if (err) {
 						printk(KERN_WARNING "md: couldn't update"
@@ -2564,6 +2579,7 @@ static int md_ioctl(struct inode *inode, struct file *file,
 					err = -EBUSY;
 					goto abort_unlock;
 				}
+				/* 初次创建SCSI设备 */
 				err = set_array_info(mddev, &info);
 				if (err) {
 					printk(KERN_WARNING "md: couldn't set"
@@ -2654,7 +2670,7 @@ static int md_ioctl(struct inode *inode, struct file *file,
 			if (copy_from_user(&info, argp, sizeof(info)))
 				err = -EFAULT;
 			else
-				err = add_new_disk(mddev, &info);
+				err = add_new_disk(mddev, &info);/* 向现有阵列添加新的磁盘 */
 			goto done_unlock;
 		}
 
@@ -2671,7 +2687,7 @@ static int md_ioctl(struct inode *inode, struct file *file,
 			goto done_unlock;
 
 		case RUN_ARRAY:
-			err = do_md_run (mddev);
+			err = do_md_run (mddev);/* 使磁阵运转起来 */
 			goto done_unlock;
 
 		default:
@@ -2696,23 +2712,24 @@ abort:
 	return err;
 }
 
+/* 在打开SCSI设备时调用 */
 static int md_open(struct inode *inode, struct file *file)
 {
 	/*
 	 * Succeed if we can lock the mddev, which confirms that
 	 * it isn't being stopped right now.
 	 */
-	mddev_t *mddev = inode->i_bdev->bd_disk->private_data;
+	mddev_t *mddev = inode->i_bdev->bd_disk->private_data;/* 找到SCSI设备 */
 	int err;
 
-	if ((err = mddev_lock(mddev)))
+	if ((err = mddev_lock(mddev)))/* 获得设备的信号量 */
 		goto out;
 
 	err = 0;
-	mddev_get(mddev);
-	mddev_unlock(mddev);
+	mddev_get(mddev);/* 增加引用计数 */
+	mddev_unlock(mddev);/* 释放信号量 */
 
-	check_disk_change(inode->i_bdev);
+	check_disk_change(inode->i_bdev);/* 检查设备介质是否失效，如果是，则使缓存失效 */
  out:
 	return err;
 }
@@ -3635,6 +3652,7 @@ static void md_geninit(void)
 		p->proc_fops = &md_seq_fops;
 }
 
+/* SCSI模块初始化 */
 int __init md_init(void)
 {
 	int minor;
@@ -3644,13 +3662,16 @@ int __init md_init(void)
 			MD_MAJOR_VERSION, MD_MINOR_VERSION,
 			MD_PATCHLEVEL_VERSION, MAX_MD_DEVS, MD_SB_DISKS);
 
+	/* 注册块设备号，为不可分区的md设备分配主设备号 */
 	if (register_blkdev(MAJOR_NR, "md"))
 		return -1;
+	/* 注册块设备号，为可分区的mdp设备分配主设备号 */
 	if ((mdp_major=register_blkdev(0, "mdp"))<=0) {
 		unregister_blkdev(MAJOR_NR, "md");
 		return -1;
 	}
 	devfs_mk_dir("md");
+	/* 注册块设备号范围 */
 	blk_register_region(MKDEV(MAJOR_NR, 0), MAX_MD_DEVS, THIS_MODULE,
 				md_probe, NULL, NULL);
 	blk_register_region(MKDEV(mdp_major, 0), MAX_MD_DEVS<<MdpMinorShift, THIS_MODULE,
@@ -3667,9 +3688,12 @@ int __init md_init(void)
 			      "md/mdp%d", minor);
 
 
+	/* 注册重启回调，在系统重启时能得到通知 */
 	register_reboot_notifier(&md_notifier);
+	/* 在/proc/sys目录下增加一个目录 */
 	raid_table_header = register_sysctl_table(raid_root_table, 1);
 
+	/* 创建/proc/mdstat，用于输出MD设备的状态 */
 	md_geninit();
 	return (0);
 }

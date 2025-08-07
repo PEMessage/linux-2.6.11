@@ -13,6 +13,9 @@
 #include <linux/kdev_t.h>
 #include <linux/err.h>
 
+/**
+ * 简单设备类。
+ */
 struct class_simple {
 	struct class_device_attribute attr;
 	struct class class;
@@ -59,6 +62,9 @@ static void class_simple_release(struct class *class)
  * Note, the pointer created here is to be destroyed when finished by making a
  * call to class_simple_destroy().
  */
+/**
+ * 创建一个简单设备类。
+ */
 struct class_simple *class_simple_create(struct module *owner, char *name)
 {
 	struct class_simple *cs;
@@ -100,6 +106,9 @@ EXPORT_SYMBOL(class_simple_create);
  * Note, the pointer to be destroyed must have been created with a call to
  * class_simple_create().
  */
+/**
+ * 销毁一个简单设备类。
+ */
 void class_simple_destroy(struct class_simple *cs)
 {
 	if ((cs == NULL) || (IS_ERR(cs)))
@@ -124,6 +133,14 @@ EXPORT_SYMBOL(class_simple_destroy);
  * might be required can be created using this pointer.
  * Note: the struct class_simple passed to this function must have previously been
  * created with a call to class_simple_create().
+ */
+/**
+ * 为一个简单设备类添加设备。
+ *		cs:			将设备添加到此简单设备类。
+ *		devnum:		分配的设备号。
+ *		device:		要添加的设备。
+ *		fmt:		用于格式化名称。
+ * 如果device不为NULL，则一个符号链接将指向/sys/device。
  */
 struct class_device *class_simple_device_add(struct class_simple *cs, dev_t dev, struct device *device, const char *fmt, ...)
 {
@@ -176,6 +193,9 @@ EXPORT_SYMBOL(class_simple_device_add);
  * Implement and set a hotplug function to add environment variables specific to this
  * class on the hotplug event.
  */
+/**
+ * 在热插拨设备时，可以使用此函数设置回调函数，回调函数用于向应用程序添加环境变量。
+ */
 int class_simple_set_hotplug(struct class_simple *cs,
 	int (*hotplug)(struct class_device *dev, char **envp, int num_envp, char *buffer, int buffer_size))
 {
@@ -192,6 +212,9 @@ EXPORT_SYMBOL(class_simple_set_hotplug);
  *
  * This call unregisters and cleans up a class device that was created with a
  * call to class_device_simple_add()
+ */
+/**
+ * 当拨除设备时，使用下面的函数删除类入口。
  */
 void class_simple_device_remove(dev_t dev)
 {

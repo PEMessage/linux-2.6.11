@@ -170,6 +170,9 @@ decl_subsys(devices, &ktype_device, &device_hotplug_ops);
  *	@attr:	device attribute descriptor.
  */
 
+/**
+ * 创建一个设备属性文件。
+ */
 int device_create_file(struct device * dev, struct device_attribute * attr)
 {
 	int error = 0;
@@ -185,7 +188,9 @@ int device_create_file(struct device * dev, struct device_attribute * attr)
  *	@dev:	device.
  *	@attr:	device attribute descriptor.
  */
-
+/**
+ * 删除一个设备属性文件。
+ */
 void device_remove_file(struct device * dev, struct device_attribute * attr)
 {
 	if (get_device(dev)) {
@@ -286,6 +291,10 @@ int device_add(struct device *dev)
  *	before it is added to the hierarchy.
  */
 
+/**
+ * 往设备驱动程序模型中插入一个新的设备驱动。
+ * 并自动的在sysfs文件系统下为其创建一个新的目录
+ */
 int device_register(struct device *dev)
 {
 	device_initialize(dev);
@@ -302,6 +311,9 @@ int device_register(struct device *dev)
  *	pointer passed in.
  */
 
+/**
+ * 增加设备的引用计数
+ */
 struct device * get_device(struct device * dev)
 {
 	return dev ? to_dev(kobject_get(&dev->kobj)) : NULL;
@@ -311,6 +323,9 @@ struct device * get_device(struct device * dev)
 /**
  *	put_device - decrement reference count.
  *	@dev:	device in question.
+ */
+/**
+ * 减少设备的引用计数
  */
 void put_device(struct device * dev)
 {
@@ -364,6 +379,9 @@ void device_del(struct device * dev)
  *	is the final reference count, the device will be cleaned up
  *	via device_release() above. Otherwise, the structure will
  *	stick around until the final reference to the device is dropped.
+ */
+/**
+ * 从设备驱动程序模型中移走一个设备驱动对象。
  */
 void device_unregister(struct device * dev)
 {

@@ -63,16 +63,20 @@ void scsi_eh_wakeup(struct Scsi_Host *shost)
  * Return value:
  *	0 on failure.
  **/
+/* 使用错误的SCSI命令进入错误恢复过程 */
 int scsi_eh_scmd_add(struct scsi_cmnd *scmd, int eh_flag)
 {
 	struct Scsi_Host *shost = scmd->device->host;
 	unsigned long flags;
 
+	/* 没有错误恢复线程，退出 */
 	if (shost->eh_wait == NULL)
 		return 0;
 
+	/* 获取自旋锁并关中断 */
 	spin_lock_irqsave(shost->host_lock, flags);
 
+	/* 设置命令标志 */
 	scsi_eh_eflags_set(scmd, eh_flag);
 	/*
 	 * FIXME: Can we stop setting owner and state.
@@ -83,10 +87,15 @@ int scsi_eh_scmd_add(struct scsi_cmnd *scmd, int eh_flag)
 	 * Set the serial_number_at_timeout to the current
 	 * serial_number
 	 */
+	/* 记录错误的命令号 */
 	scmd->serial_number_at_timeout = scmd->serial_number;
+	/* 将命令链接入错误恢复链表，恢复线程会据此处理错误命令 */
 	list_add_tail(&scmd->eh_entry, &shost->eh_cmd_q);
+	/* 设置此标志位后，新的SCSI将不会再进入队列 */
 	set_bit(SHOST_RECOVERY, &shost->shost_state);
+	/* 递增失败计数 */
 	shost->host_failed++;
+	/* 唤醒失败处理线程 */
 	scsi_eh_wakeup(shost);
 	spin_unlock_irqrestore(shost->host_lock, flags);
 	return 1;
@@ -474,6 +483,7 @@ static void scsi_eh_done(struct scsi_cmnd *scmd)
  * Return value:
  *    SUCCESS or FAILED or NEEDS_RETRY
  **/
+/* 直接向设备发送命令，用于错误恢复 */
 static int scsi_send_eh_cmnd(struct scsi_cmnd *scmd, int timeout)
 {
 	struct Scsi_Host *host = scmd->device->host;
@@ -501,9 +511,11 @@ static int scsi_send_eh_cmnd(struct scsi_cmnd *scmd, int timeout)
 
 	spin_lock_irqsave(scmd->device->host->host_lock, flags);
 	scsi_log_send(scmd);
+	/* 向主机适配器发送命令 */
 	host->hostt->queuecommand(scmd, scsi_eh_done);
 	spin_unlock_irqrestore(scmd->device->host->host_lock, flags);
 
+	/* 等待命令完成 */
 	down(&sem);
 	scsi_log_completion(scmd, SUCCESS);
 
@@ -513,7 +525,7 @@ static int scsi_send_eh_cmnd(struct scsi_cmnd *scmd, int timeout)
 	 * see if timeout.  if so, tell the host to forget about it.
 	 * in other words, we don't want a callback any more.
 	 */
-	if (scsi_eh_eflags_chk(scmd, SCSI_EH_REC_TIMEOUT)) {
+	if (scsi_eh_eflags_chk(scmd, SCSI_EH_REC_TIMEOUT)) {/* 是由于超时完成命令的 */
 		scsi_eh_eflags_clr(scmd,  SCSI_EH_REC_TIMEOUT);
 		scmd->owner = SCSI_OWNER_LOWLEVEL;
 
@@ -528,7 +540,7 @@ static int scsi_send_eh_cmnd(struct scsi_cmnd *scmd, int timeout)
 		 * we should treat them differently anyways.
 		 */
 		spin_lock_irqsave(scmd->device->host->host_lock, flags);
-		if (scmd->device->host->hostt->eh_abort_handler)
+		if (scmd->device->host->hostt->eh_abort_handler)/* 终止该命令的执行 */
 			scmd->device->host->hostt->eh_abort_handler(scmd);
 		spin_unlock_irqrestore(scmd->device->host->host_lock, flags);
 			
@@ -545,7 +557,8 @@ static int scsi_send_eh_cmnd(struct scsi_cmnd *scmd, int timeout)
 	 * now examine the actual status codes to see whether the command
 	 * actually did complete normally.
 	 */
-	if (rtn == SUCCESS) {
+	if (rtn == SUCCESS) {/* 命令被主机适配器正确的完成 */
+		/* 检查错误恢复命令的完成情况 */
 		rtn = scsi_eh_completed_normally(scmd);
 		SCSI_LOG_ERROR_RECOVERY(3,
 			printk("%s: scsi_eh_completed_normally %x\n",
@@ -640,12 +653,15 @@ static int scsi_request_sense(struct scsi_cmnd *scmd)
  *    keep a list of pending commands for final completion, and once we
  *    are ready to leave error handling we handle completion for real.
  **/
+/* 当错误恢复命令被执行完毕后，回调此函数 */
 static void scsi_eh_finish_cmd(struct scsi_cmnd *scmd,
 			       struct list_head *done_q)
 {
+	/* 递减失败的命令数 */
 	scmd->device->host->host_failed--;
 	scmd->state = SCSI_STATE_BHQUEUE;
 
+	/* 清除错误恢复标志 */
 	scsi_eh_eflags_clr_all(scmd);
 
 	/*
@@ -653,6 +669,7 @@ static void scsi_eh_finish_cmd(struct scsi_cmnd *scmd,
 	 * things.
 	 */
 	scsi_setup_cmd_retry(scmd);
+	/* 将命令从错误链表中移到错误恢复的完成链表中 */
 	list_move_tail(&scmd->eh_entry, done_q);
 }
 
@@ -819,6 +836,7 @@ retry_tur:
  *    no sense to try and abort the command, since as far as the shost
  *    adapter is concerned, it isn't running.
  **/
+/* 如果在进行错误恢复后，故障命令链表中还有故障命令，则调用本函数放弃故障命令 */
 static int scsi_eh_abort_cmds(struct list_head *work_q,
 			      struct list_head *done_q)
 {
@@ -826,18 +844,21 @@ static int scsi_eh_abort_cmds(struct list_head *work_q,
 	struct scsi_cmnd *scmd;
 	int rtn;
 
+	/* 遍历故障命令链表 */
 	list_for_each_safe(lh, lh_sf, work_q) {
 		scmd = list_entry(lh, struct scsi_cmnd, eh_entry);
+		/* 要放弃的命令应当是因超时而进入错误恢复的命令，即它应当设置了SCSI_EH_CANCEL_CMD标志 */
 		if (!scsi_eh_eflags_chk(scmd, SCSI_EH_CANCEL_CMD))
 			continue;
 		SCSI_LOG_ERROR_RECOVERY(3, printk("%s: aborting cmd:"
 						  "0x%p\n", current->comm,
 						  scmd));
+		/* 请求主机适配器放弃一个正在执行的命令。调用驱动的eh_abort_hander回调 */
 		rtn = scsi_try_to_abort_cmd(scmd);
-		if (rtn == SUCCESS) {
+		if (rtn == SUCCESS) {/* 成功放弃命令 */
 			scsi_eh_eflags_clr(scmd,  SCSI_EH_CANCEL_CMD);
-			if (!scsi_device_online(scmd->device) ||
-			    !scsi_eh_tur(scmd)) {
+			if (!scsi_device_online(scmd->device) ||/* 设备已经离线 */
+			    !scsi_eh_tur(scmd)) {/* 发送命令后已经就绪 */
 				scsi_eh_finish_cmd(scmd, done_q);
 			}
 				
@@ -1212,12 +1233,14 @@ static int scsi_eh_host_reset(struct list_head *work_q,
  * @done_q:	list_head for processed commands.
  *
  **/
+/* SCSI设备无法恢复，调用此函数使其离线 */
 static void scsi_eh_offline_sdevs(struct list_head *work_q,
 				  struct list_head *done_q)
 {
 	struct list_head *lh, *lh_sf;
 	struct scsi_cmnd *scmd;
 
+	/* 遍历错误恢复命令链表 */
 	list_for_each_safe(lh, lh_sf, work_q) {
 		scmd = list_entry(lh, struct scsi_cmnd, eh_entry);
 		printk(KERN_INFO "scsi: Device offlined - not"
@@ -1227,6 +1250,7 @@ static void scsi_eh_offline_sdevs(struct list_head *work_q,
 				scmd->device->channel,
 				scmd->device->id,
 				scmd->device->lun);
+		/* 设置所属设备为离线 */
 		scsi_device_set_state(scmd->device, SDEV_OFFLINE);
 		if (scsi_eh_eflags_chk(scmd, SCSI_EH_CANCEL_CMD)) {
 			/*
@@ -1483,6 +1507,7 @@ static void scsi_eh_lock_door(struct scsi_device *sdev)
  *    When we entered the error handler, we blocked all further i/o to
  *    this device.  we need to 'reverse' this process.
  **/
+/* 当错误恢复完毕后，重启主机适配器的IO，恢复正常操作 */
 static void scsi_restart_operations(struct Scsi_Host *shost)
 {
 	struct scsi_device *sdev;
@@ -1492,9 +1517,9 @@ static void scsi_restart_operations(struct Scsi_Host *shost)
 	 * onto the head of the SCSI request queue for the device.  There
 	 * is no point trying to lock the door of an off-line device.
 	 */
-	shost_for_each_device(sdev, shost) {
-		if (scsi_device_online(sdev) && sdev->locked)
-			scsi_eh_lock_door(sdev);
+	shost_for_each_device(sdev, shost) {/* 遍历主机设备上的所有SCSI设备 */
+		if (scsi_device_online(sdev) && sdev->locked)/* 设备在线并且设置了LOCK标志 */
+			scsi_eh_lock_door(sdev);/* 阻止移除设备介质 */
 	}
 
 	/*
@@ -1505,8 +1530,10 @@ static void scsi_restart_operations(struct Scsi_Host *shost)
 	SCSI_LOG_ERROR_RECOVERY(3, printk("%s: waking up host to restart\n",
 					  __FUNCTION__));
 
+	/* 清除SHOST_RECOVERY标志，回到正常状态 */
 	clear_bit(SHOST_RECOVERY, &shost->shost_state);
 
+	/* 恢复过程中，如果有进程在等待发送命令，则会睡眠，这里唤醒它们 */
 	wake_up(&shost->host_wait);
 
 	/*
@@ -1515,6 +1542,7 @@ static void scsi_restart_operations(struct Scsi_Host *shost)
 	 * now that error recovery is done, we will need to ensure that these
 	 * requests are started.
 	 */
+	/* 运行所有设备上的队列 */
 	scsi_run_host_queues(shost);
 }
 
@@ -1524,15 +1552,19 @@ static void scsi_restart_operations(struct Scsi_Host *shost)
  * @eh_done_q:	list_head for processed commands.
  *
  **/
+/**
+ * 错误恢复，当放弃故障命令后，故障命令链表中还有故障命令时调用
+ * 恢复设备。
+ */
 static void scsi_eh_ready_devs(struct Scsi_Host *shost,
 			       struct list_head *work_q,
 			       struct list_head *done_q)
 {
-	if (!scsi_eh_stu(shost, work_q, done_q))
-		if (!scsi_eh_bus_device_reset(shost, work_q, done_q))
-			if (!scsi_eh_bus_reset(shost, work_q, done_q))
-				if (!scsi_eh_host_reset(work_q, done_q))
-					scsi_eh_offline_sdevs(work_q, done_q);
+	if (!scsi_eh_stu(shost, work_q, done_q))/* 发送命令重启设备 */
+		if (!scsi_eh_bus_device_reset(shost, work_q, done_q))/* 复位逻辑设备 */
+			if (!scsi_eh_bus_reset(shost, work_q, done_q))/* 复位总线通道 */
+				if (!scsi_eh_host_reset(work_q, done_q))/* 复位主机适配器 */
+					scsi_eh_offline_sdevs(work_q, done_q);/* 使SCSI设备离线 */
 }
 
 /**
@@ -1545,23 +1577,26 @@ static void scsi_eh_flush_done_q(struct list_head *done_q)
 	struct list_head *lh, *lh_sf;
 	struct scsi_cmnd *scmd;
 
+	/* 遍历已经完成错误恢复的链表 */
 	list_for_each_safe(lh, lh_sf, done_q) {
 		scmd = list_entry(lh, struct scsi_cmnd, eh_entry);
-		list_del_init(lh);
-		if (scsi_device_online(scmd->device) &&
-		    !blk_noretry_request(scmd->request) &&
-		    (++scmd->retries < scmd->allowed)) {
+		list_del_init(lh);/* 将命令从链表中删除 */
+		if (scsi_device_online(scmd->device) &&/* 设备在线 */
+		    !blk_noretry_request(scmd->request) &&/* 需要重试命令 */
+		    (++scmd->retries < scmd->allowed)) {/* 重试次数未达到上限 */
 			SCSI_LOG_ERROR_RECOVERY(3, printk("%s: flush"
 							  " retry cmd: %p\n",
 							  current->comm,
 							  scmd));
+			/* 将SCSI命令重新排入队列 */
 				scsi_queue_insert(scmd, SCSI_MLQUEUE_EH_RETRY);
-		} else {
+		} else {/* 不必重试 */
 			if (!scmd->result)
 				scmd->result |= (DRIVER_TIMEOUT << 24);
 			SCSI_LOG_ERROR_RECOVERY(3, printk("%s: flush finish"
 							" cmd: %p\n",
 							current->comm, scmd));
+			/* 向上层返回错误 */
 			scsi_finish_command(scmd);
 		}
 	}
@@ -1590,22 +1625,25 @@ static void scsi_eh_flush_done_q(struct list_head *done_q)
  *    here, so when we restart the host after we return it should have an
  *    empty queue.
  **/
+/* SCSI中间层默认的错误恢复函数 */
 static void scsi_unjam_host(struct Scsi_Host *shost)
 {
 	unsigned long flags;
-	LIST_HEAD(eh_work_q);
-	LIST_HEAD(eh_done_q);
+	LIST_HEAD(eh_work_q);/* 等待进行错误恢复的命令链表 */
+	LIST_HEAD(eh_done_q);/* 已经完成错误恢复的命令链表 */
 
 	spin_lock_irqsave(shost->host_lock, flags);
+	/* 将所有的错误命令移到临时链表中 */
 	list_splice_init(&shost->eh_cmd_q, &eh_work_q);
 	spin_unlock_irqrestore(shost->host_lock, flags);
 
 	SCSI_LOG_ERROR_RECOVERY(1, scsi_eh_prt_fail_stats(shost, &eh_work_q));
 
-	if (!scsi_eh_get_sense(&eh_work_q, &eh_done_q))
-		if (!scsi_eh_abort_cmds(&eh_work_q, &eh_done_q))
+	if (!scsi_eh_get_sense(&eh_work_q, &eh_done_q))/* 发送用于错误恢复的SCSI命令 */
+		if (!scsi_eh_abort_cmds(&eh_work_q, &eh_done_q))/* 放弃故障的命令 */
 			scsi_eh_ready_devs(shost, &eh_work_q, &eh_done_q);
 
+	/* 要么重试故障SCSI命令，要么向上层报告失败 */
 	scsi_eh_flush_done_q(&eh_done_q);
 }
 
@@ -1620,6 +1658,7 @@ static void scsi_unjam_host(struct Scsi_Host *shost)
  *    event (i.e. failure).  When this takes place, we have the job of
  *    trying to unjam the bus and restarting things.
  **/
+/* SCSI错误恢复线程 */
 int scsi_error_handler(void *data)
 {
 	struct Scsi_Host *shost = (struct Scsi_Host *) data;
@@ -1643,6 +1682,7 @@ int scsi_error_handler(void *data)
 	SCSI_LOG_ERROR_RECOVERY(3, printk("Wake up parent of"
 					  " scsi_eh_%d\n",shost->host_no));
 
+	/* 通知主机适配器驱动，线程已经启动，可以进行下一步处理了 */
 	complete(shost->eh_notify);
 
 	while (1) {
@@ -1679,10 +1719,10 @@ int scsi_error_handler(void *data)
 		 * what we need to do to get it up and online again (if we can).
 		 * If we fail, we end up taking the thing offline.
 		 */
-		if (shost->hostt->eh_strategy_handler) 
+		if (shost->hostt->eh_strategy_handler) /* 主机适配器定义了错误恢复处理回调 */
 			rtn = shost->hostt->eh_strategy_handler(shost);
 		else
-			scsi_unjam_host(shost);
+			scsi_unjam_host(shost);/* 默认的错误恢复函数 */
 
 		shost->eh_active = 0;
 

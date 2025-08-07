@@ -23,7 +23,9 @@
  *	@drv:	driver.
  *	@attr:	driver attribute descriptor.
  */
-
+/**
+ * 在sysfs中创建驱动程序属性文件。
+ */
 int driver_create_file(struct device_driver * drv, struct driver_attribute * attr)
 {
 	int error;
@@ -41,7 +43,9 @@ int driver_create_file(struct device_driver * drv, struct driver_attribute * att
  *	@drv:	driver.
  *	@attr:	driver attribute descriptor.
  */
-
+/**
+ * 从sysfs中删除驱动程序属性文件。
+ */
 void driver_remove_file(struct device_driver * drv, struct driver_attribute * attr)
 {
 	if (get_driver(drv)) {
@@ -83,6 +87,10 @@ void put_driver(struct device_driver * drv)
  *	to a locked state here. It will be unlocked when the driver
  *	reference count reaches 0.
  */
+/**
+ * 往设备驱动程序模型中插入一个新的device_driver对象
+ * 并自动在sysfs文件系统下为其创建一个新的目录。
+ */
 int driver_register(struct device_driver * drv)
 {
 	INIT_LIST_HEAD(&drv->devices);
@@ -104,6 +112,9 @@ int driver_register(struct device_driver * drv)
  *	unload until all references are gone.
  */
 
+/**
+ * 从设备驱动程序模型中移走一个device_driver对象
+ */
 void driver_unregister(struct device_driver * drv)
 {
 	bus_remove_driver(drv);

@@ -99,6 +99,9 @@ void __devinit pci_bus_add_device(struct pci_dev *dev)
  *
  * Call hotplug for each new devices.
  */
+/**
+ * 将设备插入到全局PCI设备列表中，并加入到sysfs和procfs中。
+ */
 void __devinit pci_bus_add_devices(struct pci_bus *bus)
 {
 	struct pci_dev *dev;
@@ -110,6 +113,9 @@ void __devinit pci_bus_add_devices(struct pci_bus *bus)
 		 */
 		if (!list_empty(&dev->global_list))
 			continue;
+		/**
+		 * 将当前PCI总线上的所有PCI设备相关信息加入到proc和sysfs文件系统中。
+		 */
 		pci_bus_add_device(dev);
 	}
 
@@ -125,6 +131,9 @@ void __devinit pci_bus_add_devices(struct pci_bus *bus)
 			spin_lock(&pci_bus_lock);
 			list_add_tail(&dev->subordinate->node, &dev->bus->children);
 			spin_unlock(&pci_bus_lock);
+			/**
+			 * 递归调用，将PCI总线上的所有PCI子桥加入proc和sysfs文件系统。
+			 */
 			pci_bus_add_devices(dev->subordinate);
 
 			sysfs_create_link(&dev->subordinate->class_dev.kobj, &dev->dev.kobj, "bridge");
@@ -138,8 +147,14 @@ void pci_enable_bridges(struct pci_bus *bus)
 
 	list_for_each_entry(dev, &bus->devices, bus_list) {
 		if (dev->subordinate) {
+			/**
+			 * 启动当前PCI桥。
+			 */
 			pci_enable_device(dev);
 			pci_set_master(dev);
+			/**
+			 * 递归处理下级桥。
+			 */
 			pci_enable_bridges(dev->subordinate);
 		}
 	}

@@ -264,12 +264,21 @@ acpi_os_table_override (struct acpi_table_header *existing_table,
 	return AE_OK;
 }
 
+/**
+ * SCI中断处理函数。
+ */
 static irqreturn_t
 acpi_irq(int irq, void *dev_id, struct pt_regs *regs)
 {
+	/**
+	 * acpi_irq_handler会被实际指向acpi_ev_sci_xrupt_handler。
+	 */
 	return (*acpi_irq_handler)(acpi_irq_context) ? IRQ_HANDLED : IRQ_NONE;
 }
 
+/**
+ * 注册SCI中断处理程序。
+ */
 acpi_status
 acpi_os_install_interrupt_handler(u32 gsi, acpi_osd_handler handler, void *context)
 {
@@ -281,6 +290,9 @@ acpi_os_install_interrupt_handler(u32 gsi, acpi_osd_handler handler, void *conte
 	 * for the SCI.
 	 */
 	gsi = acpi_fadt.sci_int;
+	/**
+	 * 从FADT中获得ACPI使用的中断向量。在大多数x86系统中，SCI中断使用的IRQ号为9。
+	 */
 	if (acpi_gsi_to_irq(gsi, &irq) < 0) {
 		printk(KERN_ERR PREFIX "SCI (ACPI GSI %d) not registered\n",
 		       gsi);
@@ -289,6 +301,9 @@ acpi_os_install_interrupt_handler(u32 gsi, acpi_osd_handler handler, void *conte
 
 	acpi_irq_handler = handler;
 	acpi_irq_context = context;
+	/**
+	 * 注册acpi_irq为SCI中断请求函数。
+	 */
 	if (request_irq(irq, acpi_irq, SA_SHIRQ, "acpi", acpi_irq)) {
 		printk(KERN_ERR PREFIX "SCI (IRQ%d) allocation failed\n", irq);
 		return AE_NOT_ACQUIRED;

@@ -175,6 +175,9 @@ EXPORT_SYMBOL(blk_queue_activity_fn);
  * cdb from the request data for instance.
  *
  */
+/**
+ * 设置预处理函数。
+ */
 void blk_queue_prep_rq(request_queue_t *q, prep_rq_fn *pfn)
 {
 	q->prep_rq_fn = pfn;
@@ -279,6 +282,9 @@ EXPORT_SYMBOL(blk_queue_make_request);
  *   feature should call this function and indicate so.
  *
  **/
+/**
+ * 设置屏障请求标志。
+ */
 void blk_queue_ordered(request_queue_t *q, int flag)
 {
 	if (flag)
@@ -318,6 +324,15 @@ EXPORT_SYMBOL(blk_queue_issue_flush_fn);
  *    buffers for doing I/O to pages residing above @page. By default
  *    the block layer sets this to the highest numbered "low" memory page.
  **/
+/**
+ * 告诉内核驱动程序执行DMA所使用的最高物理内存。
+ * 如果一个请求包含了超越界限的内存引用，将使用回弹缓冲区。
+ * 可以把任何可行的物理地址作为参数，或者使用如下预定义的参数。
+ *		BLK_BOUNCE_HIGH:		对高端内存页使用回弹缓冲区。
+ *		BLK_BOUNCE_ISA:			驱动程序只能在16MB的ISA区执行DMA。
+ *		BLK_BOUNCE_ANY:			可以在任何地址执行DMA。
+ * 默认值是BLK_BOUNCE_HIGH。
+ */
 void blk_queue_bounce_limit(request_queue_t *q, u64 dma_addr)
 {
 	unsigned long bounce_pfn = dma_addr >> PAGE_SHIFT;
@@ -348,6 +363,9 @@ EXPORT_SYMBOL(blk_queue_bounce_limit);
  *    Enables a low level driver to set an upper limit on the size of
  *    received requests.
  **/
+/**
+ * 以扇区为单位设置请求的最大值。默认值是255。
+ */
 void blk_queue_max_sectors(request_queue_t *q, unsigned short max_sectors)
 {
 	if ((max_sectors << 9) < PAGE_CACHE_SIZE) {
@@ -370,6 +388,9 @@ EXPORT_SYMBOL(blk_queue_max_sectors);
  *    physical data segments in a request.  This would be the largest sized
  *    scatter list the driver could handle.
  **/
+/**
+ * 控制在一个请求中包含多少个物理段(在系统内存中的非连续区成员)。
+ */
 void blk_queue_max_phys_segments(request_queue_t *q, unsigned short max_segments)
 {
 	if (!max_segments) {
@@ -393,6 +414,9 @@ EXPORT_SYMBOL(blk_queue_max_phys_segments);
  *    address/length pairs the host adapter can actually give as once
  *    to the device.
  **/
+/**
+ * 设置驱动程序可以处理的段的最大值。
+ */
 void blk_queue_max_hw_segments(request_queue_t *q, unsigned short max_segments)
 {
 	if (!max_segments) {
@@ -437,6 +461,9 @@ EXPORT_SYMBOL(blk_queue_max_segment_size);
  *   even internal read-modify-write operations). Usually the default
  *   of 512 covers most hardware.
  **/
+/**
+ * 告诉内核设备硬件的扇区大小。所有由内核生成的请求都是该大小的整数倍。并且做到了边界对齐。
+ */
 void blk_queue_hardsect_size(request_queue_t *q, unsigned short size)
 {
 	q->hardsect_size = size;
@@ -473,6 +500,10 @@ EXPORT_SYMBOL(blk_queue_stack_limits);
  * @q:  the request queue for the device
  * @mask:  the memory boundary mask
  **/
+/**
+ * 一些设备无法处理那些跨越特定大小内存边界的请求。此函数告诉内存设备的特定边界。
+ * 如果设备不能处理跨越4MB边界的请求，则mask的值为0x3fffff。默认的mask是0xffffffff。
+ */
 void blk_queue_segment_boundary(request_queue_t *q, unsigned long mask)
 {
 	if (mask < PAGE_CACHE_SIZE - 1) {
@@ -495,6 +526,9 @@ EXPORT_SYMBOL(blk_queue_segment_boundary);
  *    this is used when buiding direct io requests for the queue.
  *
  **/
+/**
+ * 告诉内核设备在使用DMA传输时的内存对齐限制。默认mask是0x1ff，这样，所有的请求都是512字节对齐。
+ */
 void blk_queue_dma_alignment(request_queue_t *q, int mask)
 {
 	q->dma_alignment = mask;
@@ -514,6 +548,9 @@ EXPORT_SYMBOL(blk_queue_dma_alignment);
  *
  *    no locks need be held.
  **/
+/**
+ * 通过标记找到所属的请求。
+ */
 struct request *blk_queue_find_tag(request_queue_t *q, int tag)
 {
 	struct blk_queue_tag *bqt = q->queue_tags;
@@ -619,6 +656,9 @@ fail:
  * @q:  the request queue for the device
  * @depth:  the maximum queue depth supported
  **/
+/**
+ * 通知内核设备支持标记命令队列。
+ */
 int blk_queue_init_tags(request_queue_t *q, int depth,
 			struct blk_queue_tag *tags)
 {
@@ -666,6 +706,9 @@ EXPORT_SYMBOL(blk_queue_init_tags);
  *  Notes:
  *    Must be called with the queue lock held.
  **/
+/**
+ * 重新设置设备支持的标记数量。
+ */
 int blk_queue_resize_tags(request_queue_t *q, int new_depth)
 {
 	struct blk_queue_tag *bqt = q->queue_tags;
@@ -719,6 +762,9 @@ EXPORT_SYMBOL(blk_queue_resize_tags);
  *  Notes:
  *   queue lock must be held.
  **/
+/**
+ * 当一个请求的所有数据传输完毕后，驱动程序使用本函数释放所用的标记。
+ */
 void blk_queue_end_tag(request_queue_t *q, struct request *rq)
 {
 	struct blk_queue_tag *bqt = q->queue_tags;
@@ -765,6 +811,9 @@ EXPORT_SYMBOL(blk_queue_end_tag);
  *  Notes:
  *   queue lock must be held.
  **/
+/**
+ * 将一个标记与一个请求相关联。
+ */
 int blk_queue_start_tag(request_queue_t *q, struct request *rq)
 {
 	struct blk_queue_tag *bqt = q->queue_tags;
@@ -811,6 +860,9 @@ EXPORT_SYMBOL(blk_queue_start_tag);
  *  Notes:
  *   queue lock must be held.
  **/
+/**
+ * 将所有未执行的标记返回给缓冲区，并且把相应的请求发还给请求队列。
+ */
 void blk_queue_invalidate_tags(request_queue_t *q)
 {
 	struct blk_queue_tag *bqt = q->queue_tags;
@@ -993,6 +1045,10 @@ EXPORT_SYMBOL(blk_hw_contig_segment);
 /*
  * map a request to scatterlist, return number of sg entries setup. Caller
  * must make sure sg can hold rq->nr_phys_segments entries
+ */
+/**
+ * 该辅助函数返回一个可以立即被用来启动数据传送的分散-聚集链表。
+ * 可以将返回的分散表sg传递给dma_map_sg。
  */
 int blk_rq_map_sg(request_queue_t *q, struct request *rq, struct scatterlist *sg)
 {
@@ -1212,6 +1268,10 @@ static int ll_merge_requests_fn(request_queue_t *q, struct request *req,
  * This is called with interrupts off and no requests on the queue and
  * with the queue lock held.
  */
+/**
+ * 插入一个块设备-将其插入到某个块设备驱动程序处理的请求队列中。
+ * 其参数是一个请求队列描述符的地址。
+ */
 void blk_plug_device(request_queue_t *q)
 {
 	WARN_ON(!irqs_disabled());
@@ -1222,7 +1282,10 @@ void blk_plug_device(request_queue_t *q)
 	 */
 	if (test_bit(QUEUE_FLAG_STOPPED, &q->queue_flags))
 		return;
-
+	/**
+	 * 设置queue_flags字段中的QUEUE_FLAG_PLUGGED.
+	 * 然后重启unplug_timer字段中的内嵌动态定时器。
+	 */
 	if (!test_and_set_bit(QUEUE_FLAG_PLUGGED, &q->queue_flags))
 		mod_timer(&q->unplug_timer, jiffies + q->unplug_delay);
 }
@@ -1233,13 +1296,22 @@ EXPORT_SYMBOL(blk_plug_device);
  * remove the queue from the plugged list, if present. called with
  * queue lock held and interrupts disabled.
  */
+/**
+ * 摘除一个请求队列。
+ */
 int blk_remove_plug(request_queue_t *q)
 {
 	WARN_ON(!irqs_disabled());
 
+	/**
+	 * 清除QUEUE_FLAG_PLUGGED标志。
+	 */ 
 	if (!test_and_clear_bit(QUEUE_FLAG_PLUGGED, &q->queue_flags))
 		return 0;
 
+	/**
+	 * 清除unplug_timer动态定时器的执行。
+	 */
 	del_timer(&q->unplug_timer);
 	return 1;
 }
@@ -1249,16 +1321,28 @@ EXPORT_SYMBOL(blk_remove_plug);
 /*
  * remove the plug and let it rip..
  */
+/**
+ * 拨出块设备的辅助函数
+ */
 void __generic_unplug_device(request_queue_t *q)
 {
+	/**
+	 * 首先检测块设备是否仍然活跃
+	 */
 	if (test_bit(QUEUE_FLAG_STOPPED, &q->queue_flags))
 		return;
 
+	/**
+	 * 真正的移出块设备
+	 */
 	if (!blk_remove_plug(q))
 		return;
 
 	/*
 	 * was plugged, fire request_fn if queue has stuff to do
+	 */
+	/**
+	 * 执行request_fn来处理请求队列的下一个请求
 	 */
 	if (elv_next_request(q))
 		q->request_fn(q);
@@ -1276,6 +1360,9 @@ EXPORT_SYMBOL(__generic_unplug_device);
  *   gets unplugged, the request_fn defined for the queue is invoked and
  *   transfers started.
  **/
+/**
+ * 拨出块设备
+ */
 void generic_unplug_device(request_queue_t *q)
 {
 	spin_lock_irq(q->queue_lock);
@@ -1296,17 +1383,32 @@ static void blk_backing_dev_unplug(struct backing_dev_info *bdi,
 		q->unplug_fn(q);
 }
 
+/**
+ * 请求队列的unplug_work实现函数。
+ */
 static void blk_unplug_work(void *data)
 {
 	request_queue_t *q = data;
 
+	/**
+	 * 通常unplug_fn函数是由generic_unplug_device函数实现的。它的功能是拨出块设备
+	 */
 	q->unplug_fn(q);
 }
 
+/**
+ * 当blk_unplug_timeout函数激活的动态定时器的时间用完后，就会执行本函数。
+ */
 static void blk_unplug_timeout(unsigned long data)
 {
 	request_queue_t *q = (request_queue_t *)data;
 
+	/**
+	 * kblockd执行blk_unplug_work函数，这个函数存放在q->unplug_work中。
+	 * 该函数会调用请求队列中的q->unplug_fn方法，通常该方法是由generic_unplug_device函数实现的。
+	 * generic_unplug_device函数的功能是拨出块设备：首先检查请求队列是否仍然活跃。
+	 * 然后，调用blk_remove_plug函数。最后，执行策略例程request_fn来开始处理请求队列中的下一个请求。
+	 */
 	kblockd_schedule_work(&q->unplug_work);
 }
 
@@ -1319,6 +1421,9 @@ static void blk_unplug_timeout(unsigned long data)
  *   the request_fn for the queue if it was in a stopped state when
  *   entered. Also see blk_stop_queue(). Queue lock must be held.
  **/
+/**
+ * 重新允许块设备层向IO队列中加入请求。
+ */
 void blk_start_queue(request_queue_t *q)
 {
 	clear_bit(QUEUE_FLAG_STOPPED, &q->queue_flags);
@@ -1352,6 +1457,9 @@ EXPORT_SYMBOL(blk_start_queue);
  *   the driver has signalled it's ready to go again. This happens by calling
  *   blk_start_queue() to restart queue operations. Queue lock must be held.
  **/
+/**
+ * 如果驱动程序不能再处理更多命令，则调用此函数通知块设备层。
+ */
 void blk_stop_queue(request_queue_t *q)
 {
 	blk_remove_plug(q);
@@ -1410,6 +1518,9 @@ EXPORT_SYMBOL(blk_run_queue);
  *     Hopefully the low level driver will have finished any
  *     outstanding requests first...
  **/
+/**
+ * 把块设备请求队列返回给系统。
+ */
 void blk_cleanup_queue(request_queue_t * q)
 {
 	struct request_list *rl = &q->rq;
@@ -1503,6 +1614,13 @@ EXPORT_SYMBOL(blk_alloc_queue);
  *    blk_init_queue() must be paired with a blk_cleanup_queue() call
  *    when the block device is deactivated (such as at module unload).
  **/
+/**
+ * 分配一个请求队列描述符，并将其中许多字段初始化为缺省值。
+ * 它接收的参数为设备描述符的自旋锁的地址（foo.gd->rq->queue_lock）
+ * 和设备驱动程序的策略例程（foo.gd->rq->request_fn）
+ * 该函数也初始化foo.gd->rq->elevator，并强制驱动程序使用缺省的IO调度算法。
+ * 如果驱动程序想用其他调度算法，可以稍候覆盖elevator字段。
+ */
 request_queue_t *blk_init_queue(request_fn_proc *rfn, spinlock_t *lock)
 {
 	request_queue_t *q = blk_alloc_queue(GFP_KERNEL);
@@ -1798,6 +1916,10 @@ static struct request *get_request_wait(request_queue_t *q, int rw)
 	return rq;
 }
 
+/**
+ * 试图从一个特定请求队列的内存池中获得空闲的描述符。
+ * 如果内存区不足并且内存池已经用完，则挂起当前进程或者返回NULL
+ */
 struct request *blk_get_request(request_queue_t *q, int rw, int gfp_mask)
 {
 	struct request *rq;
@@ -2126,11 +2248,12 @@ void drive_stat_acct(struct request *rq, int nr_sectors, int new_io)
  * queue lock is held and interrupts disabled, as we muck with the
  * request queue list.
  */
+/* 将io请求添加到队列中 */
 static inline void add_request(request_queue_t * q, struct request * req)
 {
 	drive_stat_acct(req, req->nr_sectors, 1);
 
-	if (q->activity_fn)
+	if (q->activity_fn)/* 调用请求队列的回调，表示有一个新请求加入，一般未定义 */
 		q->activity_fn(q->activity_data, rq_data_dir(req));
 
 	/*
@@ -2200,6 +2323,9 @@ void __blk_put_request(request_queue_t *q, struct request *req)
 	}
 }
 
+/**
+ * 释放请求描述符，如果引用计数器为0，则释放到内存池。
+ */
 void blk_put_request(struct request *req)
 {
 	/*
@@ -2226,6 +2352,9 @@ EXPORT_SYMBOL(blk_put_request);
  * Waits for up to @timeout jiffies for a queue (any queue) to exit congestion.
  * If no queues are congested then just wait for the next request to be
  * returned.
+ */
+/**
+ * 挂起当前进程，直到所有请求队列都变为不拥塞或超时已到
  */
 long blk_congestion_wait(int rw, long timeout)
 {
@@ -2349,6 +2478,9 @@ void __blk_attempt_remerge(request_queue_t *q, struct request *rq)
 
 EXPORT_SYMBOL(__blk_attempt_remerge);
 
+/**
+ * 通用块层调用此函数，获得IO调度层的服务。
+ */
 static int __make_request(request_queue_t *q, struct bio *bio)
 {
 	struct request *req, *freereq = NULL;
@@ -2366,11 +2498,15 @@ static int __make_request(request_queue_t *q, struct bio *bio)
 	 * certain limit bounced to low memory (ie for highmem, or even
 	 * ISA dma in theory)
 	 */
+	/**
+	 * 如果有必要，建立一个回弹缓冲区。如果回弹缓冲区被建立，后续将对该缓冲区而不是对原bio结构进行操作。
+	 */
 	blk_queue_bounce(q, &bio);
 
 	spin_lock_prefetch(q->queue_lock);
 
 	barrier = bio_barrier(bio);
+	/* 屏障请求，但是队列不支持屏障，退出 */
 	if (barrier && !(q->queue_flags & (1 << QUEUE_FLAG_ORDERED))) {
 		err = -EOPNOTSUPP;
 		goto end_io;
@@ -2379,35 +2515,59 @@ static int __make_request(request_queue_t *q, struct bio *bio)
 again:
 	spin_lock_irq(q->queue_lock);
 
+	/**
+	 * 检查请求队列中是否存在待处理请求。
+	 */
 	if (elv_queue_empty(q)) {
+		/**
+		 * 没有待处理请求，则调用blk_plug_device插入请求队列。
+		 */
 		blk_plug_device(q);
 		goto get_rq;
 	}
 	if (barrier)
 		goto get_rq;
 
+	/**
+	 * 请求队列中包含待处理请求。调用elv_merge检查新bio结构是否可以并入已有请求中。
+	 */
 	el_ret = elv_merge(q, &req, bio);
 	switch (el_ret) {
-		case ELEVATOR_BACK_MERGE:
+		case ELEVATOR_BACK_MERGE:/* 可以添加到某个bio末尾 */
 			BUG_ON(!rq_mergeable(req));
 
+			/**
+			 * 检查是否可以将请求合并到bio的末尾。
+			 */
 			if (!q->back_merge_fn(q, req, bio))
 				break;
 
+			/**
+			 * 将该请求合并到bio的末尾。
+			 */
 			req->biotail->bi_next = bio;
 			req->biotail = bio;
 			req->nr_sectors = req->hard_nr_sectors += nr_sectors;
 			drive_stat_acct(req, nr_sectors, 0);
+			/**
+			 * 检查是否可以与后面的请求合并。
+			 */
 			if (!attempt_back_merge(q, req))
 				elv_merged_request(q, req);
 			goto out;
 
-		case ELEVATOR_FRONT_MERGE:
+		case ELEVATOR_FRONT_MERGE:/* 可以插到某个请求的前面 */
 			BUG_ON(!rq_mergeable(req));
 
+			/**
+			 * 检查是否可以合并到该bio的前面
+			 */
 			if (!q->front_merge_fn(q, req, bio))
 				break;
 
+			/**
+			 * 合并到该bio的前面
+			 */
 			bio->bi_next = req->bio;
 			req->bio = bio;
 
@@ -2422,6 +2582,9 @@ again:
 			req->sector = req->hard_sector = sector;
 			req->nr_sectors = req->hard_nr_sectors += nr_sectors;
 			drive_stat_acct(req, nr_sectors, 0);
+			/**
+			 * 检查是否可以与上面的bio进行进一步的合并。
+			 */
 			if (!attempt_front_merge(q, req))
 				elv_merged_request(q, req);
 			goto out;
@@ -2429,7 +2592,7 @@ again:
 		/*
 		 * elevator says don't/can't merge. get new request
 		 */
-		case ELEVATOR_NO_MERGE:
+		case ELEVATOR_NO_MERGE:/* 未合并，转到get_rq将请求插入。 */
 			break;
 
 		default:
@@ -2442,12 +2605,18 @@ again:
 	 * if we are doing read ahead and abort instead of blocking for
 	 * a free slot.
 	 */
+/**
+ * 需要将请求插入到现有队列。
+ */
 get_rq:
-	if (freereq) {
+	if (freereq) {/* 有可用描述符 */
 		req = freereq;
 		freereq = NULL;
 	} else {
 		spin_unlock_irq(q->queue_lock);
+		/**
+		 * 分配一个新请求
+		 */
 		if ((freereq = get_request(q, rw, GFP_ATOMIC)) == NULL) {
 			/*
 			 * READA bit set
@@ -2455,16 +2624,25 @@ get_rq:
 			err = -EWOULDBLOCK;
 			if (bio_rw_ahead(bio))
 				goto end_io;
-	
+
+			/**
+			 * 不能直接分配一个请求，那么等待内存可用，并分配一个请求描述短信超人 。
+			 */
 			freereq = get_request_wait(q, rw);
 		}
 		goto again;
 	}
 
+	/**
+	 * 一次标准的读或写操作标志
+	 */
 	req->flags |= REQ_CMD;
 
 	/*
 	 * inherit FAILFAST from bio (for read-ahead, and explicit FAILFAST)
+	 */
+	/**
+	 * 是一次预读。如果失败就直接返回不用重试。
 	 */
 	if (bio_rw_ahead(bio) || bio_failfast(bio))
 		req->flags |= REQ_FAILFAST;
@@ -2475,6 +2653,9 @@ get_rq:
 	if (barrier)
 		req->flags |= (REQ_HARDBARRIER | REQ_NOMERGE);
 
+	/**
+	 * 初始化请求描述符中的字段。
+	 */
 	req->errors = 0;
 	req->hard_sector = req->sector = sector;
 	req->hard_nr_sectors = req->nr_sectors = nr_sectors;
@@ -2487,11 +2668,14 @@ get_rq:
 	req->rq_disk = bio->bi_bdev->bd_disk;
 	req->start_time = jiffies;
 
+	/**
+	 * 将bio插入请求链表。
+	 */
 	add_request(q, req);
 out:
-	if (freereq)
+	if (freereq)/* 临时申请了描述符，但是由于当前请求被合并而不需要该描述符，释放它 */
 		__blk_put_request(q, freereq);
-	if (bio_sync(bio))
+	if (bio_sync(bio))/* 如果设置了BIO_RW_SYNC，则调用__generic_unplug_device摘除块设备 */
 		__generic_unplug_device(q);
 
 	spin_unlock_irq(q->queue_lock);
@@ -2509,9 +2693,18 @@ static inline void blk_partition_remap(struct bio *bio)
 {
 	struct block_device *bdev = bio->bi_bdev;
 
+	/**
+	 * 检查一个块设备是否指的是一个磁盘分区（bio->bi_bdev!=bdev->bd_contains）
+	 */
 	if (bdev != bdev->bd_contains) {
+		/**
+		 * 获得分区的hd_struct描述符
+		 */
 		struct hd_struct *p = bdev->bd_part;
 
+		/**
+		 * 更新计数值
+		 */
 		switch (bio->bi_rw) {
 		case READ:
 			p->read_sectors += bio_sectors(bio);
@@ -2522,7 +2715,14 @@ static inline void blk_partition_remap(struct bio *bio)
 			p->writes++;
 			break;
 		}
+		/**
+		 * 调整bi_sector，把相对于分区的起始扇区号转变为相对于整个磁盘的扇区号。
+		 */
 		bio->bi_sector += p->start_sect;
+		/**
+		 * 将bio->bi_bdev设置为整个磁盘的块设备描述符
+		 * 这样，下次就不会再次调整上面的值了
+		 */
 		bio->bi_bdev = bdev->bd_contains;
 	}
 }
@@ -2592,6 +2792,10 @@ void blk_wait_queue_drained(request_queue_t *q, int wait_dispatch)
 /*
  * block waiting for the io scheduler being started again.
  */
+/**
+ * 检查当前正在使用的IO调度程序是否可以被动态取代。
+ * 如果可以，则让当前进程睡眠直到启动一个新的IO调度程序。
+ */
 static inline void block_wait_queue_running(request_queue_t *q)
 {
 	DEFINE_WAIT(wait);
@@ -2651,6 +2855,9 @@ static void handle_bad_sector(struct bio *bio)
  * bi_sector for remaps as it sees fit.  So the values of these fields
  * should NOT be depended on after the call to generic_make_request.
  */
+/**
+ * 通用块层的入口点。
+ */
 void generic_make_request(struct bio *bio)
 {
 	request_queue_t *q;
@@ -2659,17 +2866,23 @@ void generic_make_request(struct bio *bio)
 
 	might_sleep();
 	/* Test device or partition size, when known. */
+	/**
+	 * 计算块设备的最大扇区数。
+	 */
 	maxsector = bio->bi_bdev->bd_inode->i_size >> 9;
 	if (maxsector) {
 		sector_t sector = bio->bi_sector;
 
+		/**
+		 * 请求的起始扇区号大于最大盲区，或者扇区号溢出。
+		 */
 		if (maxsector < nr_sectors || maxsector - nr_sectors < sector) {
 			/*
 			 * This may well happen - the kernel calls bread()
 			 * without checking the size of the device, e.g., when
 			 * mounting a device.
 			 */
-			handle_bad_sector(bio);
+			handle_bad_sector(bio);/* 打印失败信息，并结束本次请求 */
 			goto end_io;
 		}
 	}
@@ -2685,8 +2898,9 @@ void generic_make_request(struct bio *bio)
 	do {
 		char b[BDEVNAME_SIZE];
 
+		/* 获取与块设备相关的请求队列。 */
 		q = bdev_get_queue(bio->bi_bdev);
-		if (!q) {
+		if (!q) {/* 如果为空，说明遇到异常情况 */
 			printk(KERN_ERR
 			       "generic_make_request: Trying to access "
 				"nonexistent block-device %s (%Lu)\n",
@@ -2697,6 +2911,7 @@ end_io:
 			break;
 		}
 
+		/* 请求的扇区数量太大，错误 */
 		if (unlikely(bio_sectors(bio) > q->max_hw_sectors)) {
 			printk("bio too big device %s (%u > %u)\n", 
 				bdevname(bio->bi_bdev, b),
@@ -2708,16 +2923,24 @@ end_io:
 		if (test_bit(QUEUE_FLAG_DEAD, &q->queue_flags))
 			goto end_io;
 
+		/* 等待IO调度就绪。 */
 		block_wait_queue_running(q);
 
 		/*
 		 * If this device has partitions, remap block n
 		 * of partition p to block n+start(p) of the disk.
 		 */
+		/**
+		 * 如果是分区，则将分区的扇区位置转换成设备的扇区位置。并对分区进行一些计数。
+		 */
 		blk_partition_remap(bio);
 
+		/**
+		 * 请BIO请求传递给IO调度层。
+		 * 常见块设备的回调函数是__make_request
+		 */
 		ret = q->make_request_fn(q, bio);
-	} while (ret);
+	} while (ret);/* 如果ret不这0，表示bio已经被修改，需要将请求提交给另外的设备，主要处理栈式块设备 */
 }
 
 EXPORT_SYMBOL(generic_make_request);
@@ -2732,14 +2955,15 @@ EXPORT_SYMBOL(generic_make_request);
  * interfaces, @bio must be presetup and ready for I/O.
  *
  */
+/* 上层向通用块层提交请求的接口函数 */
 void submit_bio(int rw, struct bio *bio)
 {
 	int count = bio_sectors(bio);
 
 	BIO_BUG_ON(!bio->bi_size);
 	BIO_BUG_ON(!bio->bi_io_vec);
-	bio->bi_rw = rw;
-	if (rw & WRITE)
+	bio->bi_rw = rw;/* 记录读写方式 */
+	if (rw & WRITE)/* 统计读写数量 */
 		mod_page_state(pgpgout, count);
 	else
 		mod_page_state(pgpgin, count);
@@ -2753,6 +2977,7 @@ void submit_bio(int rw, struct bio *bio)
 			bdevname(bio->bi_bdev,b));
 	}
 
+	/* 执行真正的工作 */
 	generic_make_request(bio);
 }
 
@@ -2857,19 +3082,26 @@ static int __end_that_request_first(struct request *req, int uptodate,
 	}
 
 	total_bytes = bio_nbytes = 0;
+	/**
+	 * 扫描请求中的BIO结构及每个BIO字段。
+	 */
 	while ((bio = req->bio) != NULL) {
 		int nbytes;
 
-		if (nr_bytes >= bio->bi_size) {
+		if (nr_bytes >= bio->bi_size) {/* 该bio已经全部完成 */
+			/**
+			 * 修改BIO字段，使其指向请求中每一个未完成的BIO字段。
+			 */
 			req->bio = bio->bi_next;
 			nbytes = bio->bi_size;
+			/* 将bio从链表中取出 */
 			bio_endio(bio, nbytes, error);
 			next_idx = 0;
 			bio_nbytes = 0;
-		} else {
+		} else {/* bio还没有完成 */
 			int idx = bio->bi_idx + next_idx;
 
-			if (unlikely(bio->bi_idx >= bio->bi_vcnt)) {
+			if (unlikely(bio->bi_idx >= bio->bi_vcnt)) {/* 为种情况应当是出现了逻辑错误 */
 				blk_dump_rq_flags(req, "__end_that");
 				printk("%s: bio idx %d >= vcnt %d\n",
 						__FUNCTION__,
@@ -2883,7 +3115,7 @@ static int __end_that_request_first(struct request *req, int uptodate,
 			/*
 			 * not a complete bvec done
 			 */
-			if (unlikely(nbytes > nr_bytes)) {
+			if (unlikely(nbytes > nr_bytes)) {/* 当前bio的当前段还没有完成 */
 				bio_nbytes += nr_bytes;
 				total_bytes += nr_bytes;
 				break;
@@ -2903,7 +3135,7 @@ static int __end_that_request_first(struct request *req, int uptodate,
 			/*
 			 * end more in this run, or just return 'not-done'
 			 */
-			if (unlikely(nr_bytes <= 0))
+			if (unlikely(nr_bytes <= 0))/* 本次处理完所有接收到的字节，退出 */
 				break;
 		}
 	}
@@ -2911,21 +3143,36 @@ static int __end_that_request_first(struct request *req, int uptodate,
 	/*
 	 * completely done
 	 */
+	/**
+	 * 数据已经传送完，返回0
+	 */
 	if (!req->bio)
 		return 0;
 
 	/*
 	 * if the request wasn't completed, update state
 	 */
-	if (bio_nbytes) {
+	if (bio_nbytes) {/* 当前bio还没有完成 */
+		/**
+		 * 在已经完成数据传送的BIO结构上调用bio_endio函数。
+		 */
 		bio_endio(bio, bio_nbytes, error);
+		/**
+		 * 修改未完成BIO结构的bi_idx字段，使其指向第一个未完成的段。
+		 */
 		bio->bi_idx += next_idx;
+		/**
+		 * 修改未完成段的bv_offset和bv_len两个字段，使其指向仍需传递的数据。
+		 */
 		bio_iovec(bio)->bv_offset += nr_bytes;
 		bio_iovec(bio)->bv_len -= nr_bytes;
 	}
 
 	blk_recalc_rq_sectors(req, total_bytes >> 9);
 	blk_recalc_rq_segments(req);
+	/**
+	 * 数据还没有传送完，返回1。
+	 */
 	return 1;
 }
 
@@ -2943,8 +3190,19 @@ static int __end_that_request_first(struct request *req, int uptodate,
  *     0 - we are done with this request, call end_that_request_last()
  *     1 - still buffers pending for this request
  **/
+/**
+ * end_that_request_first用于块设备驱动的中断处理程序。当设备完成一个IO请求的部分或者全部扇区时，调用此函数通知块设备子系统。
+ * nr_sectors：DMA传送的扇区数
+ * uptodate：传送成功的标志
+ */
 int end_that_request_first(struct request *req, int uptodate, int nr_sectors)
 {
+	/**
+	 * 修改bio字段使其指向请求中的第一个未完成的bio结构。
+	 * 修改未完成bio结构的bi_idx字段，使其指向第一个未完成的段。
+	 * 修改未完成段的bv_offset和bv_len字段使其指向仍需传送的数据。
+	 * 同时在每个完成传送的bio结构上调用bio_endio函数。
+	 */
 	return __end_that_request_first(req, uptodate, nr_sectors << 9);
 }
 
@@ -2965,6 +3223,9 @@ EXPORT_SYMBOL(end_that_request_first);
  *     0 - we are done with this request, call end_that_request_last()
  *     1 - still buffers pending for this request
  **/
+/**
+ * 与end_that_request_first相似，不过参数是字节数而不是扇区数
+ */
 int end_that_request_chunk(struct request *req, int uptodate, int nr_bytes)
 {
 	return __end_that_request_first(req, uptodate, nr_bytes);
@@ -2974,6 +3235,11 @@ EXPORT_SYMBOL(end_that_request_chunk);
 
 /*
  * queue lock must be held
+ */
+/**
+ * 更新一些磁盘使用计数。把请求描述符从IO调用程序rq->elevator的调度队列中删除。
+ * 唤醒等待请求描述符完成的任何进程，并释放删除的那个描述符。
+ * 当一个完整的请求完成时回调
  */
 void end_that_request_last(struct request *req)
 {

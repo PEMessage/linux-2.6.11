@@ -384,6 +384,10 @@ pci_populate_driver_dir(struct pci_driver *drv)
  * If no error occured, the driver remains registered even if 
  * no device was claimed during registration.
  */
+/**
+ * 注册一个PCI设备驱动。
+ * 如果成功返回0，否则返回一个负值表示错误。
+ */
 int pci_register_driver(struct pci_driver *drv)
 {
 	int error;
@@ -416,6 +420,9 @@ int pci_register_driver(struct pci_driver *drv)
  * driverless.
  */
 
+/**
+ * 卸载PCI设备驱动。
+ */
 void
 pci_unregister_driver(struct pci_driver *drv)
 {
@@ -456,6 +463,10 @@ pci_dev_driver(const struct pci_dev *dev)
  * Used by a driver to check whether a PCI device present in the
  * system is in its list of supported devices.Returns the matching
  * pci_device_id structure or %NULL if there is no match.
+ */
+/**
+ * 确定一个设备是否可以由某个驱动处理。
+ * 如果匹配成功，则返回1.
  */
 static int pci_bus_match(struct device * dev, struct device_driver * drv) 
 {
@@ -514,6 +525,9 @@ int pci_hotplug (struct device *dev, char **envp, int num_envp,
 }
 #endif
 
+/**
+ * PCI子系统装载到内核中时，通过bus_register将该变量向驱动程序核注册。
+ */
 struct bus_type pci_bus_type = {
 	.name		= "pci",
 	.match		= pci_bus_match,
@@ -523,6 +537,10 @@ struct bus_type pci_bus_type = {
 	.dev_attrs	= pci_dev_attrs,
 };
 
+/**
+ * PCI子系统第二个执行的初始化函数。将在/sys/bus/目录下建立一个pci目录。
+ * 新注册的PCI设备调用device_register函数注册一个新的PCI设备时，将在/sys/bus/pci/drivers目录下创建设备的目录。
+ */
 static int __init pci_driver_init(void)
 {
 	return bus_register(&pci_bus_type);

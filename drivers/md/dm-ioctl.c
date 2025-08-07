@@ -24,13 +24,18 @@
  * The ioctl interface needs to be able to look up devices by
  * name or uuid.
  *---------------------------------------------------------------*/
+/* 用于mapped_device的名称、UUID映射，与映射设备是一一对应的 */
 struct hash_cell {
+	/* 链接到名称、UUID哈希表的桶中 */
 	struct list_head name_list;
 	struct list_head uuid_list;
 
+	/* 创建设备时指定的名称和UUID */
 	char *name;
 	char *uuid;
+	/* 关联的映射设备指针 */
 	struct mapped_device *md;
+	/* 映射表指针，代表了非活动的映射表 */
 	struct dm_table *new_map;
 };
 
@@ -553,23 +558,25 @@ static int __dev_status(struct mapped_device *md, struct dm_ioctl *param)
 	return 0;
 }
 
+/* 创建DM设备 */
 static int dev_create(struct dm_ioctl *param, size_t param_size)
 {
 	int r;
 	struct mapped_device *md;
 
-	r = check_name(param->name);
+	r = check_name(param->name);/* 检测设备名称是否重复 */
 	if (r)
 		return r;
 
-	if (param->flags & DM_PERSISTENT_DEV_FLAG)
+	if (param->flags & DM_PERSISTENT_DEV_FLAG)/* 如果用户态指定了设备编号，则按编号进行设备创建 */
 		r = dm_create_with_minor(MINOR(huge_decode_dev(param->dev)), &md);
 	else
-		r = dm_create(&md);
+		r = dm_create(&md);/* 否则由系统选择设备编号 */
 
 	if (r)
 		return r;
 
+	/* 为映射设备创建hash_cell描述符，并将它加入名称、uuid哈希表 */
 	r = dm_hash_insert(param->name, *param->uuid ? param->uuid : NULL, md);
 	if (r) {
 		dm_put(md);
@@ -578,6 +585,7 @@ static int dev_create(struct dm_ioctl *param, size_t param_size)
 
 	param->flags &= ~DM_INACTIVE_PRESENT_FLAG;
 
+	/* 向用户态参数中填充状态信息 */
 	r = __dev_status(md, param);
 	dm_put(md);
 
@@ -698,6 +706,7 @@ static int do_suspend(struct dm_ioctl *param)
 	return r;
 }
 
+/* 恢复映射设备 */
 static int do_resume(struct dm_ioctl *param)
 {
 	int r = 0;
@@ -707,6 +716,7 @@ static int do_resume(struct dm_ioctl *param)
 
 	down_write(&_hash_lock);
 
+	/* 通过名称或者UUID查找映射设备 */
 	hc = __find_device_hash_cell(param);
 	if (!hc) {
 		DMWARN("device doesn't appear to be in the dev hash table.");
@@ -714,28 +724,32 @@ static int do_resume(struct dm_ioctl *param)
 		return -ENXIO;
 	}
 
+	/* 获得对应的映射设备和映射表 */
 	md = hc->md;
 	dm_get(md);
 
 	new_map = hc->new_map;
+	/* 主队映射表，因为要将不活动的映射转移到活动映射表中 */
 	hc->new_map = NULL;
 	param->flags &= ~DM_INACTIVE_PRESENT_FLAG;
 
 	up_write(&_hash_lock);
 
 	/* Do we need to load a new map ? */
-	if (new_map) {
+	if (new_map) {/* 存在映射表 */
 		/* Suspend if it isn't already suspended */
-		if (!dm_suspended(md))
+		if (!dm_suspended(md))/* 如果现有的映射表没有被挂起，则挂起它 */
 			dm_suspend(md);
 
+		/* 将不活动映射表替换掉现有的映射表，并返回原映射表 */
 		r = dm_swap_table(md, new_map);
-		if (r) {
+		if (r) {/* 如果原映射表存在，则释放它 */
 			dm_put(md);
 			dm_table_put(new_map);
 			return r;
 		}
 
+		/* 根据映射表的访问模式，设备磁盘的读写标志 */
 		if (dm_table_get_mode(new_map) & FMODE_WRITE)
 			set_disk_ro(dm_disk(md), 0);
 		else
@@ -744,10 +758,10 @@ static int do_resume(struct dm_ioctl *param)
 		dm_table_put(new_map);
 	}
 
-	if (dm_suspended(md))
+	if (dm_suspended(md))/* 如果目前的映射设备是挂起状态，则恢复它 */
 		r = dm_resume(md);
 
-	if (!r)
+	if (!r)/* 向用户态返回当前的映射设备状态 */
 		r = __dev_status(md, param);
 
 	dm_put(md);
@@ -924,19 +938,23 @@ static int populate_table(struct dm_table *table,
 	void *end = (void *) param + param_size;
 	char *target_params;
 
+	/* 传入的目标数为0，错误 */
 	if (!param->target_count) {
 		DMWARN("populate_table: no targets specified");
 		return -EINVAL;
 	}
 
+	/* 循环处理传入的每个规则 */
 	for (i = 0; i < param->target_count; i++) {
 
+		/* 解析映射目标规则 */
 		r = next_target(spec, next, end, &spec, &target_params);
 		if (r) {
 			DMWARN("unable to find target");
 			return r;
 		}
 
+		/* 将规则添加到规则表 */
 		r = dm_table_add_target(table, spec->target_type,
 					(sector_t) spec->sector_start,
 					(sector_t) spec->length,
@@ -949,26 +967,31 @@ static int populate_table(struct dm_table *table,
 		next = spec->next;
 	}
 
+	/* 构建btree，以便对映射表进行索引 */
 	return dm_table_complete(table);
 }
 
+/* 加载MD设备的映射表 */
 static int table_load(struct dm_ioctl *param, size_t param_size)
 {
 	int r;
 	struct hash_cell *hc;
 	struct dm_table *t;
 
+	/* 分配设备映射表描述符，并将映射表与映射设备关联 */
 	r = dm_table_create(&t, get_mode(param), param->target_count);
 	if (r)
 		return r;
 
+	/* 解析映射规则，填充到映射表描述符中。 */
 	r = populate_table(t, param, param_size);
-	if (r) {
+	if (r) {/* 如果失败则释放映射表描述符 */
 		dm_table_put(t);
 		return r;
 	}
 
 	down_write(&_hash_lock);
+	/* 根据名称和UUID查找设备，如果不存在，退出 */
 	hc = __find_device_hash_cell(param);
 	if (!hc) {
 		DMWARN("device doesn't appear to be in the dev hash table.");
@@ -976,11 +999,13 @@ static int table_load(struct dm_ioctl *param, size_t param_size)
 		return -ENXIO;
 	}
 
-	if (hc->new_map)
+	if (hc->new_map)/* 如果映射表已经存在，则释放原映射表 */
 		dm_table_put(hc->new_map);
+	/* 将映射表与hash_cell关联 */
 	hc->new_map = t;
 	param->flags |= DM_INACTIVE_PRESENT_FLAG;
 
+	/* 获得设备的状态并向用户态返回 */
 	r = __dev_status(hc->md, param);
 	up_write(&_hash_lock);
 	return r;

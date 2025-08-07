@@ -39,9 +39,13 @@ static inline void wake(void)
 struct kcopyd_client {
 	struct list_head list;
 
+	/* 保护页面分配的锁 */
 	spinlock_t lock;
+	/* 客户端空闲页面列表 */
 	struct page_list *pages;
+	/* 客户端拥有的页面数 */
 	unsigned int nr_pages;
+	/* 剩余空闲页面数 */
 	unsigned int nr_free_pages;
 };
 
@@ -154,45 +158,55 @@ static void client_free_pages(struct kcopyd_client *kc)
  * ever having to do io (which could cause a deadlock).
  *---------------------------------------------------------------*/
 struct kcopyd_job {
+	/* 所属的kcopyd客户端 */
 	struct kcopyd_client *kc;
+	/* 链接到客户端描述符的链表 */
 	struct list_head list;
+	/* 任务标志，如是否忽略读写错误 */
 	unsigned long flags;
 
 	/*
 	 * Error state of the job.
 	 */
-	int read_err;
-	unsigned int write_err;
+	int read_err;/* 如果非0，表示发生了读取错误 */
+	unsigned int write_err;/* 如果非0，表示发生了写入错误 */
 
 	/*
 	 * Either READ or WRITE
 	 */
-	int rw;
+	int rw;/* 当前任务的IO方向，读或写 */
 	struct io_region source;
 
 	/*
 	 * The destinations for the transfer.
 	 */
+	/* 目标数目 */
 	unsigned int num_dests;
+	/* 目标 */
 	struct io_region dests[KCOPYD_MAX_REGIONS];
 
+	/* 扇区偏移 */
 	sector_t offset;
+	/* 处理该任务需要分配的页面数 */
 	unsigned int nr_pages;
+	/* 分配给该任务的页面链表 */
 	struct page_list *pages;
 
 	/*
 	 * Set this to ensure you are notified when the job has
 	 * completed.  'context' is for callback to use.
 	 */
-	kcopyd_notify_fn fn;
-	void *context;
+	kcopyd_notify_fn fn;/* 完成时的回调函数 */
+	void *context;/* 传递给回调函数的参数 */
 
 	/*
 	 * These fields are only used if the job has been split
 	 * into more manageable parts.
 	 */
-	struct semaphore lock;
+	struct semaphore lock;/* 当前任务必须分为多个子任务时，使用的互斥量 */
+	/* 子任务数 */
 	atomic_t sub_jobs;
+	/* 任务执行的进度 */
 	sector_t progress;
 };
 
@@ -293,34 +307,35 @@ static int run_complete_job(struct kcopyd_job *job)
 	unsigned int write_err = job->write_err;
 	kcopyd_notify_fn fn = job->fn;
 
-	kcopyd_put_pages(job->kc, job->pages);
-	mempool_free(job, _job_pool);
-	fn(read_err, write_err, context);
+	kcopyd_put_pages(job->kc, job->pages);/* 释放任务占用的页面 */
+	mempool_free(job, _job_pool);/* 将任务放回内存池 */
+	fn(read_err, write_err, context);/* 调用任务完成回调 */
 	return 0;
 }
 
+/* IO完成后的回调函数 */
 static void complete_io(unsigned long error, void *context)
 {
 	struct kcopyd_job *job = (struct kcopyd_job *) context;
 
-	if (error) {
-		if (job->rw == WRITE)
+	if (error) {/* 发生了IO错误 */
+		if (job->rw == WRITE)/* 记录下读写错误 */
 			job->write_err &= error;
 		else
 			job->read_err = 1;
 
-		if (!test_bit(KCOPYD_IGNORE_ERROR, &job->flags)) {
-			push(&_complete_jobs, job);
+		if (!test_bit(KCOPYD_IGNORE_ERROR, &job->flags)) {/* 上层要求不能忽略读写错误 */
+			push(&_complete_jobs, job);/* 将它放到完成队列中 */
 			wake();
 			return;
 		}
 	}
 
-	if (job->rw == WRITE)
-		push(&_complete_jobs, job);
+	if (job->rw == WRITE)/* 完成写 */
+		push(&_complete_jobs, job);/* 将其放入完成队列 */
 
 	else {
-		job->rw = WRITE;
+		job->rw = WRITE;/* 改变读写方向，并将其放入IO队列 */
 		push(&_io_jobs, job);
 	}
 
@@ -335,12 +350,12 @@ static int run_io_job(struct kcopyd_job *job)
 {
 	int r;
 
-	if (job->rw == READ)
+	if (job->rw == READ)/* 从复制源读取数据 */
 		r = dm_io_async(1, &job->source, job->rw,
 				job->pages,
 				job->offset, complete_io, job);
 
-	else
+	else/* 向目标写入数据 */
 		r = dm_io_async(job->num_dests, job->dests, job->rw,
 				job->pages,
 				job->offset, complete_io, job);
@@ -352,16 +367,18 @@ static int run_pages_job(struct kcopyd_job *job)
 {
 	int r;
 
+	/* 计算复制任务需要的页面数 */
 	job->nr_pages = dm_div_up(job->dests[0].count + job->offset,
 				  PAGE_SIZE >> 9);
+	/* 分配所需要的页面 */
 	r = kcopyd_get_pages(job->kc, job->nr_pages, &job->pages);
-	if (!r) {
+	if (!r) {/* 分配成功，将任务放到读写队列并返回0 */
 		/* this job is ready for io */
 		push(&_io_jobs, job);
 		return 0;
 	}
 
-	if (r == -ENOMEM)
+	if (r == -ENOMEM)/* 没有内存了，返回1，稍后再说 */
 		/* can't complete now */
 		return 1;
 
@@ -377,30 +394,31 @@ static int process_jobs(struct list_head *jobs, int (*fn) (struct kcopyd_job *))
 	struct kcopyd_job *job;
 	int r, count = 0;
 
-	while ((job = pop(jobs))) {
+	while ((job = pop(jobs))) {/* 从队列中取出任务 */
 
-		r = fn(job);
+		r = fn(job);/* 调用回调函数处理该任务 */
 
-		if (r < 0) {
+		if (r < 0) {/* 出现错误 */
 			/* error this rogue job */
-			if (job->rw == WRITE)
+			if (job->rw == WRITE)/* 记录错误 */
 				job->write_err = (unsigned int) -1;
 			else
 				job->read_err = 1;
+			/* 任务已经无法继续进行，将其放回完成队列 */
 			push(&_complete_jobs, job);
 			break;
 		}
 
-		if (r > 0) {
+		if (r > 0) {/* 当前不能处理，今后可能能够继续 */
 			/*
 			 * We couldn't service this job ATM, so
 			 * push this job back onto the list.
 			 */
-			push(jobs, job);
+			push(jobs, job);/* 将任务放回队列头部 */
 			break;
 		}
 
-		count++;
+		count++;/* 任务完成，递增计数并处理下一个任务 */
 	}
 
 	return count;
@@ -409,6 +427,7 @@ static int process_jobs(struct list_head *jobs, int (*fn) (struct kcopyd_job *))
 /*
  * kcopyd does this every time it's woken up.
  */
+/* dm复制线程的主工作函数 */
 static void do_work(void *ignored)
 {
 	/*
@@ -418,8 +437,11 @@ static void do_work(void *ignored)
 	 * list.  io jobs call wake when they complete and it all
 	 * starts again.
 	 */
+	/* 先处理已经完成的任务队列，这样可以释放更多的页面 */
 	process_jobs(&_complete_jobs, run_complete_job);
+	/* 处理等待分配页面的队列 */
 	process_jobs(&_pages_jobs, run_pages_job);
+	/* 处理读写队列 */
 	process_jobs(&_io_jobs, run_io_job);
 }
 
@@ -430,8 +452,8 @@ static void do_work(void *ignored)
  */
 static void dispatch_job(struct kcopyd_job *job)
 {
-	push(&_pages_jobs, job);
-	wake();
+	push(&_pages_jobs, job);/* 将任务放到待分配页面队列 */
+	wake();/* 唤醒工作队列处理任务 */
 }
 
 #define SUB_JOB_SIZE 128
@@ -513,6 +535,7 @@ static void split_job(struct kcopyd_job *job)
 		segment_complete(0, 0u, job);
 }
 
+/* 向kcopyd提交一个复制任务 */
 int kcopyd_copy(struct kcopyd_client *kc, struct io_region *from,
 		unsigned int num_dests, struct io_region *dests,
 		unsigned int flags, kcopyd_notify_fn fn, void *context)
@@ -522,12 +545,12 @@ int kcopyd_copy(struct kcopyd_client *kc, struct io_region *from,
 	/*
 	 * Allocate a new job.
 	 */
-	job = mempool_alloc(_job_pool, GFP_NOIO);
+	job = mempool_alloc(_job_pool, GFP_NOIO);/* 从内存池中分配任务结构 */
 
 	/*
 	 * set up for the read.
 	 */
-	job->kc = kc;
+	job->kc = kc;/* 构造一个任务 */
 	job->flags = flags;
 	job->read_err = 0;
 	job->write_err = 0;
@@ -545,10 +568,10 @@ int kcopyd_copy(struct kcopyd_client *kc, struct io_region *from,
 	job->fn = fn;
 	job->context = context;
 
-	if (job->source.count < SUB_JOB_SIZE)
-		dispatch_job(job);
+	if (job->source.count < SUB_JOB_SIZE)/* 不必分解为子任务 */
+		dispatch_job(job);/* 分发任务 */
 
-	else {
+	else {/* 需要分解任务 */
 		init_MUTEX(&job->lock);
 		job->progress = 0;
 		split_job(job);
@@ -634,6 +657,7 @@ static void kcopyd_exit(void)
 	up(&kcopyd_init_lock);
 }
 
+/* 分配kcopyd客户端结构 */
 int kcopyd_client_create(unsigned int nr_pages, struct kcopyd_client **result)
 {
 	int r = 0;
@@ -672,6 +696,7 @@ int kcopyd_client_create(unsigned int nr_pages, struct kcopyd_client **result)
 	return 0;
 }
 
+/* 释放kcopyd客户端结构 */
 void kcopyd_client_destroy(struct kcopyd_client *kc)
 {
 	dm_io_put(kc->nr_pages);

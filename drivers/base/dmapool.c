@@ -101,6 +101,14 @@ static DEVICE_ATTR (pools, S_IRUGO, show_pools, NULL);
  * addressing restrictions on individual DMA transfers, such as not crossing
  * boundaries of 4KBytes.
  */
+/**
+ * 创建DMA内存分配池。
+ *		name:		DMA池的名字。
+ *		dev:		设备对象。
+ *		size:		池中分配的缓冲区的大小。
+ *		align:		硬件对齐(以字节表示)。
+ *		allocation:	如果allocation不为0，表示内存边界不能超越allocation。比如传入allocation是4096，表示该池中分配的缓冲区不能跨越4KB边界。
+ */
 struct dma_pool *
 dma_pool_create (const char *name, struct device *dev,
 	size_t size, size_t align, size_t allocation)
@@ -220,6 +228,9 @@ pool_free_page (struct dma_pool *pool, struct dma_page *page)
  * Caller guarantees that no more memory from the pool is in use,
  * and that nothing will try to use the pool after this call.
  */
+/**
+ * 释放DMA内存分配池。
+ */
 void
 dma_pool_destroy (struct dma_pool *pool)
 {
@@ -260,6 +271,12 @@ dma_pool_destroy (struct dma_pool *pool)
  * This returns the kernel virtual address of a currently unused block,
  * and reports its dma address through the handle.
  * If such a memory block can't be allocated, null is returned.
+ */
+/**
+ * 从DMA池中分配内存。
+ * 		mem_flags:		是内存分配标志。
+ * 		handle:			分配的DMA地址。
+ * 返回值是内存的内核虚拟地址。
  */
 void *
 dma_pool_alloc (struct dma_pool *pool, int mem_flags, dma_addr_t *handle)
@@ -349,6 +366,9 @@ done:
  *
  * Caller promises neither device nor driver will again touch this block
  * unless it is first re-allocated.
+ */
+/**
+ * 释放DMA内存。
  */
 void
 dma_pool_free (struct dma_pool *pool, void *vaddr, dma_addr_t dma)

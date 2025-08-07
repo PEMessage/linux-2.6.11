@@ -388,6 +388,11 @@ out:
  *	should be distinctive enough not to be confused with any other
  *	firmware image for this or any other device.
  **/
+/**
+ * 从用户空间为内核定位并提供一个固件映像文件。
+ *		name:			需要的固件。通常是供应商提供的固件文件名称。
+ *		firmware_p:		包含了实际的固件。请注意在将映像传递给硬件前，对它进行检查。
+ */
 int
 request_firmware(const struct firmware **firmware_p, const char *name,
 		 struct device *device)
@@ -447,6 +452,9 @@ out:
 /**
  * release_firmware: - release the resource associated with a firmware image
  **/
+/**
+ * 释放保存固件的内核对象。
+ */
 void
 release_firmware(const struct firmware *fw)
 {
@@ -515,6 +523,10 @@ request_firmware_work_func(void *arg)
  *	@fw may be %NULL if firmware request fails.
  *
  **/
+/**
+ * 与request_firmware类似，但是它并不等待用户空间完成固件加载操作。
+ * 当加载完成后，回调cont通知加载结果。
+ */
 int
 request_firmware_nowait(
 	struct module *module,

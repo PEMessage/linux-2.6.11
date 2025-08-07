@@ -476,6 +476,9 @@ void pci_remove_sysfs_dev_files(struct pci_dev *pdev)
 	}
 }
 
+/**
+ * 与sysfs文件系统相关，主要功能是将每一个PCI设备加入到sysfs文件系统的相应目录中。
+ */
 static int __init pci_sysfs_init(void)
 {
 	struct pci_dev *pdev = NULL;

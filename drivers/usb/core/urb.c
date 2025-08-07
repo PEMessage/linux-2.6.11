@@ -60,6 +60,12 @@ void usb_init_urb(struct urb *urb)
  *
  * The driver must call usb_free_urb() when it is finished with the urb.
  */
+/**
+ * 创建urb。
+ * 不能使用静态变量，这样会破坏USB核心对urb所使用的计数。
+ *		iso_packets:		等时数据包的数量。如果不创建等时urb，则此值为0。
+ *		mem_flag:			分配内存时使用的标志。
+ */
 struct urb *usb_alloc_urb(int iso_packets, int mem_flags)
 {
 	struct urb *urb;
@@ -84,6 +90,9 @@ struct urb *usb_alloc_urb(int iso_packets, int mem_flags)
  *
  * Note: The transfer buffer associated with the urb is not freed, that must be
  * done elsewhere.
+ */
+/**
+ * 销毁urb。
  */
 void usb_free_urb(struct urb *urb)
 {
@@ -223,6 +232,11 @@ struct urb * usb_get_urb(struct urb *urb)
  *  (6) changing firmware on a running storage or net device uses
  *      GFP_NOIO, unless b) or c) apply
  *
+ */
+/**
+ * 提交urb到USB核心。将其发送到USB设备。
+ *		urb:		即将被提交的urb指针。
+ *		mem_flags:	告诉USB核心如何在此时及时地分配内存缓冲区。
  */
 int usb_submit_urb(struct urb *urb, int mem_flags)
 {
@@ -445,6 +459,10 @@ int usb_submit_urb(struct urb *urb, int mem_flags)
  * status stage of the transfer will not take place, even if it is merely
  * a soft error resulting from a short-packet with URB_SHORT_NOT_OK set.
  */
+/**
+ * 终止一个urb，但是并不等到urb完全被终止之后才返回到调用函数。
+ * 在中断函数或者持有一个urb时有用。因为等待一个urb完全被终止需要进行睡眠。
+ */
 int usb_unlink_urb(struct urb *urb)
 {
 	if (!urb)
@@ -484,6 +502,9 @@ int usb_unlink_urb(struct urb *urb)
  * This routine may not be used in an interrupt context (such as a bottom
  * half or a completion handler), or when holding a spinlock, or in other
  * situations where the caller can't schedule().
+ */
+/**
+ * 终止一个已经被提交到USB核心的urb。该urb的生命周期被终止。通常是当设备从系统中被断开时，在断开回调函数中调用该函数。
  */
 void usb_kill_urb(struct urb *urb)
 {

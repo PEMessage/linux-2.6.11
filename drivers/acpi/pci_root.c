@@ -149,6 +149,9 @@ try_get_root_bridge_busnr(acpi_handle handle, int *busnum)
 	return AE_OK;
 }
 
+/**
+ * 扫描ACPI PCI总线树。
+ */
 static int
 acpi_pci_root_add (
 	struct acpi_device	*device)
@@ -165,6 +168,9 @@ acpi_pci_root_add (
 	if (!device)
 		return_VALUE(-EINVAL);
 
+	/**
+	 * 分配一个acpi_pci_root结构。
+	 */
 	root = kmalloc(sizeof(struct acpi_pci_root), GFP_KERNEL);
 	if (!root)
 		return_VALUE(-ENOMEM);
@@ -256,6 +262,10 @@ acpi_pci_root_add (
 	 */
 
  	/* TBD: Locking */
+	/**
+	 * 将acpi_pci_root结构加到acpi_pci_roots队列中。
+	 * acpi_pci_roots包含了所有acpi_pci主桥。对多数x86体系结构中，只有一个主桥。
+	 */
  	list_add_tail(&root->node, &acpi_pci_roots);
 
 	printk(KERN_INFO PREFIX "%s [%s] (%02x:%02x)\n", 
@@ -268,6 +278,9 @@ acpi_pci_root_add (
 	 * Must do this prior to any attempt to bind the root device, as the
 	 * PCI namespace does not get created until this call is made (and 
 	 * thus the root bridge's pci_dev does not exist).
+	 */
+	/**
+	 * 使能ACPI后，调用pci_acpi_scan_root完成PCI设备的枚举。否则使用pcibios_scan_root。
 	 */
 	root->bus = pci_acpi_scan_root(device, root->id.segment, root->id.bus);
 	if (!root->bus) {
@@ -283,6 +296,9 @@ acpi_pci_root_add (
 	 * -----------------------
 	 * Thus binding the ACPI and PCI devices.
 	 */
+	/**
+	 * 绑定acpi_device与pci_bus结构。
+	 */
 	result = acpi_pci_bind_root(device, &root->id, root->bus);
 	if (result)
 		goto end;
@@ -294,6 +310,9 @@ acpi_pci_root_add (
 	 */
 	status = acpi_get_handle(root->handle, METHOD_NAME__PRT, &handle);
 	if (ACPI_SUCCESS(status))
+		/**
+		 * 分析当前处理器系统的中断路由表。
+		 */
 		result = acpi_pci_irq_add_prt(root->handle, root->id.segment,
 			root->id.bus);
 
@@ -337,6 +356,10 @@ static int __init acpi_pci_root_init (void)
 	acpi_dbg_level = 0xFFFFFFFF;
 	 */
 
+	/**
+	 * acpi_bus_register_driver注册ACPI驱动。
+	 * 这最终导致acpi_pci_root_add函数被调用。
+	 */
 	if (acpi_bus_register_driver(&acpi_pci_root_driver) < 0)
 		return_VALUE(-ENODEV);
 

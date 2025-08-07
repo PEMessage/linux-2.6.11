@@ -119,13 +119,13 @@ static int linear_run (mddev_t *mddev)
 	sector_t start;
 	sector_t curr_offset;
 	struct list_head *tmp;
-
+	/* 分配线性RAID数据结构 */
 	conf = kmalloc (sizeof (*conf) + mddev->raid_disks*sizeof(dev_info_t),
 			GFP_KERNEL);
 	if (!conf)
 		goto out;
 	memset(conf, 0, sizeof(*conf) + mddev->raid_disks*sizeof(dev_info_t));
-	mddev->private = conf;
+	mddev->private = conf;/* 将它与RAID设备关联 */
 
 	/*
 	 * Find the smallest device.
@@ -233,12 +233,14 @@ static int linear_stop (mddev_t *mddev)
 	return 0;
 }
 
+/* 提交线性RAID的IO请求 */
 static int linear_make_request (request_queue_t *q, struct bio *bio)
 {
 	mddev_t *mddev = q->queuedata;
 	dev_info_t *tmp_dev;
 	sector_t block;
 
+	/* 统计计数 */
 	if (bio_data_dir(bio)==WRITE) {
 		disk_stat_inc(mddev->gendisk, writes);
 		disk_stat_add(mddev->gendisk, write_sectors, bio_sectors(bio));
@@ -247,10 +249,11 @@ static int linear_make_request (request_queue_t *q, struct bio *bio)
 		disk_stat_add(mddev->gendisk, read_sectors, bio_sectors(bio));
 	}
 
+	/* 通过二分法查找给定请求所在的成员磁盘 */
 	tmp_dev = which_dev(mddev, bio->bi_sector);
 	block = bio->bi_sector >> 1;
     
-	if (unlikely(block >= (tmp_dev->size + tmp_dev->offset)
+	if (unlikely(block >= (tmp_dev->size + tmp_dev->offset)/* 要访问的扇区编号落在成员磁盘的范围之外 */
 		     || block < tmp_dev->offset)) {
 		char b[BDEVNAME_SIZE];
 
@@ -260,26 +263,29 @@ static int linear_make_request (request_queue_t *q, struct bio *bio)
 			bdevname(tmp_dev->rdev->bdev, b),
 			(unsigned long long)tmp_dev->size,
 		        (unsigned long long)tmp_dev->offset);
+		/* 向上层返回失败，并返回0表示处理完毕 */
 		bio_io_error(bio, bio->bi_size);
 		return 0;
 	}
 	if (unlikely(bio->bi_sector + (bio->bi_size >> 9) >
-		     (tmp_dev->offset + tmp_dev->size)<<1)) {
+		     (tmp_dev->offset + tmp_dev->size)<<1)) {/* 请求跨越了两个成员磁盘 */
 		/* This bio crosses a device boundary, so we have to
 		 * split it.
 		 */
 		struct bio_pair *bp;
+		/* 将请求分裂成两个BIO请求 */
 		bp = bio_split(bio, bio_split_pool, 
 			       (bio->bi_sector + (bio->bi_size >> 9) -
 				(tmp_dev->offset + tmp_dev->size))<<1);
-		if (linear_make_request(q, &bp->bio1))
+		if (linear_make_request(q, &bp->bio1))/* 如果返回0表示已经处理完毕，否则调用generic_make_request处理 */
 			generic_make_request(&bp->bio1);
-		if (linear_make_request(q, &bp->bio2))
+		if (linear_make_request(q, &bp->bio2))/* 以同样的方法处理第二个BIO请求 */
 			generic_make_request(&bp->bio2);
 		bio_pair_release(bp);
 		return 0;
 	}
-		    
+
+	/* 运行到这里，说明请求处于磁盘之内，修改目标设备及扇区号，并返回1请求上层继续处理 */
 	bio->bi_bdev = tmp_dev->rdev->bdev;
 	bio->bi_sector = bio->bi_sector - (tmp_dev->offset << 1) + tmp_dev->rdev->data_offset;
 

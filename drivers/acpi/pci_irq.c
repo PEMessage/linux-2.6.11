@@ -294,8 +294,11 @@ acpi_pci_irq_lookup (
 		"Searching for PRT entry for %02x:%02x:%02x[%c]\n", 
 		segment, bus_nr, device, ('A' + pin)));
 
+	/**
+	 * 从prt链表中找到PCI设备的中断路由。
+	 */
 	entry = acpi_pci_irq_find_prt_entry(segment, bus_nr, device, pin); 
-	if (!entry) {
+	if (!entry) {/* 如果为空，说明使用IO APIC管理外部中断，而不是8259A。 */
 		ACPI_DEBUG_PRINT((ACPI_DB_INFO, "PRT entry not found\n"));
 		return_VALUE(-1);
 	}
@@ -411,6 +414,10 @@ acpi_pci_irq_enable (
 	 * First we check the PCI IRQ routing table (PRT) for an IRQ.  PRT
 	 * values override any BIOS-assigned IRQs set during boot.
 	 */
+	/**
+	 * 从acpi_prt_list中找到一个acpi_ptr_entry。该链表存放PCI总线的中断路由表。
+	 * 这个entry中，存放了PCI设备使用的segment、bus、device和function号。
+	 */
  	irq = acpi_pci_irq_lookup(dev->bus, PCI_SLOT(dev->devfn), pin, &edge_level, &active_high_low);
 
 	/*
@@ -441,6 +448,10 @@ acpi_pci_irq_enable (
 	if (via_interrupt_line_quirk)
 		pci_write_config_byte(dev, PCI_INTERRUPT_LINE, irq & 15);
 
+	/**
+	 * acpi_register_gsi将GSI号转换为系统软件使用的IRQ号。
+	 * 该函数同时还会建立GSI号与REDIR_TBL表中的中断向量之间的对应关系。
+	 */
 	dev->irq = acpi_register_gsi(irq, edge_level, active_high_low);
 
 	printk(KERN_INFO PREFIX "PCI interrupt %s[%c] -> GSI %u "

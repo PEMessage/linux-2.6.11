@@ -404,6 +404,9 @@ acpi_ev_gpe_detect (
 
 	/* Examine all GPE blocks attached to this interrupt level */
 
+	/**
+	 * acpi_gbl_gpe_lock由ACPI代码与OS共享。
+	 */
 	acpi_os_acquire_lock (acpi_gbl_gpe_lock, ACPI_ISR);
 	gpe_block = gpe_xrupt_list->gpe_block_list_head;
 	while (gpe_block) {
@@ -419,6 +422,9 @@ acpi_ev_gpe_detect (
 
 			/* Read the Status Register */
 
+			/**
+			 * 检查GPEx_STS寄存器
+			 */
 			status = acpi_hw_low_level_read (ACPI_GPE_REGISTER_WIDTH, &status_reg,
 					 &gpe_register_info->status_address);
 			if (ACPI_FAILURE (status)) {
@@ -427,6 +433,9 @@ acpi_ev_gpe_detect (
 
 			/* Read the Enable Register */
 
+			/**
+			 * 检查GPEx_EN寄存器。
+			 */
 			status = acpi_hw_low_level_read (ACPI_GPE_REGISTER_WIDTH, &enable_reg,
 					 &gpe_register_info->enable_address);
 			if (ACPI_FAILURE (status)) {
@@ -439,6 +448,9 @@ acpi_ev_gpe_detect (
 
 			/* First check if there is anything active at all in this register */
 
+			/**
+			 * 根据GPEx_STS和GPEx_EN寄存器确定处理器系统中是否存在GPE事件。
+			 */
 			enabled_status_byte = (u8) (status_reg & enable_reg);
 			if (!enabled_status_byte) {
 				/* No active GPEs in this register, move on */
@@ -450,11 +462,17 @@ acpi_ev_gpe_detect (
 
 			for (j = 0; j < ACPI_GPE_REGISTER_WIDTH; j++) {
 				/* Examine one GPE bit */
-
+				/**
+				 *存在GPE事件。
+				 */
 				if (enabled_status_byte & acpi_gbl_decode_to8bit[j]) {
 					/*
 					 * Found an active GPE. Dispatch the event to a handler
 					 * or method.
+					 */
+					/**
+					 * acpi_ev_gpe_dispatch执行ASL中定义的ACPI代码。
+					 * 最终是在工作队列中解释执行ASL程序。
 					 */
 					int_status |= acpi_ev_gpe_dispatch (
 							  &gpe_block->event_info[(i * ACPI_GPE_REGISTER_WIDTH) + j],

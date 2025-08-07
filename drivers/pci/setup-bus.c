@@ -43,6 +43,9 @@
 #define CARDBUS_IO_SIZE		(4096)
 #define CARDBUS_MEM_SIZE	(32*1024*1024)
 
+/**
+ * 对未初始化PCI设备的BAR寄存器进行写操作。
+ */
 static void __devinit
 pbus_assign_resources_sorted(struct pci_bus *bus)
 {
@@ -66,12 +69,19 @@ pbus_assign_resources_sorted(struct pci_bus *bus)
 		    class == PCI_CLASS_NOT_DEFINED_VGA)
 			bus->bridge_ctl |= PCI_BRIDGE_CTL_VGA;
 
+		/**
+		 * 将未初始化的PCI设备使用的资源进行排序对齐，然后加到head中。
+		 */
 		pdev_sort_resources(dev, &head);
 	}
 
 	for (list = head.next; list;) {
 		res = list->res;
 		idx = res - &list->dev->resource[0];
+		/**
+		 * 对每个设备，调用pci_assign_resource初始化这些PCI设备的BAR寄存器。
+		 * pci_assign_resource函数两次调用pci_bus_alloc_resource，第一次试图从上游总线的可预读存储器空间为当前PCI设备分配资源。第二次从不可预读存储器空间中分配资源。
+		 */
 		pci_assign_resource(list->dev, idx);
 		tmp = list;
 		list = list->next;
@@ -445,6 +455,9 @@ pci_bus_size_cardbus(struct pci_bus *bus)
 	}
 }
 
+/**
+ * 修复和对齐PCI总线树下的所有PCI设备所使用的IO和存储器地址空间。
+ */
 void __devinit
 pci_bus_size_bridges(struct pci_bus *bus)
 {
@@ -463,6 +476,9 @@ pci_bus_size_bridges(struct pci_bus *bus)
 
 		case PCI_CLASS_BRIDGE_PCI:
 		default:
+			/**
+			 * 递归调用，直到找到当前PCI总线树最底层的PCI桥。
+			 */
 			pci_bus_size_bridges(b);
 			break;
 		}
@@ -478,8 +494,14 @@ pci_bus_size_bridges(struct pci_bus *bus)
 		break;
 
 	case PCI_CLASS_BRIDGE_PCI:
+		/**
+		 * 检查PCI桥所管理的地址空间是否支持IO或者可预读的存储器空间。如果支持，则将resource参数的相应状态置1.
+		 */
 		pci_bridge_check_ranges(bus);
 	default:
+		/**
+		 * pbus_size_io和pbus_size_mem函数修复并对齐当前PCI桥的IO空间和存储器空间。
+		 */
 		pbus_size_io(bus);
 		/* If the bridge supports prefetchable range, size it
 		   separately. If it doesn't, or its prefetchable window
@@ -502,6 +524,9 @@ pci_bus_assign_resources(struct pci_bus *bus)
 	struct pci_bus *b;
 	struct pci_dev *dev;
 
+	/**
+	 * 遍历并初始化当前PCI总线上的所有PCI设备的BAR寄存器。含PCI Agent设备和PCI桥。
+	 */
 	pbus_assign_resources_sorted(bus);
 
 	if (bus->bridge_ctl & PCI_BRIDGE_CTL_VGA) {
@@ -510,6 +535,9 @@ pci_bus_assign_resources(struct pci_bus *bus)
 			b->bridge_ctl |= PCI_BRIDGE_CTL_VGA;
 		}
 	}
+	/**
+	 * 遍历并递归，处理所有下游总线。
+	 */
 	list_for_each_entry(dev, &bus->devices, bus_list) {
 		b = dev->subordinate;
 		if (!b)
@@ -519,6 +547,9 @@ pci_bus_assign_resources(struct pci_bus *bus)
 
 		switch (dev->class >> 8) {
 		case PCI_CLASS_BRIDGE_PCI:
+			/**
+			 * 初始化PCI桥的存储器和IO Base、Limit寄存器。
+			 */
 			pci_setup_bridge(b);
 			break;
 
@@ -535,6 +566,9 @@ pci_bus_assign_resources(struct pci_bus *bus)
 }
 EXPORT_SYMBOL(pci_bus_assign_resources);
 
+/**
+ * 设置PCI设备的BAR寄存器。
+ */
 void __init
 pci_assign_unassigned_resources(void)
 {
@@ -542,12 +576,21 @@ pci_assign_unassigned_resources(void)
 
 	/* Depth first, calculate sizes and alignments of all
 	   subordinate buses. */
+	/**
+	 * 修复和对齐PCI总线树下所有PCI设备(含PCI桥)所使用的IO和存储器地址空间。
+	 */
 	list_for_each_entry(bus, &pci_root_buses, node) {
 		pci_bus_size_bridges(bus);
 	}
 	/* Depth last, allocate resources and update the hardware. */
 	list_for_each_entry(bus, &pci_root_buses, node) {
+		/**
+		 * 遍历并初始化所有PCI设备的BAR寄存器，初始化所有PCI桥的存储器和IO基址寄存器、限制寄存器。
+		 */
 		pci_bus_assign_resources(bus);
+		/**
+		 * 使能所有PCI桥设备。
+		 */
 		pci_enable_bridges(bus);
 	}
 }

@@ -110,6 +110,9 @@
 #define TTY_PARANOIA_CHECK 1
 #define CHECK_TTY_COUNT 1
 
+/**
+ * 默认的tty端口属性。
+ */
 struct termios tty_std_termios = {	/* for the benefit of tty drivers  */
 	.c_iflag = ICRNL | IXON,
 	.c_oflag = OPOST | ONLCR,
@@ -2669,6 +2672,12 @@ static struct class_simple *tty_class;
  * the tty driver's flags have the TTY_DRIVER_NO_DEVFS bit set.  If that
  * bit is not set, this function should not be called.
  */
+/**
+ * 注册tty设备。
+ *		driver:		所属驱动。
+ *		index:		设备的次设备号。
+ *		device:		要注册的设备。
+ */
 void tty_register_device(struct tty_driver *driver, unsigned index,
 			 struct device *device)
 {
@@ -2708,6 +2717,10 @@ void tty_unregister_device(struct tty_driver *driver, unsigned index)
 EXPORT_SYMBOL(tty_register_device);
 EXPORT_SYMBOL(tty_unregister_device);
 
+/**
+ * 分配一个tty设备驱动程序结构。
+ *		lines:		该驱动程序支持的设备数量。
+ */
 struct tty_driver *alloc_tty_driver(int lines)
 {
 	struct tty_driver *driver;
@@ -2761,6 +2774,9 @@ EXPORT_SYMBOL(tty_set_operations);
 
 /*
  * Called by a tty driver to register itself.
+ */
+/**
+ * 向tty核心注册一个tty设备驱动程序。
  */
 int tty_register_driver(struct tty_driver *driver)
 {

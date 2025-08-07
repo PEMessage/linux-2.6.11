@@ -210,14 +210,23 @@ pci_find_parent_resource(const struct pci_dev *dev, struct resource *res)
 	int i;
 	struct resource *best = NULL;
 
+	/**
+	 * 对PCI桥管理的地址空间进行检查。
+	 */
 	for(i = 0; i < PCI_BUS_NUM_RESOURCES; i++) {
 		struct resource *r = bus->resource[i];
 		if (!r)
 			continue;
+		/**
+		 * 检查地址空间是否在上游设备的地址空间内。
+		 */
 		if (res->start && !(res->start >= r->start && res->end <= r->end))
 			continue;	/* Not contained */
 		if ((res->flags ^ r->flags) & (IORESOURCE_IO | IORESOURCE_MEM))
 			continue;	/* Wrong type */
+		/**
+		 * 上游桥设备是不可预读空间。
+		 */
 		if (!((res->flags ^ r->flags) & IORESOURCE_PREFETCH))
 			return r;	/* Exact match */
 		if ((res->flags & IORESOURCE_PREFETCH) && !(r->flags & IORESOURCE_PREFETCH))
@@ -397,6 +406,9 @@ pci_enable_device_bars(struct pci_dev *dev, int bars)
  *  to enable I/O and memory. Wake up the device if it was suspended.
  *  Beware, this function can fail.
  */
+/**
+ * 激活PCI设备。它把设备唤醒，在某些情况下还指派它的中断线和IO区域。
+ */
 int
 pci_enable_device(struct pci_dev *dev)
 {
@@ -456,6 +468,9 @@ pci_disable_device(struct pci_dev *dev)
  * -EINVAL is returned if device supports it, but can't generate wake events.
  * 0 if operation is successful.
  * 
+ */
+/**
+ * 开启或者关闭WOL功能
  */
 int pci_enable_wake(struct pci_dev *dev, pci_power_t state, int enable)
 {
@@ -751,7 +766,10 @@ pci_set_dma_mask(struct pci_dev *dev, u64 mask)
 
 	return 0;
 }
-    
+
+/**
+ * 设置dac地址掩码。当返回值为0时，才能使用DAC地址。
+ */
 int
 pci_dac_set_dma_mask(struct pci_dev *dev, u64 mask)
 {
@@ -774,7 +792,10 @@ pci_set_consistent_dma_mask(struct pci_dev *dev, u64 mask)
 	return 0;
 }
 #endif
-     
+
+/**
+ * 对已经完成枚举的PCI设备进行修复工作，用于修补一些BIOS中对PCI设备有影响的BUG。
+ */
 static int __devinit pci_init(void)
 {
 	struct pci_dev *dev = NULL;

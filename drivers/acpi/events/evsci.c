@@ -63,6 +63,9 @@
  *
  ******************************************************************************/
 
+/**
+ * 处理SCI中断的服务例程。被acpi_irq调用。
+ */
 static u32 ACPI_SYSTEM_XFACE
 acpi_ev_sci_xrupt_handler (
 	void                            *context)
@@ -83,11 +86,17 @@ acpi_ev_sci_xrupt_handler (
 	 * Fixed Events:
 	 * Check for and dispatch any Fixed Events that have occurred
 	 */
+	/**
+	 * 检查PM寄存器组，判断是否存在PM事件。
+	 */
 	interrupt_handled |= acpi_ev_fixed_event_detect ();
 
 	/*
 	 * General Purpose Events:
 	 * Check for and dispatch any GPEs that have occurred
+	 */
+	/**
+	 * 检查是否存在GPE事件。
 	 */
 	interrupt_handled |= acpi_ev_gpe_detect (gpe_xrupt_list);
 
@@ -145,6 +154,9 @@ acpi_ev_gpe_xrupt_handler (
  *
  ******************************************************************************/
 
+/**
+ * 注册SCI中断服务程序。
+ */
 u32
 acpi_ev_install_sci_handler (void)
 {
@@ -154,6 +166,11 @@ acpi_ev_install_sci_handler (void)
 	ACPI_FUNCTION_TRACE ("ev_install_sci_handler");
 
 
+	/**
+	 * sci_int是SCI中断使用的IRQ号。
+	 * acpi_ev_sci_xrupt_handler是中断处理函数。
+	 * acpi_gbl_gpe_xrupt_list_head是中断处理函数的参数。
+	 */
 	status = acpi_os_install_interrupt_handler ((u32) acpi_gbl_FADT->sci_int,
 			   acpi_ev_sci_xrupt_handler, acpi_gbl_gpe_xrupt_list_head);
 	return_ACPI_STATUS (status);

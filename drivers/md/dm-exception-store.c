@@ -55,27 +55,35 @@
  */
 #define SNAPSHOT_DISK_VERSION 1
 
+/* COW设备的第一个chunk，包含了头信息 */
 struct disk_header {
+	/* 魔数，应该为"SnAp" */
 	uint32_t magic;
 
 	/*
 	 * Is this snapshot valid.  There is no way of recovering
 	 * an invalid snapshot.
 	 */
+	/* 为1表示快照有效 */
 	uint32_t valid;
 
 	/*
 	 * Simple, incrementing version. no backward
 	 * compatibility.
 	 */
+	/* 简单递增的版本号 */
 	uint32_t version;
 
 	/* In sectors */
+	/* 每个chunk包含的扇区数 */
 	uint32_t chunk_size;
 };
 
+/* COW设备元数据 */
 struct disk_exception {
+	/* 在源设备上的chunk编号 */
 	uint64_t old_chunk;
+	/* 在COW设备上的chunk编号 */
 	uint64_t new_chunk;
 };
 
@@ -87,11 +95,16 @@ struct commit_callback {
 /*
  * The top level structure for a persistent exception store.
  */
+/* 永久性快照 */
 struct pstore {
 	struct dm_snapshot *snap;	/* up pointer to my snapshot */
+	/* 版本号 */
 	int version;
+	/* 如果为1，表示快照有效 */
 	int valid;
+	/* chunk大小 */
 	uint32_t chunk_size;
+	/* 每个区域含有的例外个数 */
 	uint32_t exceptions_per_area;
 
 	/*
@@ -99,26 +112,32 @@ struct pstore {
 	 * need for large chunk sizes, so it wont hurt to have a
 	 * whole chunks worth of metadata in memory at once.
 	 */
+	/* 在内存中保存的一个chunk大小的元数据 */
 	void *area;
 
 	/*
 	 * Used to keep track of which metadata area the data in
 	 * 'chunk' refers to.
 	 */
+	/* area保存的元数据所属的区 */
 	uint32_t current_area;
 
 	/*
 	 * The next free chunk for an exception.
 	 */
+	/* 用于例外的下一个空闲块 */
 	uint32_t next_free;
 
 	/*
 	 * The index of next free exception in the current
 	 * metadata area.
 	 */
+	/* 当前区中下一个空闲例外的索引 */
 	uint32_t current_committed;
 
+	/* 待处理的例外数目 */
 	atomic_t pending_count;
+	/* 为被提交的例外进行回调的次数 */
 	uint32_t callback_count;
 	struct commit_callback *callbacks;
 };
@@ -524,12 +543,13 @@ int dm_create_persistent(struct exception_store *store, uint32_t chunk_size)
 		return r;
 
 	/* allocate the pstore */
-	ps = kmalloc(sizeof(*ps), GFP_KERNEL);
+	ps = kmalloc(sizeof(*ps), GFP_KERNEL);/* 分配例外仓库描述符 */
 	if (!ps) {
 		r = -ENOMEM;
 		goto bad;
 	}
 
+	/* 初始化例外仓库描述符 */
 	ps->snap = store->snap;
 	ps->valid = 1;
 	ps->version = SNAPSHOT_DISK_VERSION;
@@ -580,7 +600,9 @@ int dm_create_persistent(struct exception_store *store, uint32_t chunk_size)
 /*-----------------------------------------------------------------
  * Implementation of the store for non-persistent snapshots.
  *---------------------------------------------------------------*/
+/* 非永久性快照 */
 struct transient_c {
+	/* COW设备上保存下一个数据的起始扇区编号 */
 	sector_t next_free;
 };
 

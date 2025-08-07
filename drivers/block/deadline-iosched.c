@@ -35,6 +35,7 @@ static const int deadline_hash_shift = 5;
 #define list_entry_hash(ptr)	list_entry((ptr), struct deadline_rq, hash)
 #define ON_HASH(drq)		(drq)->on_hash
 
+/* 最后期限调度算法的私有数据 */
 struct deadline_data {
 	/*
 	 * run time data
@@ -43,7 +44,9 @@ struct deadline_data {
 	/*
 	 * requests (deadline_rq s) are present on both sort_list and fifo_list
 	 */
+	/* 以扇区号进行排序的两棵红黑树，分别用于读和写 */
 	struct rb_root sort_list[2];	
+	/* 读写FIFO队列 */
 	struct list_head fifo_list[2];
 	
 	/*
@@ -52,16 +55,22 @@ struct deadline_data {
 	struct deadline_rq *next_drq[2];
 	struct list_head *dispatch;	/* driver dispatch queue */
 	struct list_head *hash;		/* request hash */
+	/* 当前连续提交的请求数目，只要小于fifo_batch就可以进行连续提交 */
 	unsigned int batching;		/* number of sequential requests made */
+	/* 实际未用，要分发请求的结束扇区 */
 	sector_t last_sector;		/* head position */
+	/* 为了提交读请求而造成写饥饿的次数，如果超过writes_starved，则需要提交写请求 */
 	unsigned int starved;		/* times reads have starved writes */
 
 	/*
 	 * settings that change how the i/o scheduler behaves
 	 */
+	/* 超过此时间则必须提交请求 */
 	int fifo_expire[2];
 	int fifo_batch;
+	/* 写饥饿的最大次数 */
 	int writes_starved;
+	/* 默认为1，表示允许向前合并 */
 	int front_merges;
 
 	mempool_t *drq_pool;
@@ -286,6 +295,7 @@ deadline_find_first_drq(struct deadline_data *dd, int data_dir)
 /*
  * add drq to rbtree and fifo
  */
+/* 添加请求到红黑树和FIFO队列 */
 static inline void
 deadline_add_request(struct request_queue *q, struct request *rq)
 {
@@ -294,12 +304,13 @@ deadline_add_request(struct request_queue *q, struct request *rq)
 
 	const int data_dir = rq_data_dir(drq->request);
 
+	/* 添加到红黑树中 */
 	deadline_add_drq_rb(dd, drq);
 	/*
 	 * set expire time (only used for reads) and add to fifo list
 	 */
-	drq->expires = jiffies + dd->fifo_expire[data_dir];
-	list_add_tail(&drq->fifo, &dd->fifo_list[data_dir]);
+	drq->expires = jiffies + dd->fifo_expire[data_dir];/* 计算请求超时时间-deadline */
+	list_add_tail(&drq->fifo, &dd->fifo_list[data_dir]);/* 添加到FIFO队列最后 */
 
 	if (rq_mergeable(rq)) {
 		deadline_add_drq_hash(dd, drq);
@@ -325,6 +336,7 @@ static void deadline_remove_request(request_queue_t *q, struct request *rq)
 	}
 }
 
+/* 判断bio请求是否可以合并 */
 static int
 deadline_merge(request_queue_t *q, struct request **req, struct bio *bio)
 {
@@ -335,8 +347,8 @@ deadline_merge(request_queue_t *q, struct request **req, struct bio *bio)
 	/*
 	 * try last_merge to avoid going to hash
 	 */
-	ret = elv_try_last_merge(q, bio);
-	if (ret != ELEVATOR_NO_MERGE) {
+	ret = elv_try_last_merge(q, bio);/* 首先尝试与上次合并的块进行合并，避免进行hash查找 */
+	if (ret != ELEVATOR_NO_MERGE) {/* 与上次的块进行了合并 */
 		__rq = q->last_merge;
 		goto out_insert;
 	}
@@ -344,11 +356,11 @@ deadline_merge(request_queue_t *q, struct request **req, struct bio *bio)
 	/*
 	 * see if the merge hash can satisfy a back merge
 	 */
-	__rq = deadline_find_drq_hash(dd, bio->bi_sector);
-	if (__rq) {
+	__rq = deadline_find_drq_hash(dd, bio->bi_sector);/* 后向合并，即将当前请求合并到某个请求的后面 */
+	if (__rq) {/* 当前请求在某个请求的后面 */
 		BUG_ON(__rq->sector + __rq->nr_sectors != bio->bi_sector);
 
-		if (elv_rq_merge_ok(__rq, bio)) {
+		if (elv_rq_merge_ok(__rq, bio)) {/* 可以合并 */
 			ret = ELEVATOR_BACK_MERGE;
 			goto out;
 		}
@@ -357,23 +369,25 @@ deadline_merge(request_queue_t *q, struct request **req, struct bio *bio)
 	/*
 	 * check for front merge
 	 */
-	if (dd->front_merges) {
-		sector_t rb_key = bio->bi_sector + bio_sectors(bio);
+	if (dd->front_merges) {/* 虽然不能后向合并，但是算法允许前向合并 */
+		sector_t rb_key = bio->bi_sector + bio_sectors(bio);/* 计算当前请求的最后一个扇区编号 */
 
+		/* 在红黑树中查找最后一个扇区编号的请求 */
 		__rq = deadline_find_drq_rb(dd, rb_key, bio_data_dir(bio));
-		if (__rq) {
+		if (__rq) {/* 存在某个请求与当前请求相连 */
 			BUG_ON(rb_key != rq_rb_key(__rq));
 
-			if (elv_rq_merge_ok(__rq, bio)) {
+			if (elv_rq_merge_ok(__rq, bio)) {/* 允许合并，进行前向合并 */
 				ret = ELEVATOR_FRONT_MERGE;
 				goto out;
 			}
 		}
 	}
 
+	/* 前后向都不能合并，退出 */
 	return ELEVATOR_NO_MERGE;
 out:
-	q->last_merge = __rq;
+	q->last_merge = __rq;/* 记录下最后一次合并的请求，下一次的请求可能也能与该请求合并 */
 out_insert:
 	if (ret)
 		deadline_hot_drq_hash(dd, RQ_DATA(__rq));
@@ -502,6 +516,7 @@ static inline int deadline_check_fifo(struct deadline_data *dd, int ddir)
  * deadline_dispatch_requests selects the best request according to
  * read/write expire, fifo_batch, etc
  */
+/* 从调度队列中取出一个请求。 */
 static int deadline_dispatch_requests(struct deadline_data *dd)
 {
 	const int reads = !list_empty(&dd->fifo_list[READ]);
@@ -514,20 +529,20 @@ static int deadline_dispatch_requests(struct deadline_data *dd)
 	 */
 	drq = NULL;
 
-	if (dd->next_drq[READ])
+	if (dd->next_drq[READ])/* 从batch的角度看，确定下一次是处理读还是写 */
 		drq = dd->next_drq[READ];
 
 	if (dd->next_drq[WRITE])
 		drq = dd->next_drq[WRITE];
 
-	if (drq) {
+	if (drq) {/* 电梯未到顶，并且该批次处理的请求还未达到限值 */
 		/* we have a "next request" */
 		
 		if (dd->last_sector != drq->request->sector)
 			/* end the batch on a non sequential request */
 			dd->batching += dd->fifo_batch;
 		
-		if (dd->batching < dd->fifo_batch)
+		if (dd->batching < dd->fifo_batch)/* 本批次的请求未到限额，直接处理读或者写请求 */
 			/* we are still entitled to batch */
 			goto dispatch_request;
 	}
@@ -536,10 +551,11 @@ static int deadline_dispatch_requests(struct deadline_data *dd)
 	 * at this point we are not running a batch. select the appropriate
 	 * data direction (read / write)
 	 */
-
+	/* 运行到这里，说明当前批次额度用完，优先处理读请求 */
 	if (reads) {
 		BUG_ON(RB_EMPTY(&dd->sort_list[READ]));
 
+		/* 有写请求，递增写请求饥饿计数后超过限额，则应当处理写请求 */
 		if (writes && (dd->starved++ >= dd->writes_starved))
 			goto dispatch_writes;
 
@@ -553,11 +569,11 @@ static int deadline_dispatch_requests(struct deadline_data *dd)
 	 * there are either no reads or writes have been starved
 	 */
 
-	if (writes) {
+	if (writes) {/* 没有读请求或者读请求额度用完 */
 dispatch_writes:
 		BUG_ON(RB_EMPTY(&dd->sort_list[WRITE]));
 
-		dd->starved = 0;
+		dd->starved = 0;/* 清除饥饿计数 */
 
 		data_dir = WRITE;
 		other_dir = READ;
@@ -565,23 +581,23 @@ dispatch_writes:
 		goto dispatch_find_request;
 	}
 
-	return 0;
+	return 0;/* 既没有读请求，也没有写请求，返回0表示无法将请求转移到分发队列 */
 
 dispatch_find_request:
 	/*
 	 * we are not running a batch, find best request for selected data_dir
 	 */
-	if (deadline_check_fifo(dd, data_dir)) {
+	if (deadline_check_fifo(dd, data_dir)) {/* 检查FIFO队列中是否有过期请求，或者电梯已经到头，也从FIFO队列中取第一个请求 */
 		/* An expired request exists - satisfy it */
 		dd->batching = 0;
-		drq = list_entry_fifo(dd->fifo_list[data_dir].next);
+		drq = list_entry_fifo(dd->fifo_list[data_dir].next);/* 取FIFO队列中第一个请求 */
 		
 	} else if (dd->next_drq[data_dir]) {
 		/*
 		 * The last req was the same dir and we have a next request in
 		 * sort order. No expired requests so continue on from here.
 		 */
-		drq = dd->next_drq[data_dir];
+		drq = dd->next_drq[data_dir];/* 沿递增方向找下一个请求 */
 	} else {
 		/*
 		 * The last req was the other direction or we have run out of
@@ -596,8 +612,8 @@ dispatch_request:
 	/*
 	 * drq is the selected appropriate request.
 	 */
-	dd->batching++;
-	deadline_move_request(dd, drq);
+	dd->batching++;/* 递增batch计数 */
+	deadline_move_request(dd, drq);/* 将请求从最后期限IO调度队列移到分发队列中 */
 
 	return 1;
 }

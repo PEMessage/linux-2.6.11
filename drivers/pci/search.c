@@ -118,6 +118,9 @@ pci_find_slot(unsigned int bus, unsigned int devfn)
  * decrement the reference count by calling pci_dev_put().
  * If no device is found, %NULL is returned.
  */
+/**
+ * 在指定pci_bus上的系统PCI设备列表中查找指定的设备和PCI设备的功能编号。
+ */
 struct pci_dev * pci_get_slot(struct pci_bus *bus, unsigned int devfn)
 {
 	struct list_head *tmp;
@@ -223,6 +226,9 @@ pci_find_device(unsigned int vendor, unsigned int device, const struct pci_dev *
  * searches continue from next device on the global list.
  * The reference count for @from is always decremented if it is not %NULL.
  */
+/**
+ * 与pci_get_device类似，但是允许指定子系统厂商和子系统设备。
+ */
 struct pci_dev * 
 pci_get_subsys(unsigned int vendor, unsigned int device,
 	       unsigned int ss_vendor, unsigned int ss_device,
@@ -265,6 +271,9 @@ exit:
  * to the @from argument.  Otherwise if @from is not %NULL, searches continue
  * from next device on the global list.  The reference count for @from is
  * always decremented if it is not %NULL.
+ */
+/**
+ * 查找特定的PCI设备。扫描当前存在的PCI设备列表。
  */
 struct pci_dev *
 pci_get_device(unsigned int vendor, unsigned int device, struct pci_dev *from)

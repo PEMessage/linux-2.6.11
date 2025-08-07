@@ -590,6 +590,9 @@ static struct file_operations proc_bus_pci_dev_operations = {
 	.release	= seq_release,
 };
 
+/**
+ * 在proc文件系统中建立/bus/pci目录，并将proc_fs默认提供的file_operations改为proc_bus_pci_dev_operations。
+ */
 static int __init pci_proc_init(void)
 {
 	struct proc_dir_entry *entry;

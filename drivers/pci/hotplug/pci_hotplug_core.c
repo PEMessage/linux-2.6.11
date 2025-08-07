@@ -664,6 +664,9 @@ int pci_hp_change_slot_info (struct hotplug_slot *slot, struct hotplug_slot_info
 	return 0;
 }
 
+/**
+ * 主要用来支持CompactPCI的热插拨功能，在通信系统中较为常见。
+ */
 static int __init pci_hotplug_init (void)
 {
 	int result;

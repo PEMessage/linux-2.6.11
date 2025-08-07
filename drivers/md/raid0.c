@@ -60,7 +60,7 @@ static int raid0_issue_flush(request_queue_t *q, struct gendisk *disk,
 	return ret;
 }
 
-
+/* 为RAID0创建条带 */
 static int create_strip_zones (mddev_t *mddev)
 {
 	int i, c, j;
@@ -77,12 +77,13 @@ static int create_strip_zones (mddev_t *mddev)
 	 * The number of 'same size groups'
 	 */
 	conf->nr_strip_zones = 0;
- 
-	ITERATE_RDEV(mddev,rdev1,tmp1) {
+
+ 	/* 统计条带区域数目 */
+	ITERATE_RDEV(mddev,rdev1,tmp1) {/* 遍历所有磁盘 */
 		printk("raid0: looking at %s\n",
 			bdevname(rdev1->bdev,b));
 		c = 0;
-		ITERATE_RDEV(mddev,rdev2,tmp2) {
+		ITERATE_RDEV(mddev,rdev2,tmp2) {/* 处理当前磁盘以前的所有磁盘 */
 			printk("raid0:   comparing %s(%llu)",
 			       bdevname(rdev1->bdev,b),
 			       (unsigned long long)rdev1->size);
@@ -93,19 +94,19 @@ static int create_strip_zones (mddev_t *mddev)
 				printk("raid0:   END\n");
 				break;
 			}
-			if (rdev2->size == rdev1->size)
+			if (rdev2->size == rdev1->size)/* 当前磁盘与以前某个磁盘长度相同 */
 			{
 				/*
 				 * Not unique, don't count it as a new
 				 * group
 				 */
 				printk("raid0:   EQUAL\n");
-				c = 1;
+				c = 1;/* 表示长度相同，不用增加条带数目 */
 				break;
 			}
 			printk("raid0:   NOT EQUAL\n");
 		}
-		if (!c) {
+		if (!c) {/* 与其他磁盘长度不相等，需要增加条带数量 */
 			printk("raid0:   ==> UNIQUE\n");
 			conf->nr_strip_zones++;
 			printk("raid0: %d zones\n", conf->nr_strip_zones);
@@ -113,10 +114,12 @@ static int create_strip_zones (mddev_t *mddev)
 	}
 	printk("raid0: FINAL %d zones\n", conf->nr_strip_zones);
 
+	/* 根据条带数量，分配 条带数组 */
 	conf->strip_zone = kmalloc(sizeof(struct strip_zone)*
 				conf->nr_strip_zones, GFP_KERNEL);
-	if (!conf->strip_zone)
+	if (!conf->strip_zone)/* 内存分配失败，退出 */
 		return 1;
+	/* 分配设备指针数组 */
 	conf->devlist = kmalloc(sizeof(mdk_rdev_t*)*
 				conf->nr_strip_zones*mddev->raid_disks,
 				GFP_KERNEL);
@@ -132,17 +135,18 @@ static int create_strip_zones (mddev_t *mddev)
 	 * there is a proper alignment of slots to devices and find them all
 	 */
 	zone = &conf->strip_zone[0];
-	cnt = 0;
-	smallest = NULL;
+	/* 以下是处理第一个条带 */
+	cnt = 0;/* 条带区域包含的磁盘数 */
+	smallest = NULL;/* 长度最小的磁盘，它是第一个条带的结束扇区 */
 	zone->dev = conf->devlist;
 	ITERATE_RDEV(mddev, rdev1, tmp1) {
 		int j = rdev1->raid_disk;
 
-		if (j < 0 || j >= mddev->raid_disks) {
+		if (j < 0 || j >= mddev->raid_disks) {/* 逻辑错误 */
 			printk("raid0: bad disk number %d - aborting!\n", j);
 			goto abort;
 		}
-		if (zone->dev[j]) {
+		if (zone->dev[j]) {/* 已经属于其他条带了???? */
 			printk("raid0: multiple devices for %d - aborting!\n",
 				j);
 			goto abort;
@@ -160,15 +164,16 @@ static int create_strip_zones (mddev_t *mddev)
 		    mddev->queue->max_sectors > (PAGE_SIZE>>9))
 			blk_queue_max_sectors(mddev->queue, PAGE_SIZE>>9);
 
-		if (!smallest || (rdev1->size <smallest->size))
+		if (!smallest || (rdev1->size <smallest->size))/* 记录最小的磁盘 */
 			smallest = rdev1;
 		cnt++;
 	}
-	if (cnt != mddev->raid_disks) {
+	if (cnt != mddev->raid_disks) {/* 逻辑检查，一般不会异常 */
 		printk("raid0: too few disks (%d of %d) - aborting!\n",
 			cnt, mddev->raid_disks);
 		goto abort;
 	}
+	/* 下面处理其他条带 */
 	zone->nb_dev = cnt;
 	zone->size = smallest->size * cnt;
 	zone->zone_offset = 0;
@@ -177,7 +182,7 @@ static int create_strip_zones (mddev_t *mddev)
 	curr_zone_offset = zone->size;
 
 	/* now do the other zones */
-	for (i = 1; i < conf->nr_strip_zones; i++)
+	for (i = 1; i < conf->nr_strip_zones; i++)/* 循环处理余下的条带 */
 	{
 		zone = conf->strip_zone + i;
 		zone->dev = conf->strip_zone[i-1].dev + mddev->raid_disks;
@@ -187,16 +192,16 @@ static int create_strip_zones (mddev_t *mddev)
 		smallest = NULL;
 		c = 0;
 
-		for (j=0; j<cnt; j++) {
+		for (j=0; j<cnt; j++) {/* 遍历所有磁盘 */
 			char b[BDEVNAME_SIZE];
 			rdev = conf->strip_zone[0].dev[j];
 			printk("raid0: checking %s ...", bdevname(rdev->bdev,b));
-			if (rdev->size > current_offset)
+			if (rdev->size > current_offset)/* 该磁盘属于当前条带 */
 			{
 				printk(" contained as device %d\n", c);
 				zone->dev[c] = rdev;
 				c++;
-				if (!smallest || (rdev->size <smallest->size)) {
+				if (!smallest || (rdev->size <smallest->size)) {/* 记下本轮处理的最小磁盘 */
 					smallest = rdev;
 					printk("  (%llu) is smallest!.\n", 
 						(unsigned long long)rdev->size);

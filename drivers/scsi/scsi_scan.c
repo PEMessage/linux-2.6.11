@@ -309,6 +309,7 @@ out:
  *     are copied to the Scsi_Device at @sreq->sr_device (sdev);
  *     any flags value is stored in *@bflags.
  **/
+/* 发送INQUIRY命令探测逻辑单元 */
 static void scsi_probe_lun(struct scsi_request *sreq, char *inq_result,
 			   int *bflags)
 {
@@ -324,6 +325,7 @@ static void scsi_probe_lun(struct scsi_request *sreq, char *inq_result,
 	/* Perform up to 3 passes.  The first pass uses a conservative
 	 * transfer length of 36 unless sdev->inquiry_len specifies a
 	 * different value. */
+	/* 第一轮探测命令的长度，默认为36 */
 	first_inquiry_len = sdev->inquiry_len ? sdev->inquiry_len : 36;
 	try_inquiry_len = first_inquiry_len;
 	pass = 1;
@@ -383,6 +385,7 @@ static void scsi_probe_lun(struct scsi_request *sreq, char *inq_result,
 		 * corresponding bit fields in Scsi_Device, so bflags
 		 * need not be passed as an argument.
 		 */
+		/* 根据厂商和设备id，设置一些特殊的标志。因为总有一些奇怪的设备需要特殊处理 */
 		*bflags = scsi_get_device_flags(sdev, &inq_result[8],
 				&inq_result[16]);
 
@@ -477,6 +480,7 @@ static void scsi_probe_lun(struct scsi_request *sreq, char *inq_result,
  *     SCSI_SCAN_NO_RESPONSE: could not allocate or setup a Scsi_Device
  *     SCSI_SCAN_LUN_PRESENT: a new Scsi_Device was allocated and initialized
  **/
+/* 将逻辑设备LUN添加到系统 */
 static int scsi_add_lun(struct scsi_device *sdev, char *inq_result, int *bflags)
 {
 	/*
@@ -489,6 +493,7 @@ static int scsi_add_lun(struct scsi_device *sdev, char *inq_result, int *bflags)
 	 * scanning run at their own risk, or supply a user level program
 	 * that can correctly scan.
 	 */
+	/* 根据INQUIRY响应数据来设置SCSI设备描述符各个域 */
 	sdev->inquiry = kmalloc(sdev->inquiry_len, GFP_ATOMIC);
 	if (sdev->inquiry == NULL) {
 		return SCSI_SCAN_NO_RESPONSE;
@@ -622,6 +627,7 @@ static int scsi_add_lun(struct scsi_device *sdev, char *inq_result, int *bflags)
 
 	transport_configure_device(&sdev->sdev_gendev);
 
+	/* 如果主机适配器模板实现了slave_configure回调，则回调它，用于进行一些特殊的设置 */
 	if (sdev->host->hostt->slave_configure)
 		sdev->host->hostt->slave_configure(sdev);
 
@@ -630,6 +636,7 @@ static int scsi_add_lun(struct scsi_device *sdev, char *inq_result, int *bflags)
 	 * register it and tell the rest of the kernel
 	 * about it.
 	 */
+	/* 将scsi设备及对应的目标节点添加到sysfs文件系统，并创建对应的属性文件 */
 	scsi_sysfs_add_sdev(sdev);
 
 	return SCSI_SCAN_LUN_PRESENT;
@@ -651,6 +658,7 @@ static int scsi_add_lun(struct scsi_device *sdev, char *inq_result, int *bflags)
  *         attached at the LUN
  *     SCSI_SCAN_LUN_PRESENT: a new Scsi_Device was allocated and initialized
  **/
+/* 对指定目标节点上的特定逻辑单元进行探测 */
 static int scsi_probe_and_add_lun(struct Scsi_Host *host,
 		uint channel, uint id, uint lun, int *bflagsp,
 		struct scsi_device **sdevp, int rescan, void *hostdata)
@@ -665,8 +673,9 @@ static int scsi_probe_and_add_lun(struct Scsi_Host *host,
 	 * host adapter calls into here with rescan == 0.
 	 */
 	if (rescan) {
+		/* 在目标节点描述符的设备链表中查找对应该lun的SCSI设备是否存在 */
 		sdev = scsi_device_lookup(host, channel, id, lun);
-		if (sdev) {
+		if (sdev) {/* 已经存在 */
 			SCSI_LOG_SCAN_BUS(3, printk(KERN_INFO
 				"scsi scan: device exists on <%d:%d:%d:%d>\n",
 				host->host_no, channel, id, lun));
@@ -682,25 +691,28 @@ static int scsi_probe_and_add_lun(struct Scsi_Host *host,
 		}
 	}
 
+	/* 分配一个逻辑设备描述符 */
 	sdev = scsi_alloc_sdev(host, channel, id, lun, hostdata);
 	if (!sdev)
 		goto out;
 	sreq = scsi_allocate_request(sdev, GFP_ATOMIC);
 	if (!sreq)
 		goto out_free_sdev;
+	/* 临时缓冲区，用于保存发送的SCSI命令的响应结果 */
 	result = kmalloc(256, GFP_ATOMIC |
 			(host->unchecked_isa_dma) ? __GFP_DMA : 0);
 	if (!result)
 		goto out_free_sreq;
 
+	/* 发送INQUIRY命令探测逻辑单元 */
 	scsi_probe_lun(sreq, result, &bflags);
-	if (sreq->sr_result)
+	if (sreq->sr_result)/* 设备不存在，退出 */
 		goto out_free_result;
 
 	/*
 	 * result contains valid SCSI INQUIRY data.
 	 */
-	if ((result[0] >> 5) == 3) {
+	if ((result[0] >> 5) == 3) {/* 根据规范，这个结果表示目标单元存在，但是没有物理设备。 */
 		/*
 		 * For a Peripheral qualifier 3 (011b), the SCSI
 		 * spec says: The device server is not capable of
@@ -718,6 +730,7 @@ static int scsi_probe_and_add_lun(struct Scsi_Host *host,
 		goto out_free_result;
 	}
 
+	/* 将逻辑设备添加到系统中 */
 	res = scsi_add_lun(sdev, result, &bflags);
 	if (res == SCSI_SCAN_LUN_PRESENT) {
 		if (bflags & BLIST_KEY) {
@@ -1122,6 +1135,7 @@ EXPORT_SYMBOL(scsi_rescan_device);
  *     First try a REPORT LUN scan, if that does not scan the target, do a
  *     sequential scan of LUNs on the target id.
  **/
+/* 扫描特定的scsi节点 */
 static void scsi_scan_target(struct Scsi_Host *shost, unsigned int channel,
 			     unsigned int id, unsigned int lun, int rescan)
 {
@@ -1129,13 +1143,14 @@ static void scsi_scan_target(struct Scsi_Host *shost, unsigned int channel,
 	int res;
 	struct scsi_device *sdev;
 
+	/* 节点ID就是主机适配器ID，直接退出 */
 	if (shost->this_id == id)
 		/*
 		 * Don't scan the host adapter
 		 */
 		return;
 
-	if (lun != SCAN_WILD_CARD) {
+	if (lun != SCAN_WILD_CARD) {/* 扫描特定逻辑单元 */
 		/*
 		 * Scan for a specific host/chan/id/lun.
 		 */
@@ -1148,14 +1163,17 @@ static void scsi_scan_target(struct Scsi_Host *shost, unsigned int channel,
 	 * Scan LUN 0, if there is some response, scan further. Ideally, we
 	 * would not configure LUN 0 until all LUNs are scanned.
 	 */
+	/* 先探测LUN0，目标节点必须响应对LUN0的扫描 */
 	res = scsi_probe_and_add_lun(shost, channel, id, 0, &bflags, &sdev,
 				     rescan, NULL);
-	if (res == SCSI_SCAN_LUN_PRESENT) {
+	if (res == SCSI_SCAN_LUN_PRESENT) {/* LUN0有逻辑单元 */
+		/* 通过REPORT LUN命令探测逻辑单元数量，并对每个逻辑单元进行探测 */
 		if (scsi_report_lun_scan(sdev, bflags, rescan) != 0)
 			/*
 			 * The REPORT LUN did not scan the target,
 			 * do a sequential scan.
 			 */
+			/* 探测失败，从1到最大编号进行依次探测 */
 			scsi_sequential_lun_scan(shost, channel, id, bflags,
 				       	res, sdev->scsi_level, rescan);
 	} else if (res == SCSI_SCAN_TARGET_PRESENT) {
@@ -1170,13 +1188,14 @@ static void scsi_scan_target(struct Scsi_Host *shost, unsigned int channel,
 	}
 }
 
+/* 扫描特定的通道设备是否存在 */
 static void scsi_scan_channel(struct Scsi_Host *shost, unsigned int channel,
 			      unsigned int id, unsigned int lun, int rescan)
 {
 	uint order_id;
 
-	if (id == SCAN_WILD_CARD)
-		for (id = 0; id < shost->max_id; ++id) {
+	if (id == SCAN_WILD_CARD)/* 扫描所有可能的节点 */
+		for (id = 0; id < shost->max_id; ++id) {/* 扫描所有可能的节点 */
 			/*
 			 * XXX adapter drivers when possible (FCP, iSCSI)
 			 * could modify max_id to match the current max,
@@ -1186,34 +1205,38 @@ static void scsi_scan_channel(struct Scsi_Host *shost, unsigned int channel,
 			 * the FC ID can be the same as a target id
 			 * without a huge overhead of sparse id's.
 			 */
-			if (shost->reverse_ordering)
+			if (shost->reverse_ordering)/* 逆向扫描，交换ID */
 				/*
 				 * Scan from high to low id.
 				 */
 				order_id = shost->max_id - id - 1;
 			else
 				order_id = id;
+			/* 扫描特定的节点 */
 			scsi_scan_target(shost, channel, order_id, lun, rescan);
 		}
-	else
+	else/* 扫描特定节点 */
 		scsi_scan_target(shost, channel, id, lun, rescan);
 }
 
+/* SCSI中间层提供的扫描SCSI总线的函数 */
 int scsi_scan_host_selected(struct Scsi_Host *shost, unsigned int channel,
 			    unsigned int id, unsigned int lun, int rescan)
 {
 	SCSI_LOG_SCAN_BUS(3, printk (KERN_INFO "%s: <%u:%u:%u:%u>\n",
 		__FUNCTION__, shost->host_no, channel, id, lun));
 
+	/* 检查要扫描的ID号是否正确 */
 	if (((channel != SCAN_WILD_CARD) && (channel > shost->max_channel)) ||
 	    ((id != SCAN_WILD_CARD) && (id > shost->max_id)) ||
 	    ((lun != SCAN_WILD_CARD) && (lun > shost->max_lun)))
 		return -EINVAL;
 
-	down(&shost->scan_mutex);
-	if (channel == SCAN_WILD_CARD) 
+	down(&shost->scan_mutex);/* 获取扫描的锁 */
+	if (channel == SCAN_WILD_CARD) /* 要求扫描所有通道 */
+		/* 遍历所有可能的通道 */
 		for (channel = 0; channel <= shost->max_channel; channel++)
-			scsi_scan_channel(shost, channel, id, lun, rescan);
+			scsi_scan_channel(shost, channel, id, lun, rescan);/* 扫描该通道 */
 	else
 		scsi_scan_channel(shost, channel, id, lun, rescan);
 	up(&shost->scan_mutex);
@@ -1225,6 +1248,7 @@ int scsi_scan_host_selected(struct Scsi_Host *shost, unsigned int channel,
  * scsi_scan_host - scan the given adapter
  * @shost:	adapter to scan
  **/
+/* SCSI中间层提供的扫描SCSI总线的函数 */
 void scsi_scan_host(struct Scsi_Host *shost)
 {
 	scsi_scan_host_selected(shost, SCAN_WILD_CARD, SCAN_WILD_CARD,

@@ -595,7 +595,9 @@ acpi_bus_init_irq (void)
 	return_VALUE(0);
 }
 
-
+/**
+ * ACPI初始化过程。
+ */
 void __init
 acpi_early_init (void)
 {
@@ -652,6 +654,9 @@ acpi_early_init (void)
 	}
 #endif
 
+	/**
+	 * acpi_enable_subsystem会安装SCI中断处理函数到do_IRQ中。
+	 */
 	status = acpi_enable_subsystem(~(ACPI_NO_HARDWARE_INIT | ACPI_NO_ACPI_ENABLE));
 	if (ACPI_FAILURE(status)) {
 		printk(KERN_ERR PREFIX "Unable to enable ACPI\n");

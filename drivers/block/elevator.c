@@ -225,11 +225,14 @@ int elevator_global_init(void)
 	return 0;
 }
 
+/**
+ * 判断BIO是否可以被合并到req中。
+ */
 int elv_merge(request_queue_t *q, struct request **req, struct bio *bio)
 {
 	elevator_t *e = q->elevator;
 
-	if (e->ops->elevator_merge_fn)
+	if (e->ops->elevator_merge_fn)/* 对最后期限算法来说，回调函数是deadline_merge */
 		return e->ops->elevator_merge_fn(q, req, bio);
 
 	return ELEVATOR_NO_MERGE;
@@ -255,6 +258,9 @@ void elv_merge_requests(request_queue_t *q, struct request *rq,
 		e->ops->elevator_merge_req_fn(q, rq, next);
 }
 
+/**
+ * 将已经取出的请求放回块设备请求队列中。
+ */
 void elv_requeue_request(request_queue_t *q, struct request *rq)
 {
 	/*
@@ -290,6 +296,7 @@ void __elv_add_request(request_queue_t *q, struct request *rq, int where,
 	rq->q = q;
 
 	if (!test_bit(QUEUE_FLAG_DRAIN, &q->queue_flags)) {
+		/* 对最后期限算法来说，回调函数是deadline_add_request */
 		q->elevator->ops->elevator_add_req_fn(q, rq, where);
 
 		if (blk_queue_plugged(q)) {
@@ -318,47 +325,57 @@ void elv_add_request(request_queue_t *q, struct request *rq, int where,
 	spin_unlock_irqrestore(q->queue_lock, flags);
 }
 
+/**
+ * 从调度队列中获取下一个请求。
+ */
 static inline struct request *__elv_next_request(request_queue_t *q)
 {
+	/* 从队列中获取下一个请求，对最后期限算法来说，回调函数是deadline_dispatch_requests */
 	return q->elevator->ops->elevator_next_req_fn(q);
 }
 
+/**
+ * 返回请求队列中下一个要处理的请求。
+ * 它依然将请求保存在队列中，但是为其做了活动标记。该标记是防止IO调度器将其与其他请求合并。
+ */
 struct request *elv_next_request(request_queue_t *q)
 {
 	struct request *rq;
 	int ret;
 
-	while ((rq = __elv_next_request(q)) != NULL) {
+	while ((rq = __elv_next_request(q)) != NULL) {/* 从电梯队列中取出一个请求进行处理 */
 		/*
 		 * just mark as started even if we don't start it, a request
 		 * that has been delayed should not be passed by new incoming
 		 * requests
 		 */
-		rq->flags |= REQ_STARTED;
+		rq->flags |= REQ_STARTED;/* 从队列中取出后，如果今后再看到这个请求，必须是重新入队的 */
 
-		if (rq == q->last_merge)
+		if (rq == q->last_merge)/* 当前请求是队列中的请求边界(IO屏障) */
 			q->last_merge = NULL;
 
+		/* 如果队列不需要为SCSI进行特定的准备工作则退出 */
 		if ((rq->flags & REQ_DONTPREP) || !q->prep_rq_fn)
 			break;
 
-		ret = q->prep_rq_fn(q, rq);
-		if (ret == BLKPREP_OK) {
+		ret = q->prep_rq_fn(q, rq);/* 需要进行一些SCSI命令准备工作 */
+		if (ret == BLKPREP_OK) {/* 准备工作圆满返回 */
 			break;
-		} else if (ret == BLKPREP_DEFER) {
+		} else if (ret == BLKPREP_DEFER) {/* 暂时不能继续处理，需要将请求重新入队 */
 			rq = NULL;
 			break;
-		} else if (ret == BLKPREP_KILL) {
+		} else if (ret == BLKPREP_KILL) {/* 出现错误，没有办法继续处理 */
 			int nr_bytes = rq->hard_nr_sectors << 9;
 
 			if (!nr_bytes)
 				nr_bytes = rq->data_len;
 
+			/* 向上层返回错误 */
 			blkdev_dequeue_request(rq);
 			rq->flags |= REQ_QUIET;
 			end_that_request_chunk(rq, 0, nr_bytes);
 			end_that_request_last(rq);
-		} else {
+		} else {/* 意外 */
 			printk(KERN_ERR "%s: bad return=%d\n", __FUNCTION__,
 								ret);
 			break;
@@ -396,6 +413,9 @@ void elv_remove_request(request_queue_t *q, struct request *rq)
 		e->ops->elevator_remove_req_fn(q, rq);
 }
 
+/**
+ * 检查请求队列中是否存在待处理请求。
+ */
 int elv_queue_empty(request_queue_t *q)
 {
 	elevator_t *e = q->elevator;
@@ -467,6 +487,7 @@ int elv_may_queue(request_queue_t *q, int rw)
 	return ELV_MQUEUE_MAY;
 }
 
+/* 当一个IO请求完成时调用 */
 void elv_completed_request(request_queue_t *q, struct request *rq)
 {
 	elevator_t *e = q->elevator;

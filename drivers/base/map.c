@@ -17,17 +17,41 @@
 
 struct kobj_map {
 	struct probe {
+		/**
+		 * 散列冲突链表的下一个元素
+		 */
 		struct probe *next;
+		/**
+		 * 设备号范围的初始设备号（主、次设备号）
+		 */
 		dev_t dev;
+		/**
+		 * 设备号范围的大小
+		 */
 		unsigned long range;
+		/**
+		 * 如果有的话，就是实现设备驱动程序模块的指针
+		 */
 		struct module *owner;
+		/**
+		 * 探测谁拥有这个设备号范围
+		 */
 		kobj_probe_t *get;
+		/**
+		 * 增加设备号范围内拥有者的引用计数器？？？
+		 */
 		int (*lock)(dev_t, void *);
+		/**
+		 * 设备号范围内拥有者的私有数据
+		 */
 		void *data;
 	} *probes[255];
 	struct rw_semaphore *sem;
 };
 
+/**
+ * 依次建立设备驱动程序模型的数据结构，把设备号范围复制到设备驱动程序的描述符中。
+ */
 int kobj_map(struct kobj_map *domain, dev_t dev, unsigned long range,
 	     struct module *module, kobj_probe_t *probe,
 	     int (*lock)(dev_t, void *), void *data)

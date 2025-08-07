@@ -109,6 +109,9 @@ static struct sysfs_ops bus_sysfs_ops = {
 	.store	= bus_attr_store,
 };
 
+/**
+ * 创建属于总线的属性。
+ */
 int bus_create_file(struct bus_type * bus, struct bus_attribute * attr)
 {
 	int error;
@@ -120,6 +123,9 @@ int bus_create_file(struct bus_type * bus, struct bus_attribute * attr)
 	return error;
 }
 
+/**
+ * 删除总线属性。
+ */
 void bus_remove_file(struct bus_type * bus, struct bus_attribute * attr)
 {
 	if (get_bus(bus)) {
@@ -201,6 +207,11 @@ static int __bus_for_each_drv(struct bus_type *bus, struct device_driver *start,
  *	count in the supplied callback.
  */
 
+/**
+ * 循环扫描注册到总线的devices链表中的所有元素。
+ * 如果fn返回一个非0值，将停止迭代。
+ * 注意它获得了总线子系统的读写信号量。
+ */
 int bus_for_each_dev(struct bus_type * bus, struct device * start,
 		     void * data, int (*fn)(struct device *, void *))
 {
@@ -231,7 +242,10 @@ int bus_for_each_dev(struct bus_type * bus, struct device * start,
  *	in the callback. It must also be sure to increment the refcount
  *	so it doesn't disappear before returning to the caller.
  */
-
+ 
+/**
+ * 循环扫描drivers链表中的所有元素。
+ */
 int bus_for_each_drv(struct bus_type * bus, struct device_driver * start,
 		     void * data, int (*fn)(struct device_driver *, void *))
 {
@@ -685,6 +699,9 @@ static void bus_remove_attrs(struct bus_type * bus)
  *	infrastructure, then register the children subsystems it has:
  *	the devices and drivers that belong to the bus.
  */
+/**
+ * 注册总线。新注册的总线被删除到sysfs/bus中。
+ */
 int bus_register(struct bus_type * bus)
 {
 	int retval;
@@ -730,6 +747,9 @@ out:
  *
  *	Unregister the child subsystems and the bus itself.
  *	Finally, we call put_bus() to release the refcount
+ */
+/**
+ * 从系统中删除一个总线。
  */
 void bus_unregister(struct bus_type * bus)
 {

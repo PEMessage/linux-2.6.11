@@ -26,17 +26,19 @@ static unsigned int _major = 0;
 /*
  * One of these is allocated per bio.
  */
+/* MD设备分割后的BIO */
 struct dm_io {
-	struct mapped_device *md;
-	int error;
-	struct bio *bio;
-	atomic_t io_count;
+	struct mapped_device *md;/* 所属MD设备 */
+	int error;/* 错误码 */
+	struct bio *bio;/* 原始BIO */
+	atomic_t io_count;/* 分割后的BIO计数器 */
 };
 
 /*
  * One of these is allocated per target within a bio.  Hopefully
  * this will be simplified out one day.
  */
+/* DM设备分解后的BIO */
 struct target_io {
 	struct dm_io *io;
 	struct dm_target *ti;
@@ -50,45 +52,61 @@ struct target_io {
 #define DMF_SUSPENDED 1
 #define DMF_FS_LOCKED 2
 
+/* 映射设备描述符 */
 struct mapped_device {
+	/* 保护映射设备的锁 */
 	struct rw_semaphore lock;
 	rwlock_t map_lock;
+	/* 引用计数 */
 	atomic_t holders;
 
+	/* 设备标志 */
 	unsigned long flags;
 
+	/* 设备请求队列描述符 */
 	request_queue_t *queue;
+	/* 通用磁盘描述符指针 */
 	struct gendisk *disk;
 
+	/* 指向hash_cell描述符的指针，用于与用户空间接口 */
 	void *interface_ptr;
 
 	/*
 	 * A list of ios that arrived while we were suspended.
 	 */
+	/* 在挂起时到达的IO请求数 */
 	atomic_t pending;
+	/* 等待队列 */
 	wait_queue_head_t wait;
+	/* 延迟处理的BIO链表 */
  	struct bio_list deferred;
 
 	/*
 	 * The current mapping.
 	 */
+	/* 当前使用的映射表描述符指针 */
 	struct dm_table *map;
 
 	/*
 	 * io objects are allocated from here.
 	 */
+	/* 用于dm_io的缓冲分配器 */
 	mempool_t *io_pool;
+	/* 用于dm_target_io的缓冲分配器 */
 	mempool_t *tio_pool;
 
 	/*
 	 * Event handling.
 	 */
+	/* 映射设备事件触发的编号，一次可以触发多个事件 */
 	atomic_t event_nr;
+	/* 等待映射设备事件的进程位于这个队列中 */
 	wait_queue_head_t eventq;
 
 	/*
 	 * freeze/thaw support require holding onto a super block
 	 */
+	/* 如果映射设备上有文件系统，这个文件系统被锁定，强制进入一致状态。 */
 	struct super_block *frozen_sb;
 };
 
@@ -142,11 +160,11 @@ static void local_exit(void)
 }
 
 int (*_inits[])(void) __initdata = {
-	local_init,
-	dm_target_init,
-	dm_linear_init,
-	dm_stripe_init,
-	dm_interface_init,
+	local_init,/* 分配各种结构的高速缓存，并注册设备号 */
+	dm_target_init,/* 注册致错映射目标类型 */
+	dm_linear_init,/* 注册线性映射目标类型 */
+	dm_stripe_init,/* 注册条带映射目标类型 */
+	dm_interface_init,/* 初始化两个哈希表，并注册一个misc设备用于设备控制 */
 };
 
 void (*_exits[])(void) = {
@@ -157,13 +175,14 @@ void (*_exits[])(void) = {
 	dm_interface_exit,
 };
 
+/* DM初始化 */
 static int __init dm_init(void)
 {
 	const int count = ARRAY_SIZE(_inits);
 
 	int r, i;
 
-	for (i = 0; i < count; i++) {
+	for (i = 0; i < count; i++) {/* 依次调用各个初始化函数 */
 		r = _inits[i]();
 		if (r)
 			goto bad;
@@ -234,12 +253,12 @@ static int queue_io(struct mapped_device *md, struct bio *bio)
 {
 	down_write(&md->lock);
 
-	if (!test_bit(DMF_BLOCK_IO, &md->flags)) {
+	if (!test_bit(DMF_BLOCK_IO, &md->flags)) {/* 不进行延迟处理，则退出 */
 		up_write(&md->lock);
-		return 1;
+		return 1;/* 这里返回1，上层会继续获取锁后判断DMF_BLOCK_IO标志 */
 	}
 
-	bio_list_add(&md->deferred, bio);
+	bio_list_add(&md->deferred, bio);/* 将请求添加到延迟链表中 */
 
 	up_write(&md->lock);
 	return 0;		/* deferred successfully */
@@ -278,9 +297,10 @@ struct dm_table *dm_get_table(struct mapped_device *md)
  */
 static inline void dec_pending(struct dm_io *io, int error)
 {
-	if (error)
+	if (error)/* 保存错误码 */
 		io->error = error;
 
+	/* 递减分割计数，如果递减为0，则调用原始BIO的结束回调 */
 	if (atomic_dec_and_test(&io->io_count)) {
 		if (atomic_dec_and_test(&io->md->pending))
 			/* nudge anyone waiting on suspend queue */
@@ -291,6 +311,7 @@ static inline void dec_pending(struct dm_io *io, int error)
 	}
 }
 
+/* 当DM设备分割后的BIO被结束后，回调此函数 */
 static int clone_endio(struct bio *bio, unsigned int done, int error)
 {
 	int r = 0;
@@ -298,15 +319,16 @@ static int clone_endio(struct bio *bio, unsigned int done, int error)
 	struct dm_io *io = tio->io;
 	dm_endio_fn endio = tio->ti->type->end_io;
 
-	if (bio->bi_size)
+	if (bio->bi_size)/* 运行到这里，bi_size应当为0，如果不为0表示某个地方出现了错误 */
 		return 1;
 
+	/* 如果BIO不是最新的，即使没有出错码，也表示有错误 */
 	if (!bio_flagged(bio, BIO_UPTODATE) && !error)
 		error = -EIO;
 
-	if (endio) {
+	if (endio) {/* 目标映射类型有结束回调 */
 		r = endio(tio->ti, bio, error, &tio->info);
-		if (r < 0)
+		if (r < 0)/* 出现了错误 */
 			error = r;
 
 		else if (r > 0)
@@ -315,6 +337,7 @@ static int clone_endio(struct bio *bio, unsigned int done, int error)
 	}
 
 	free_tio(io->md, tio);
+	/* 递减分割计数 */
 	dec_pending(io, error);
 	bio_put(bio);
 	return r;
@@ -323,14 +346,16 @@ static int clone_endio(struct bio *bio, unsigned int done, int error)
 static sector_t max_io_len(struct mapped_device *md,
 			   sector_t sector, struct dm_target *ti)
 {
+	/* 计算扇区在目标设备上的相对位置及长度 */
 	sector_t offset = sector - ti->begin;
-	sector_t len = ti->len - offset;
+	sector_t len = ti->len - offset;/* 假设能读写的最大长度是映射目标的剩余长度 */
 
 	/*
 	 * Does the target need to split even further ?
 	 */
-	if (ti->split_io) {
+	if (ti->split_io) {/* 目标设备需要细分IO长度? */
 		sector_t boundary;
+		/* 将结束边界对齐，并减去起始扇区号，作为本次IO的最大长度 */
 		boundary = ((offset + ti->split_io) & ~(ti->split_io - 1))
 			   - offset;
 		if (len > boundary)
@@ -340,6 +365,7 @@ static sector_t max_io_len(struct mapped_device *md,
 	return len;
 }
 
+/* 将复制后的BIO映射到目标设备 */
 static void __map_bio(struct dm_target *ti, struct bio *clone,
 		      struct target_io *tio)
 {
@@ -350,6 +376,7 @@ static void __map_bio(struct dm_target *ti, struct bio *clone,
 	 */
 	BUG_ON(!clone->bi_size);
 
+	/* 目标设备的完成回调，它会递减BIO计数，直到为0后才会将DM设备的原始BIO请求结束掉 */
 	clone->bi_end_io = clone_endio;
 	clone->bi_private = tio;
 
@@ -358,29 +385,32 @@ static void __map_bio(struct dm_target *ti, struct bio *clone,
 	 * anything, the target has assumed ownership of
 	 * this io.
 	 */
+	/* 递增分割计数 */
 	atomic_inc(&tio->io->io_count);
+	/* 调用目标设备的映射回调函数 */
 	r = ti->type->map(ti, clone, &tio->info);
-	if (r > 0)
+	if (r > 0)/* 成功映射，并重定向到低层设备，调用块IO层提交BIO */
 		/* the bio has been remapped so dispatch it */
 		generic_make_request(clone);
 
-	else if (r < 0) {
+	else if (r < 0) {/* 出现错误，递减分割计数器 */
 		/* error the io and bail out */
 		struct dm_io *io = tio->io;
 		free_tio(tio->io->md, tio);
 		dec_pending(io, -EIO);
 		bio_put(clone);
-	}
+	}/* 返回0表示复制的BIO已经被映射目标类型提交，不须做任何处理 */
 }
 
+/* 将DM设备的BIO分割成小BIO时，每个BIO的执行上下文 */
 struct clone_info {
-	struct mapped_device *md;
-	struct dm_table *map;
-	struct bio *bio;
+	struct mapped_device *md;/* 所属MD设备 */
+	struct dm_table *map;/* 设备的映射表 */
+	struct bio *bio;/* 原始BIO */
 	struct dm_io *io;
-	sector_t sector;
-	sector_t sector_count;
-	unsigned short idx;
+	sector_t sector;/* 当前IO的起始扇区 */
+	sector_t sector_count;/* 剩余扇区数 */
+	unsigned short idx;/* 当前IO在原bio的段索引，动态变化 */
 };
 
 /*
@@ -426,10 +456,13 @@ static struct bio *clone_bio(struct bio *bio, sector_t sector,
 	return clone;
 }
 
+/* 分割处理DM设备的BIO请求 */
 static void __clone_and_map(struct clone_info *ci)
 {
 	struct bio *clone, *bio = ci->bio;
+	/* 查找扇区对应的映射目标 */
 	struct dm_target *ti = dm_table_find_target(ci->map, ci->sector);
+	/* 计算本轮处理的最大扇区数 */
 	sector_t len = 0, max = max_io_len(ci->md, ci->sector, ti);
 	struct target_io *tio;
 
@@ -441,17 +474,20 @@ static void __clone_and_map(struct clone_info *ci)
 	tio->ti = ti;
 	memset(&tio->info, 0, sizeof(tio->info));
 
-	if (ci->sector_count <= max) {
+	if (ci->sector_count <= max) {/* 整个BIO都可以被映射到这个设备 */
 		/*
 		 * Optimise for the simple case where we can do all of
 		 * the remaining io with a single clone.
 		 */
+		/* 复制BIO */
 		clone = clone_bio(bio, ci->sector, ci->idx,
 				  bio->bi_vcnt - ci->idx, ci->sector_count);
+		/* 将BIO映射到目标设备 */
 		__map_bio(ti, clone, tio);
+		/* 将剩余扇区数清0 */
 		ci->sector_count = 0;
 
-	} else if (to_sector(bio->bi_io_vec[ci->idx].bv_len) <= max) {
+	} else if (to_sector(bio->bi_io_vec[ci->idx].bv_len) <= max) {/* BIO的当前段可以被映射到这个映射目标执行 */
 		/*
 		 * There are some bvecs that don't span targets.
 		 * Do as many of these as possible.
@@ -460,24 +496,29 @@ static void __clone_and_map(struct clone_info *ci)
 		sector_t remaining = max;
 		sector_t bv_len;
 
+		/* 遍历BIO的所有段，将尽可能多的段纳入到本次IO */
 		for (i = ci->idx; remaining && (i < bio->bi_vcnt); i++) {
 			bv_len = to_sector(bio->bi_io_vec[i].bv_len);
 
-			if (bv_len > remaining)
+			if (bv_len > remaining)/* 该段太长，超过目标设备的范围 */
 				break;
 
+			/* 调整可接纳的扇区数和本次处理的长度 */
 			remaining -= bv_len;
 			len += bv_len;
 		}
 
+		/* 复制BIO */
 		clone = clone_bio(bio, ci->sector, ci->idx, i - ci->idx, len);
+		/* 将BIO映射到目标设备 */
 		__map_bio(ti, clone, tio);
 
+		/* 调整剩余的扇区数 */
 		ci->sector += len;
 		ci->sector_count -= len;
 		ci->idx = i;
 
-	} else {
+	} else {/* 需要对BIO的当前段进行分割 */
 		/*
 		 * Create two copy bios to deal with io that has
 		 * been split across a target.
@@ -512,8 +553,9 @@ static void __clone_and_map(struct clone_info *ci)
  */
 static void __split_bio(struct mapped_device *md, struct bio *bio)
 {
-	struct clone_info ci;
+	struct clone_info ci;/* 被分割的BIO的执行上下文 */
 
+	/* 初始化clone_info */
 	ci.map = dm_get_table(md);
 	if (!ci.map) {
 		bio_io_error(bio, bio->bi_size);
@@ -532,11 +574,11 @@ static void __split_bio(struct mapped_device *md, struct bio *bio)
 	ci.idx = bio->bi_idx;
 
 	atomic_inc(&md->pending);
-	while (ci.sector_count)
-		__clone_and_map(&ci);
+	while (ci.sector_count)/* 对BIO进行分割，直到剩余扇区数为0 */
+		__clone_and_map(&ci);/* 分割BIO */
 
 	/* drop the extra reference count */
-	dec_pending(ci.io, 0);
+	dec_pending(ci.io, 0);/* io_count初值为1，这里将其减回去 */
 	dm_table_put(ci.map);
 }
 /*-----------------------------------------------------------------
@@ -547,27 +589,28 @@ static void __split_bio(struct mapped_device *md, struct bio *bio)
  * The request function that just remaps the bio built up by
  * dm_merge_bvec.
  */
+/* DM设备处理BIO的入口函数 */
 static int dm_request(request_queue_t *q, struct bio *bio)
 {
 	int r;
 	struct mapped_device *md = q->queuedata;
 
-	down_read(&md->lock);
+	down_read(&md->lock);/* 获取设备的读锁 */
 
 	/*
 	 * If we're suspended we have to queue
 	 * this io for later.
 	 */
-	while (test_bit(DMF_BLOCK_IO, &md->flags)) {
+	while (test_bit(DMF_BLOCK_IO, &md->flags)) {/* 需要延迟处理IO */
 		up_read(&md->lock);
 
-		if (bio_rw(bio) == READA) {
+		if (bio_rw(bio) == READA) {/* 如果是预读，则不需要挂入延迟队列，直接向上层返回错误 */
 			bio_io_error(bio, bio->bi_size);
 			return 0;
 		}
 
-		r = queue_io(md, bio);
-		if (r < 0) {
+		r = queue_io(md, bio);/* 将请求挂入到延迟队列中，由工作队列处理 */
+		if (r < 0) {/* 挂入失败，向上层返回错误 */
 			bio_io_error(bio, bio->bi_size);
 			return 0;
 
@@ -578,10 +621,10 @@ static int dm_request(request_queue_t *q, struct bio *bio)
 		 * We're in a while loop, because someone could suspend
 		 * before we get to the following read lock.
 		 */
-		down_read(&md->lock);
+		down_read(&md->lock);/* 如果在释放锁的时候，其他事件导致挂入队列失败，就获取锁后重试 */
 	}
 
-	__split_bio(md, bio);
+	__split_bio(md, bio);/* 分割与处理BIO */
 	up_read(&md->lock);
 	return 0;
 }
@@ -715,10 +758,11 @@ static struct block_device_operations dm_blk_dops;
 /*
  * Allocate and initialise a blank device with a given minor.
  */
+/* 分配并初始化映射设备的描述符，次设备号为-1表示由系统自动选择次设备号 */
 static struct mapped_device *alloc_dev(unsigned int minor, int persistent)
 {
 	int r;
-	struct mapped_device *md = kmalloc(sizeof(*md), GFP_KERNEL);
+	struct mapped_device *md = kmalloc(sizeof(*md), GFP_KERNEL);/* 分配描述符 */
 
 	if (!md) {
 		DMWARN("unable to allocate device, out of memory.");
@@ -740,6 +784,7 @@ static struct mapped_device *alloc_dev(unsigned int minor, int persistent)
 	if (!md->queue)
 		goto bad1;
 
+	/* 分配并初始化磁盘队列 */
 	md->queue->queuedata = md;
 	md->queue->backing_dev_info.congested_fn = dm_any_congested;
 	md->queue->backing_dev_info.congested_data = md;
@@ -747,6 +792,7 @@ static struct mapped_device *alloc_dev(unsigned int minor, int persistent)
 	md->queue->unplug_fn = dm_unplug_all;
 	md->queue->issue_flush_fn = dm_flush_all;
 
+	/* 创建内存分配缓冲池 */
 	md->io_pool = mempool_create(MIN_IOS, mempool_alloc_slab,
 				     mempool_free_slab, _io_cache);
  	if (!md->io_pool)
@@ -757,6 +803,7 @@ static struct mapped_device *alloc_dev(unsigned int minor, int persistent)
 	if (!md->tio_pool)
 		goto bad3;
 
+	/* 分配通用磁盘结构，传入1表示不支持分区 */
 	md->disk = alloc_disk(1);
 	if (!md->disk)
 		goto bad4;
@@ -767,6 +814,7 @@ static struct mapped_device *alloc_dev(unsigned int minor, int persistent)
 	md->disk->queue = md->queue;
 	md->disk->private_data = md;
 	sprintf(md->disk->disk_name, "dm-%d", minor);
+	/* 将磁盘添加到系统 */
 	add_disk(md->disk);
 
 	atomic_set(&md->pending, 0);
@@ -828,17 +876,21 @@ static int __bind(struct mapped_device *md, struct dm_table *t)
 	request_queue_t *q = md->queue;
 	sector_t size;
 
+	/* 获得原来的映射表的长度 */
 	size = dm_table_get_size(t);
+	/* 设置映射设备的新长度，更新通用磁盘描述符的容量，更新bdev文件系统中inode的长度 */
 	__set_size(md->disk, size);
 	if (size == 0)
 		return 0;
 
-	write_lock(&md->map_lock);
+	write_lock(&md->map_lock);/* 设置映射表 */
 	md->map = t;
 	write_unlock(&md->map_lock);
 
 	dm_table_get(t);
+	/* 设置映射表的事件回调函数 */
 	dm_table_event_callback(md->map, event_callback, md);
+	/* 为映射设备的请求队列设置限制 */
 	dm_table_set_restrictions(t, q);
 	return 0;
 }
@@ -955,13 +1007,13 @@ int dm_swap_table(struct mapped_device *md, struct dm_table *table)
 	down_write(&md->lock);
 
 	/* device must be suspended */
-	if (!test_bit(DMF_SUSPENDED, &md->flags)) {
+	if (!test_bit(DMF_SUSPENDED, &md->flags)) {/* 设备还没有被挂起，不能修改它的映射表 */
 		up_write(&md->lock);
 		return -EPERM;
 	}
 
 	__unbind(md);
-	r = __bind(md, table);
+	r = __bind(md, table);/* 进行实际的交换操作 */
 	if (r)
 		return r;
 

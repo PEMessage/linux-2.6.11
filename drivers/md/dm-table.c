@@ -21,17 +21,26 @@
 #define KEYS_PER_NODE (NODE_SIZE / sizeof(sector_t))
 #define CHILDREN_PER_NODE (KEYS_PER_NODE + 1)
 
+/* 映射表描述符 */
 struct dm_table {
+	/* 引用计数 */
 	atomic_t holders;
 
 	/* btree table */
+	/* Btree的深度，是为了加快扇区到目标的查找过程 */
 	unsigned int depth;
+	/* Btree各层的节点数 */
 	unsigned int counts[MAX_DEPTH];	/* in nodes */
+	/* Btree各层的索引值 */
 	sector_t *index[MAX_DEPTH];
 
+	/* 映射规则的数目 */
 	unsigned int num_targets;
+	/* 偏移数组和目标数组已经分配的项数 */
 	unsigned int num_allocated;
+	/* 偏移数组指针 */
 	sector_t *highs;
+	/* 目标数组指针 */
 	struct dm_target *targets;
 
 	/*
@@ -39,9 +48,11 @@ struct dm_table {
 	 * device.  This should be a combination of FMODE_READ
 	 * and FMODE_WRITE.
 	 */
+	/* 逻辑设备的读写模式 */
 	int mode;
 
 	/* a list of devices used by this table */
+	/* 映射表使用的低层设备链表 */
 	struct list_head devices;
 
 	/*
@@ -51,7 +62,9 @@ struct dm_table {
 	struct io_restrictions limits;
 
 	/* events get handed up using this callback */
+	/* 映射表的事件回调函数 */
 	void (*event_fn)(void *);
+	/* 映射表的事件回调参数 */
 	void *event_context;
 };
 
@@ -649,6 +662,7 @@ static void check_for_valid_limits(struct io_restrictions *rs)
 		rs->seg_boundary_mask = -1;
 }
 
+/* 将目标规则添加到DM设备的目标表中 */
 int dm_table_add_target(struct dm_table *t, const char *type,
 			sector_t start, sector_t len, char *params)
 {
@@ -656,26 +670,29 @@ int dm_table_add_target(struct dm_table *t, const char *type,
 	char **argv;
 	struct dm_target *tgt;
 
-	if ((r = check_space(t)))
+	if ((r = check_space(t)))/* 检查是否需要扩展偏移数组和目标数组，如果扩展不成功则退出 */
 		return r;
 
+	/* 找到新规则保存的位置并将其清0 */
 	tgt = t->targets + t->num_targets;
 	memset(tgt, 0, sizeof(*tgt));
 
-	if (!len) {
+	if (!len) {/* 确保规则长度不为0 */
 		tgt->error = "zero-length target";
 		DMERR("%s", tgt->error);
 		return -EINVAL;
 	}
 
+	/* 获得规则的目标类型 */
 	tgt->type = dm_get_target_type(type);
-	if (!tgt->type) {
+	if (!tgt->type) {/* 未知的规则类型 */
 		tgt->error = "unknown target type";
 		DMERR("%s", tgt->error);
 		return -EINVAL;
 	}
 
 	tgt->table = t;
+	/* 映射的起始位置及长度 */
 	tgt->begin = start;
 	tgt->len = len;
 	tgt->error = "Unknown error";
@@ -683,18 +700,20 @@ int dm_table_add_target(struct dm_table *t, const char *type,
 	/*
 	 * Does this target adjoin the previous one ?
 	 */
-	if (!adjoin(t, tgt)) {
+	if (!adjoin(t, tgt)) {/* 确保规则之间无间隙 */
 		tgt->error = "Gap in table";
 		r = -EINVAL;
 		goto bad;
 	}
 
+	/* 对目标参数进行分解 */
 	r = dm_split_args(&argc, &argv, params);
 	if (r) {
 		tgt->error = "couldn't split parameters (insufficient memory)";
 		goto bad;
 	}
 
+	/* 由各规则类型对参数进行分析 */
 	r = tgt->type->ctr(tgt, argc, argv);
 	kfree(argv);
 	if (r)

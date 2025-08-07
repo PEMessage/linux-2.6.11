@@ -15,8 +15,11 @@
 /*
  * Linear: maps a linear range of a device.
  */
+/* 线性映射的私有数据结构 */
 struct linear_c {
+	/* 目标设备 */
 	struct dm_dev *dev;
+	/* 在目标设备上的起始地址 */
 	sector_t start;
 };
 
@@ -27,22 +30,25 @@ static int linear_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	struct linear_c *lc;
 
-	if (argc != 2) {
+	if (argc != 2) {/* 只需要目标设备和起始扇区两个参数 */
 		ti->error = "dm-linear: Invalid argument count";
 		return -EINVAL;
 	}
 
+	/* 分配私有数据结构 */
 	lc = kmalloc(sizeof(*lc), GFP_KERNEL);
 	if (lc == NULL) {
 		ti->error = "dm-linear: Cannot allocate linear context";
 		return -ENOMEM;
 	}
 
+	/* 解析起始扇区 */
 	if (sscanf(argv[1], SECTOR_FORMAT, &lc->start) != 1) {
 		ti->error = "dm-linear: Invalid device sector";
 		goto bad;
 	}
 
+	/* 解析设备名称 */
 	if (dm_get_device(ti, argv[0], lc->start, ti->len,
 			  dm_table_get_mode(ti->table), &lc->dev)) {
 		ti->error = "dm-linear: Device lookup failed";
@@ -57,6 +63,7 @@ static int linear_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	return -EINVAL;
 }
 
+/* 析构函数，释放私有数据结构 */
 static void linear_dtr(struct dm_target *ti)
 {
 	struct linear_c *lc = (struct linear_c *) ti->private;
@@ -65,6 +72,7 @@ static void linear_dtr(struct dm_target *ti)
 	kfree(lc);
 }
 
+/* 转换BIO请求 */
 static int linear_map(struct dm_target *ti, struct bio *bio,
 		      union map_info *map_context)
 {

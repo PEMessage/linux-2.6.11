@@ -88,6 +88,9 @@ EXPORT_SYMBOL(pci_remove_bus);
  * device lists, remove the /proc entry, and notify userspace
  * (/sbin/hotplug).
  */
+/**
+ * 移除一个PCI设备。
+ */
 void pci_remove_bus_device(struct pci_dev *dev)
 {
 	if (dev->subordinate) {

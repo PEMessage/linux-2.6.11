@@ -58,6 +58,12 @@ int get_blkdev_list(char *p)
 }
 #endif
 
+/**
+ * 注册块设备驱动程序。为块设备预订一个主设备号。并在/proc/devices特殊文件中产生一个新条目。
+ *		major:		主设备号。如果传入0，则分配一个新的主设备号。并作为返回值。
+ *		name:		驱动名称。
+ * 返回值为正数，表示分配的主设备号。负数表示错误。
+ */
 int register_blkdev(unsigned int major, const char *name)
 {
 	struct blk_major_name **n, *p;
@@ -115,6 +121,9 @@ out:
 EXPORT_SYMBOL(register_blkdev);
 
 /* todo: make void - error printk here */
+/**
+ * 注销块设备驱动程序。
+ */
 int unregister_blkdev(unsigned int major, const char *name)
 {
 	struct blk_major_name **n;
@@ -140,6 +149,9 @@ int unregister_blkdev(unsigned int major, const char *name)
 
 EXPORT_SYMBOL(unregister_blkdev);
 
+/**
+ * kobj_map建立设备驱动程序和设备的主设备号（及相关范围内的次设备号）之间的联接。
+ */
 static struct kobj_map *bdev_map;
 
 /*
@@ -185,12 +197,28 @@ static int exact_lock(dev_t dev, void *data)
  * This function registers the partitioning information in @disk
  * with the kernel.
  */
+/**
+ * 注册和激活磁盘
+ */
 void add_disk(struct gendisk *disk)
 {
+	/**
+	 * 设置GENHD_FL_UP标志。
+	 */
 	disk->flags |= GENHD_FL_UP;
+	/**
+	 * 建立设备驱动程序和设备的主设备号之间的连接。
+	 */
 	blk_register_region(MKDEV(disk->major, disk->first_minor),
 			    disk->minors, NULL, exact_match, exact_lock, disk);
+	/**
+	 * 注册设备驱动程序模型的gendisk的kobject结构，它作为设备驱动程序的一个新设备。
+	 * 并扫描磁盘中的分区表，对每个分区，初始化其hd_struct描述符。同时注册设备驱动程序模型中的分区。
+	 */
 	register_disk(disk);
+	/**
+	 * 注册请求队列描述符中内嵌的kobject结构。
+	 */
 	blk_register_queue(disk);
 }
 
@@ -566,18 +594,23 @@ struct seq_operations diskstats_op = {
 	.show	= diskstats_show
 };
 
-
+/**
+ * 分配并初始化一个新的gendisk(磁盘)对象
+ * 如果新磁盘被分区，那它还会分配并初始化一个适当的hd_struct数组
+ */
 struct gendisk *alloc_disk(int minors)
 {
+	/* 分配磁盘描述符空间 */
 	struct gendisk *disk = kmalloc(sizeof(struct gendisk), GFP_KERNEL);
 	if (disk) {
 		memset(disk, 0, sizeof(struct gendisk));
-		if (!init_disk_stats(disk)) {
+		if (!init_disk_stats(disk)) {/* 分配每CPU的统计数据 */
 			kfree(disk);
 			return NULL;
 		}
-		if (minors > 1) {
+		if (minors > 1) {/* 分区数大于1，表示有逻辑分区 */
 			int size = (minors - 1) * sizeof(struct hd_struct *);
+			/* 为逻辑分区分配描述符 */
 			disk->part = kmalloc(size, GFP_KERNEL);
 			if (!disk->part) {
 				kfree(disk);
@@ -586,8 +619,10 @@ struct gendisk *alloc_disk(int minors)
 			memset(disk->part, 0, size);
 		}
 		disk->minors = minors;
+		/* 处理sys文件系统 */
 		kobj_set_kset_s(disk,block_subsys);
 		kobject_init(&disk->kobj);
+		/* 随机数熵处理 */
 		rand_initialize_disk(disk);
 	}
 	return disk;
@@ -595,6 +630,9 @@ struct gendisk *alloc_disk(int minors)
 
 EXPORT_SYMBOL(alloc_disk);
 
+/**
+ * 增加磁盘设备的引用计数。
+ */
 struct kobject *get_disk(struct gendisk *disk)
 {
 	struct module *owner;

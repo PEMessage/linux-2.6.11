@@ -179,6 +179,10 @@ MODULE_PARM_DESC(debug, "Debug level (0=none,...,16=all)");
 #define INTEL_8255X_ETHERNET_DEVICE(device_id, ich) {\
 	PCI_VENDOR_ID_INTEL, device_id, PCI_ANY_ID, PCI_ANY_ID, \
 	PCI_CLASS_NETWORK_ETHERNET << 8, 0xFFFF00, ich }
+/**
+ * 厂商ID固定为PCI_VENDOR_ID_INTEL，这是intel分配的厂商ID。
+ * 第三和第四个域(subvendor和subdevice)被初始化为PCI_ANY_ID，这是因为前两个域(vendor和device)已经足够标识一个设备
+ */
 static struct pci_device_id e100_id_table[] = {
 	INTEL_8255X_ETHERNET_DEVICE(0x1029, 0),
 	INTEL_8255X_ETHERNET_DEVICE(0x1030, 0),
@@ -2356,12 +2360,18 @@ static struct pci_driver e100_driver = {
 #endif
 };
 
+/**
+ * 模块初始化函数。
+ */
 static int __init e100_init_module(void)
 {
 	if(((1 << debug) - 1) & NETIF_MSG_DRV) {
 		printk(KERN_INFO PFX "%s, %s\n", DRV_DESCRIPTION, DRV_VERSION);
 		printk(KERN_INFO PFX "%s\n", DRV_COPYRIGHT);
 	}
+	/**
+	 * 调用pci_module_init注册设备驱动，同时也会注册驱动所能处理的网卡
+	 */
 	return pci_module_init(&e100_driver);
 }
 

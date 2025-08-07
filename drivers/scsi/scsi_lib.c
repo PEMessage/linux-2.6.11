@@ -368,6 +368,7 @@ static void scsi_single_lun_run(struct scsi_device *current_sdev)
 	unsigned long flags;
 
 	spin_lock_irqsave(shost->host_lock, flags);
+	/* 清空此标志，表示没有设备在进行IO */
 	scsi_target(current_sdev)->starget_sdev_user = NULL;
 	spin_unlock_irqrestore(shost->host_lock, flags);
 
@@ -377,17 +378,21 @@ static void scsi_single_lun_run(struct scsi_device *current_sdev)
 	 * but in most cases, we will be first. Ideally, each LU on the
 	 * target would get some limited time or requests on the target.
 	 */
+	/* 运行当前设备上的请求队列 */
 	blk_run_queue(current_sdev->request_queue);
 
 	spin_lock_irqsave(shost->host_lock, flags);
+	/* 如果设备上有请求，则退出 */
 	if (scsi_target(current_sdev)->starget_sdev_user)
 		goto out;
+	/* 遍历相邻设备 */
 	list_for_each_entry_safe(sdev, tmp, &current_sdev->same_target_siblings,
 			same_target_siblings) {
-		if (scsi_device_get(sdev))
+		if (scsi_device_get(sdev))/* 不能获得设备的引用 */
 			continue;
 
 		spin_unlock_irqrestore(shost->host_lock, flags);
+		/* 运行该设备上的队列 */
 		blk_run_queue(sdev->request_queue);
 		spin_lock_irqsave(shost->host_lock, flags);
 	
@@ -415,11 +420,11 @@ static void scsi_run_queue(struct request_queue *q)
 	struct Scsi_Host *shost = sdev->host;
 	unsigned long flags;
 
-	if (sdev->single_lun)
+	if (sdev->single_lun)/* 一次只允许对目标节点的一个逻辑单元进行IO */
 		scsi_single_lun_run(sdev);
 
 	spin_lock_irqsave(shost->host_lock, flags);
-	while (!list_empty(&shost->starved_list) &&
+	while (!list_empty(&shost->starved_list) &&/* 饥饿链表中还有设备 */
 	       !shost->host_blocked && !shost->host_self_blocked &&
 		!((shost->can_queue > 0) &&
 		  (shost->host_busy >= shost->can_queue))) {
@@ -435,9 +440,11 @@ static void scsi_run_queue(struct request_queue *q)
 		 */
 		sdev = list_entry(shost->starved_list.next,
 					  struct scsi_device, starved_entry);
+		/* 将它从饥饿链表中摘除 */
 		list_del_init(&sdev->starved_entry);
 		spin_unlock_irqrestore(shost->host_lock, flags);
 
+		/* 运行饥饿设备上的请求队列 */
 		blk_run_queue(sdev->request_queue);
 
 		spin_lock_irqsave(shost->host_lock, flags);
@@ -451,6 +458,7 @@ static void scsi_run_queue(struct request_queue *q)
 	}
 	spin_unlock_irqrestore(shost->host_lock, flags);
 
+	/* 处理完饥饿设备的请求后，处理当前设备上的请求 */
 	blk_run_queue(q);
 }
 
@@ -516,6 +524,7 @@ void scsi_run_host_queues(struct Scsi_Host *shost)
  *		We are guaranteeing that the request queue will be goosed
  *		at some point during this call.
  */
+/* 当一个SCSI命令完成后，调用此函数 */
 static struct scsi_cmnd *scsi_end_request(struct scsi_cmnd *cmd, int uptodate,
 					  int bytes, int requeue)
 {
@@ -527,29 +536,29 @@ static struct scsi_cmnd *scsi_end_request(struct scsi_cmnd *cmd, int uptodate,
 	 * If there are blocks left over at the end, set up the command
 	 * to queue the remainder of them.
 	 */
-	if (end_that_request_chunk(req, uptodate, bytes)) {
+	if (end_that_request_chunk(req, uptodate, bytes)) {/* 该请求还没有完全处理完，还有剩余的块 */
 		int leftover = (req->hard_nr_sectors << 9);
 
-		if (blk_pc_request(req))
+		if (blk_pc_request(req))/* 计算剩余的请求 */
 			leftover = req->data_len;
 
 		/* kill remainder if no retrys */
-		if (!uptodate && blk_noretry_request(req))
-			end_that_request_chunk(req, 0, leftover);
-		else {
+		if (!uptodate && blk_noretry_request(req))/* 上层不允许重试 */
+			end_that_request_chunk(req, 0, leftover);/* 结束处理这个命令的剩余部分 */
+		else {/* 没有错误或者允许重试 */
 			if (requeue)
 				/*
 				 * Bleah.  Leftovers again.  Stick the
 				 * leftovers in the front of the
 				 * queue, and goose the queue again.
 				 */
-				scsi_requeue_command(q, cmd);
+				scsi_requeue_command(q, cmd);/* 将命令插入到队列中 */
 
 			return cmd;
 		}
 	}
 
-	add_disk_randomness(req->rq_disk);
+	add_disk_randomness(req->rq_disk);/* 随机熵处理 */
 
 	spin_lock_irqsave(q->queue_lock, flags);
 	if (blk_rq_tagged(req))
@@ -685,6 +694,7 @@ static void scsi_release_buffers(struct scsi_cmnd *cmd)
  *		b) We can just use scsi_requeue_command() here.  This would
  *		   be used if we just wanted to retry, for example.
  */
+/* 当SCSI命令完成后调用此函数 */
 void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes,
 			unsigned int block_bytes)
 {
@@ -715,10 +725,12 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes,
 	}
 
 	if (result) {
+		/* 规格化数据格式 */
 		sense_valid = scsi_command_normalize_sense(cmd, &sshdr);
 		if (sense_valid)
 			sense_deferred = scsi_sense_is_deferred(&sshdr);
 	}
+	/* 处理公共服务层的请求，主要来自于ioctl */
 	if (blk_pc_request(req)) { /* SG_IO ioctl from block level */
 		req->errors = result;
 		if (result) {
@@ -769,13 +781,14 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes,
 		 * requeueing right here - we will requeue down below
 		 * when we handle the bad sectors.
 		 */
+		/* 处理一部分结束SCSI命令的工作 */
 		cmd = scsi_end_request(cmd, 1, good_bytes, result == 0);
 
 		/*
 		 * If the command completed without error, then either finish off the
 		 * rest of the command, or start a new one.
 		 */
-		if (result == 0 || cmd == NULL ) {
+		if (result == 0 || cmd == NULL ) {/* 如果scsi_end_request处理完命令则退出 */
 			return;
 		}
 	}
@@ -784,29 +797,30 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes,
 	 * sense buffer.  We can extract information from this, so we
 	 * can choose a block to remap, etc.
 	 */
+	/* scsi_end_request不能处理整个命令，这里继续处理 */
 	if (sense_valid && !sense_deferred) {
 		switch (sshdr.sense_key) {
 		case UNIT_ATTENTION:
-			if (cmd->device->removable) {
+			if (cmd->device->removable) {/* 感测到可移动介质发生变化 */
 				/* detected disc change.  set a bit 
 				 * and quietly refuse further access.
 				 */
 				cmd->device->changed = 1;
 				cmd = scsi_end_request(cmd, 0,
-						this_count, 1);
+						this_count, 1);/* 结束这个命令，表示其执行失败 */
 				return;
-			} else {
+			} else {/* 否则就是电源故障或总线复位 */
 				/*
 				* Must have been a power glitch, or a
 				* bus reset.  Could not have been a
 				* media change, so we just retry the
 				* request and see what happens.  
 				*/
-				scsi_requeue_command(q, cmd);
+				scsi_requeue_command(q, cmd);/* 重试这个命令 */
 				return;
 			}
 			break;
-		case ILLEGAL_REQUEST:
+		case ILLEGAL_REQUEST:/* 可能执行了不支持的命令 */
 			/*
 		 	* If we had an ILLEGAL REQUEST returned, then we may
 		 	* have performed an unsupported command.  The only
@@ -815,35 +829,36 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes,
 			* system where READ CAPACITY failed, we may have read
 			* past the end of the disk.
 		 	*/
-			if (cmd->device->use_10_for_rw &&
+			if (cmd->device->use_10_for_rw &&/* 执行了10字节的读写命令 */
 			    (cmd->cmnd[0] == READ_10 ||
 			     cmd->cmnd[0] == WRITE_10)) {
-				cmd->device->use_10_for_rw = 0;
+				cmd->device->use_10_for_rw = 0;/* 关闭此标志，重试时就只发送6字节命令了 */
 				/*
 				 * This will cause a retry with a 6-byte
 				 * command.
 				 */
-				scsi_requeue_command(q, cmd);
+				scsi_requeue_command(q, cmd);/* 将命令重新插入队列 */
 				result = 0;
-			} else {
+			} else {/* 其他情况下，都是失败的结果结束此命令 */
 				cmd = scsi_end_request(cmd, 0, this_count, 1);
 				return;
 			}
 			break;
-		case NOT_READY:
+		case NOT_READY:/* 设备正在启动过程中，或者临时被阻塞了 */
 			/*
 			 * If the device is in the process of becoming ready,
 			 * retry.
 			 */
-			if (sshdr.asc == 0x04 && sshdr.ascq == 0x01) {
-				scsi_requeue_command(q, cmd);
+			if (sshdr.asc == 0x04 && sshdr.ascq == 0x01) {/* 正在等待设备就绪 */
+				scsi_requeue_command(q, cmd);/* 重试命令 */
 				return;
 			}
 			printk(KERN_INFO "Device %s not ready.\n",
 			       req->rq_disk ? req->rq_disk->disk_name : "");
+			/* 否则就是设备被阻塞了，结束此命令 */
 			cmd = scsi_end_request(cmd, 0, this_count, 1);
 			return;
-		case VOLUME_OVERFLOW:
+		case VOLUME_OVERFLOW:/* 这种情况下，表示执行失败，结束命令 */
 			printk(KERN_INFO "Volume overflow <%d %d %d %d> CDB: ",
 			       cmd->device->host->host_no,
 			       (int)cmd->device->channel,
@@ -856,13 +871,13 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes,
 			break;
 		}
 	}			/* driver byte != 0 */
-	if (host_byte(result) == DID_RESET) {
+	if (host_byte(result) == DID_RESET) {/* 这种情况下表示总线复位或者错误恢复原因而复位 */
 		/*
 		 * Third party bus reset or reset for error
 		 * recovery reasons.  Just retry the request
 		 * and see what happens.  
 		 */
-		scsi_requeue_command(q, cmd);
+		scsi_requeue_command(q, cmd);/* 重试此命令 */
 		return;
 	}
 	if (result) {
@@ -978,6 +993,7 @@ static int scsi_issue_flush_fn(request_queue_t *q, struct gendisk *disk,
 	return -EOPNOTSUPP;
 }
 
+/* 在初始化请求队列时，本函数被设置为请求队列的预处理函数 */
 static int scsi_prep_fn(struct request_queue *q, struct request *req)
 {
 	struct scsi_device *sdev = q->queuedata;
@@ -989,12 +1005,12 @@ static int scsi_prep_fn(struct request_queue *q, struct request *req)
 	 * refuse to process any commands.  The device must be brought
 	 * online before trying any recovery commands
 	 */
-	if (unlikely(!scsi_device_online(sdev))) {
+	if (unlikely(!scsi_device_online(sdev))) {/* 设备不在线，退出 */
 		printk(KERN_ERR "scsi%d (%d:%d): rejecting I/O to offline device\n",
 		       sdev->host->host_no, sdev->id, sdev->lun);
 		return BLKPREP_KILL;
 	}
-	if (unlikely(sdev->sdev_state != SDEV_RUNNING)) {
+	if (unlikely(sdev->sdev_state != SDEV_RUNNING)) {/* 检查设备是否接受命令 */
 		/* OK, we're not in a running state don't prep
 		 * user commands */
 		if (sdev->sdev_state == SDEV_DEL) {
@@ -1019,6 +1035,7 @@ static int scsi_prep_fn(struct request_queue *q, struct request *req)
 	 * these two cases differently.  We differentiate by looking
 	 * at request->cmd, as this tells us the real story.
 	 */
+	/* 为这个设备分配命令描述符 */
 	if (req->flags & REQ_SPECIAL) {
 		struct scsi_request *sreq = req->special;
 
@@ -1205,6 +1222,7 @@ static inline int scsi_host_queue_ready(struct request_queue *q,
  *
  * Lock status: IO request lock assumed to be held when called.
  */
+/* SCSI磁盘策略函数，将队列泄流后，向低层驱动发送SCSI命令 */
 static void scsi_request_fn(struct request_queue *q)
 {
 	struct scsi_device *sdev = q->queuedata;
@@ -1220,18 +1238,18 @@ static void scsi_request_fn(struct request_queue *q)
 	 * To start with, we keep looping until the queue is empty, or until
 	 * the host is no longer able to accept any more requests.
 	 */
-	while (!blk_queue_plugged(q)) {
+	while (!blk_queue_plugged(q)) {/* 队列没有变化 */
 		int rtn;
 		/*
 		 * get next queueable request.  We do this early to make sure
 		 * that the request is fully prepared even if we cannot 
 		 * accept it.
 		 */
-		req = elv_next_request(q);
+		req = elv_next_request(q);/* 获得队列中下一个请求 */
 		if (!req || !scsi_dev_queue_ready(q, sdev))
 			break;
 
-		if (unlikely(!scsi_device_online(sdev))) {
+		if (unlikely(!scsi_device_online(sdev))) {/* 如果设备已经离线，则退出 */
 			printk(KERN_ERR "scsi%d (%d:%d): rejecting I/O to offline device\n",
 			       sdev->host->host_no, sdev->id, sdev->lun);
 			blkdev_dequeue_request(req);
@@ -1246,13 +1264,16 @@ static void scsi_request_fn(struct request_queue *q)
 		/*
 		 * Remove the request from the request list.
 		 */
+		/* 从队列中取出请求，并由驱动处理请求，设置它的超时定时器 */
 		if (!(blk_queue_tagged(q) && !blk_queue_start_tag(q, req)))
 			blkdev_dequeue_request(req);
+		/* 递增分发给驱动的请求数 */
 		sdev->device_busy++;
 
 		spin_unlock(q->queue_lock);
 		spin_lock(shost->host_lock);
 
+		/* 检查我们是否可以发送命令到主机适配器 */
 		if (!scsi_host_queue_ready(q, shost, sdev))
 			goto not_ready;
 		if (sdev->single_lun) {
@@ -1261,7 +1282,7 @@ static void scsi_request_fn(struct request_queue *q)
 				goto not_ready;
 			scsi_target(sdev)->starget_sdev_user = sdev;
 		}
-		shost->host_busy++;
+		shost->host_busy++;/* 分发到主机适配器的计数 */
 
 		/*
 		 * XXX(hch): This is rather suboptimal, scsi_dispatch_cmd will
@@ -1269,7 +1290,7 @@ static void scsi_request_fn(struct request_queue *q)
 		 */
 		spin_unlock_irq(shost->host_lock);
 
-		cmd = req->special;
+		cmd = req->special;/* 获取SCSI命令描述符，在prep_rq_fn中准备的 */
 		if (unlikely(cmd == NULL)) {
 			printk(KERN_CRIT "impossible request in %s.\n"
 					 "please mail a stack trace to "
@@ -1282,18 +1303,18 @@ static void scsi_request_fn(struct request_queue *q)
 		 * Finally, initialize any error handling parameters, and set up
 		 * the timers for timeouts.
 		 */
-		scsi_init_cmd_errh(cmd);
+		scsi_init_cmd_errh(cmd);/* 初始化错误处理参数，设置超时定时器 */
 
 		/*
 		 * Dispatch the command to the low-level driver.
 		 */
-		rtn = scsi_dispatch_cmd(cmd);
+		rtn = scsi_dispatch_cmd(cmd);/* 分发命令到驱动 */
 		spin_lock_irq(q->queue_lock);
-		if(rtn) {
+		if(rtn) {/* 发生了错误 */
 			/* we're refusing the command; because of
 			 * the way locks get dropped, we need to 
 			 * check here if plugging is required */
-			if(sdev->device_busy == 0)
+			if(sdev->device_busy == 0)/* 检查是否需要对队列进行蓄流 */
 				blk_plug_device(q);
 
 			break;

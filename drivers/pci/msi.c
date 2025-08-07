@@ -703,12 +703,21 @@ int pci_enable_msi(struct pci_dev* dev)
 	int pos, temp = dev->irq, status = -EINVAL;
 	u16 control;
 
+	/**
+	 * 检查是否支持MSI中断机制。
+	 */
 	if (!pci_msi_enable || !dev)
  		return status;
 
+	/**
+	 * 初始化MSI。
+	 */
 	if ((status = msi_init()) < 0)
 		return status;
 
+	/**
+	 * 检查设备是否支持MSI中断。不支持则直接退出。
+	 */
    	if (!(pos = pci_find_capability(dev, PCI_CAP_ID_MSI)))
 		return -EINVAL;
 
