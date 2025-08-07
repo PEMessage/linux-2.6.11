@@ -64,6 +64,9 @@ static void nfs_umount_begin(struct super_block *);
 static int  nfs_statfs(struct super_block *, struct kstatfs *);
 static int  nfs_show_options(struct seq_file *, struct vfsmount *);
 
+/**
+ * 网络文件系统的超级块操作。
+ */
 static struct super_operations nfs_sops = { 
 	.alloc_inode	= nfs_alloc_inode,
 	.destroy_inode	= nfs_destroy_inode,
@@ -1385,6 +1388,9 @@ static struct super_block *nfs_get_sb(struct file_system_type *fs_type,
 	/* Zero out the NFS state stuff */
 	init_nfsv4_state(server);
 
+	/**
+	 * 下面比较data中的版本信息与当前NFS_MOUNT版本是否一致
+	 */
 	if (data->version != NFS_MOUNT_VERSION) {
 		printk("nfs warning: mount version %s than kernel\n",
 			data->version < NFS_MOUNT_VERSION ? "older" : "newer");
@@ -1437,6 +1443,9 @@ static struct super_block *nfs_get_sb(struct file_system_type *fs_type,
 		return ERR_PTR(-EIO);
 	}
 
+	/**
+	 * 初试化super_block的相应信息
+	 */
 	error = nfs_fill_super(s, data, flags & MS_VERBOSE ? 1 : 0);
 	if (error) {
 		up_write(&s->s_umount);
@@ -1473,6 +1482,11 @@ static struct file_system_type nfs_fs_type = {
 	.name		= "nfs",
 	.get_sb		= nfs_get_sb,
 	.kill_sb	= nfs_kill_super,
+	/**
+	 * ~FS_REQUIRES_DEV			:不需要设备
+	 * ~FS_NO_DCACHE			:需要目录缓存
+	 * ~FS_NO_PRELIM			:需要进行目录缓存的预读
+	 */
 	.fs_flags	= FS_ODD_RENAME|FS_REVAL_DOT|FS_BINARY_MOUNTDATA,
 };
 
@@ -1901,6 +1915,9 @@ void nfs_destroy_inodecache(void)
 /*
  * Initialize NFS
  */
+/**
+ * 初始化NFS文件系统。
+ */
 static int __init init_nfs_fs(void)
 {
 	int err;
@@ -1930,6 +1947,10 @@ static int __init init_nfs_fs(void)
 #ifdef CONFIG_PROC_FS
 	rpc_proc_register(&nfs_rpcstat);
 #endif
+	/**
+	 * 初始化NFS文件系统结构。并注册NFS文件系统。
+	 * 其中get_sb初始化为指向函数nfs_get_sb，负责在mount网络文件系统时读入NSF的SuperBlock信息。
+	 */
         err = register_filesystem(&nfs_fs_type);
 	if (err)
 		goto out;

@@ -1144,6 +1144,10 @@ direct_io_worker(int rw, struct kiocb *iocb, struct inode *inode,
  *
  * Additional i_alloc_sem locking requirements described inline below.
  */
+/**
+ * 对存放在相应块中要读或写的数据进行拆分，确定数据在磁盘上的位置。
+ * 并添加一个或多个用于描述要进行的IO操作的BIO描述符。
+ */
 ssize_t
 __blockdev_direct_IO(int rw, struct kiocb *iocb, struct inode *inode,
 	struct block_device *bdev, const struct iovec *iov, loff_t offset, 

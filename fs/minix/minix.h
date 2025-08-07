@@ -16,33 +16,53 @@
 /*
  * minix fs inode data in memory
  */
+/* 内存中的MINIX节点 */
 struct minix_inode_info {
 	union {
+		/* 文件所占用的盘上逻辑块号数组，针对2.0版本 */
 		__u16 i1_data[16];
+		/* 文件所占用的盘上逻辑块号数组，其中0-6是直接块号，7是一次间接块，8是二次间接块，9是三次间接块 */
 		__u32 i2_data[16];
 	} u;
+	/* 内嵌的VFS节点 */
 	struct inode vfs_inode;
 };
 
 /*
  * minix super-block data in memory
  */
+/* MINIX文件系统在内存中的超级块结构 */
 struct minix_sb_info {
+	/* i节点数 */
 	unsigned long s_ninodes;
+	/* 逻辑块数 */
 	unsigned long s_nzones;
+	/* i节点位图所占块数 */
 	unsigned long s_imap_blocks;
+	/* 逻辑块位图所占块数 */
 	unsigned long s_zmap_blocks;
+	/* 数据区中第一个逻辑块号 */
 	unsigned long s_firstdatazone;
+	/* log2(磁盘块数/逻辑块) */
 	unsigned long s_log_zone_size;
+	/* 最大的文件长度，以字节为单位 */
 	unsigned long s_max_size;
+	/* 目录项的长度 */
 	int s_dirsize;
+	/* 目录项中文件名的长度 */
 	int s_namelen;
+	/* 最大的链接数 */
 	int s_link_max;
+	/* i节点位图缓冲区 */
 	struct buffer_head ** s_imap;
+	/* 逻辑块位图缓冲区 */
 	struct buffer_head ** s_zmap;
+	/* 超级块缓冲区 */
 	struct buffer_head * s_sbh;
+	/* 指向磁盘上超级块的指针 */
 	struct minix_super_block * s_ms;
 	unsigned short s_mount_state;
+	/* 文件系统版本 */
 	unsigned short s_version;
 };
 

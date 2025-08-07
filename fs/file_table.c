@@ -18,6 +18,9 @@
 #include <linux/cdev.h>
 
 /* sysctl tunables... */
+/**
+ * 可分配的文件对象的最大数目。可通过/proc/sys/fs/file-max文件来修改这个值。
+ */
 struct files_stat_struct files_stat = {
 	.max_files = NR_FILE
 };
@@ -61,9 +64,12 @@ static inline void file_free(struct file *f)
  * Returns NULL, if there are no more free file structures or
  * we run out of memory.
  */
+/**
+ * get_empty_filp为pipefs文件系统中的管道分配一个索引节点对象并对其进行初始化。
+ */
 struct file *get_empty_filp(void)
 {
-static int old_max;
+	static int old_max;
 	struct file * f;
 
 	/*
@@ -71,6 +77,9 @@ static int old_max;
 	 */
 	if (files_stat.nr_files < files_stat.max_files ||
 				capable(CAP_SYS_ADMIN)) {
+		/**
+		 * 分配文件索引结点
+		 */
 		f = kmem_cache_alloc(filp_cachep, GFP_KERNEL);
 		if (f) {
 			memset(f, 0, sizeof(*f));
@@ -105,6 +114,9 @@ fail:
 
 EXPORT_SYMBOL(get_empty_filp);
 
+/**
+ * 释放对file的引用。
+ */
 void fastcall fput(struct file *file)
 {
 	if (atomic_dec_and_test(&file->f_count))
@@ -136,8 +148,8 @@ void fastcall __fput(struct file *file)
 	if (unlikely(inode->i_cdev != NULL))
 		cdev_put(inode->i_cdev);
 	fops_put(file->f_op);
-	if (file->f_mode & FMODE_WRITE)
-		put_write_access(inode);
+	if (file->f_mode & FMODE_WRITE)/* 可写方式打开 */
+		put_write_access(inode);/* 减少i_writecount计数 */
 	file_kill(file);
 	file->f_dentry = NULL;
 	file->f_vfsmnt = NULL;
@@ -146,6 +158,9 @@ void fastcall __fput(struct file *file)
 	mntput(mnt);
 }
 
+/**
+ * 根据进程文件描述符获得文件对象的地址。并增加其引用计数。
+ */
 struct file fastcall *fget(unsigned int fd)
 {
 	struct file *file;

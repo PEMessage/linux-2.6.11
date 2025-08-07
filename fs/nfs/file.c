@@ -45,6 +45,9 @@ static int  nfs_file_flush(struct file *);
 static int  nfs_fsync(struct file *, struct dentry *dentry, int datasync);
 static int nfs_check_flags(int flags);
 
+/**
+ * NFS文件操作
+ */
 struct file_operations nfs_file_operations = {
 	.llseek		= remote_llseek,
 	.read		= do_sync_read,
@@ -61,6 +64,9 @@ struct file_operations nfs_file_operations = {
 	.check_flags	= nfs_check_flags,
 };
 
+/**
+ * NFS文件节点操作
+ */
 struct inode_operations nfs_file_inode_operations = {
 	.permission	= nfs_permission,
 	.getattr	= nfs_getattr,

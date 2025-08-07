@@ -142,6 +142,7 @@ changed:
 	return -EAGAIN;
 }
 
+/* 获得文件逻辑块编号对应的磁盘编号 */
 static inline int get_block(struct inode * inode, sector_t block,
 			struct buffer_head *bh, int create)
 {

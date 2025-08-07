@@ -107,10 +107,22 @@ static void anon_pipe_buf_unmap(struct pipe_inode_info *info, struct pipe_buffer
 	kunmap(buf->page);
 }
 
+/**
+ * anon_pipe_buf_ops由pipe_buffer对象的ops指向
+ */
 static struct pipe_buf_operations anon_pipe_buf_ops = {
 	.can_merge = 1,
+	/**
+	 * 在访问缓冲区数据之前调用。它只在管理缓冲区在高端内存时对管理缓冲区页框调用kmap
+	 */
 	.map = anon_pipe_buf_map,
+	/**
+	 * 与map对应,对管理缓冲区页框调用kunmap
+	 */
 	.unmap = anon_pipe_buf_unmap,
+	/**
+	 * 当释放管理缓冲区时调用，该方法实现了一个单页内存高速缓存。
+	 */
 	.release = anon_pipe_buf_release,
 };
 
@@ -353,12 +365,20 @@ pipe_write(struct file *filp, const char __user *buf,
 	return pipe_writev(filp, &iov, 1, ppos);
 }
 
+/**
+ * 当FIFO只写时,其文件操作表的f_op字段的读方法
+ * 因此时文件只写,所以读方法只是简单的返回一个错误
+ */
 static ssize_t
 bad_pipe_r(struct file *filp, char __user *buf, size_t count, loff_t *ppos)
 {
 	return -EBADF;
 }
 
+/**
+ * 当FIFO只读时,其文件操作表的f_op字段的写方法
+ * 因此时文件只读,所以写方法只是简单的返回一个错误
+ */
 static ssize_t
 bad_pipe_w(struct file *filp, const char __user *buf, size_t count, loff_t *ppos)
 {
@@ -680,13 +700,22 @@ static struct dentry_operations pipefs_dentry_operations = {
 
 static struct inode * get_pipe_inode(void)
 {
+	/**
+	 * 在pipe_fs文件系统中分配一个新的索引结点。
+	 */
 	struct inode *inode = new_inode(pipe_mnt->mnt_sb);
 
 	if (!inode)
 		goto fail_inode;
 
+	/**
+	 * pipe_new分配pipe_inode_info数据结构，并把它的地址存放在索引节点的i_pipe字段。
+	 */
 	if(!pipe_new(inode))
 		goto fail_iput;
+	/**
+	 * 初始化inode->r_counter和w_counter为1。
+	 */
 	PIPE_READERS(*inode) = PIPE_WRITERS(*inode) = 1;
 	inode->i_fop = &rdwr_pipe_fops;
 
@@ -710,6 +739,9 @@ fail_inode:
 	return NULL;
 }
 
+/**
+ * 创建新的管道
+ */
 int do_pipe(int *fd)
 {
 	struct qstr this;
@@ -721,6 +753,7 @@ int do_pipe(int *fd)
 	int i,j;
 
 	error = -ENFILE;
+	
 	f1 = get_empty_filp();
 	if (!f1)
 		goto no_files;
@@ -729,10 +762,18 @@ int do_pipe(int *fd)
 	if (!f2)
 		goto close_f1;
 
+	/**
+	 * get_pipe_inode为pipefs文件系统中的管道分配一个索引节点对象并对其进行初始化。
+	 * 它会考虑一些资源限制，所以不一定能够分配成功。
+	 */
 	inode = get_pipe_inode();
 	if (!inode)
 		goto close_f12;
 
+	/**
+	 * 为读和写分配文件对象和文件描述符。存放到i,j中
+	 * 并将f1,f2设为只读和只写。
+	 */
 	error = get_unused_fd();
 	if (error < 0)
 		goto close_f12_inode;
@@ -748,6 +789,10 @@ int do_pipe(int *fd)
 	this.name = name;
 	this.len = strlen(name);
 	this.hash = inode->i_ino; /* will go */
+	/**
+	 * 分配一个目录项对象，并使用它把两个文件对象和索引节点对象连接在一起。
+	 * 然后把新的索引节点插入到pipefs特殊文件系统中。
+	 */
 	dentry = d_alloc(pipe_mnt->mnt_sb->s_root, &this);
 	if (!dentry)
 		goto close_f12_inode_i_j;
@@ -772,6 +817,9 @@ int do_pipe(int *fd)
 
 	fd_install(i, f1);
 	fd_install(j, f2);
+	/**
+	 * 向用户返回文件描述符进行读写。
+	 */
 	fd[0] = i;
 	fd[1] = j;
 	return 0;

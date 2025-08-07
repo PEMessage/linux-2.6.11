@@ -67,6 +67,9 @@ static inline int ext2_add_nondir(struct dentry *dentry, struct inode *inode)
  * Methods themselves.
  */
 
+/**
+ * ext2的loopup实现方法。
+ */
 static struct dentry *ext2_lookup(struct inode * dir, struct dentry *dentry, struct nameidata *nd)
 {
 	struct inode * inode;
@@ -121,6 +124,9 @@ struct dentry *ext2_get_parent(struct dentry *child)
  * If the create succeeds, we fill in the inode information
  * with d_instantiate(). 
  */
+/**
+ * ext2在vfs中的create实现函数。
+ */
 static int ext2_create (struct inode * dir, struct dentry * dentry, int mode, struct nameidata *nd)
 {
 	struct inode * inode = ext2_new_inode (dir, mode);
@@ -138,6 +144,9 @@ static int ext2_create (struct inode * dir, struct dentry * dentry, int mode, st
 	return err;
 }
 
+/**
+ * ext2的mknod实现方法。
+ */
 static int ext2_mknod (struct inode * dir, struct dentry *dentry, int mode, dev_t rdev)
 {
 	struct inode * inode;
@@ -159,6 +168,9 @@ static int ext2_mknod (struct inode * dir, struct dentry *dentry, int mode, dev_
 	return err;
 }
 
+/**
+ * ext2的symlink实现方法。
+ */
 static int ext2_symlink (struct inode * dir, struct dentry * dentry,
 	const char * symname)
 {
@@ -203,6 +215,9 @@ out_fail:
 	goto out;
 }
 
+/**
+ * ext2的link实现方法。
+ */
 static int ext2_link (struct dentry * old_dentry, struct inode * dir,
 	struct dentry *dentry)
 {
@@ -218,6 +233,9 @@ static int ext2_link (struct dentry * old_dentry, struct inode * dir,
 	return ext2_add_nondir(dentry, inode);
 }
 
+/**
+ * ext2的mkdir实现方法。
+ */
 static int ext2_mkdir(struct inode * dir, struct dentry * dentry, int mode)
 {
 	struct inode * inode;
@@ -263,6 +281,9 @@ out_dir:
 	goto out;
 }
 
+/**
+ * ext2的unlink实现方法。
+ */
 static int ext2_unlink(struct inode * dir, struct dentry *dentry)
 {
 	struct inode * inode = dentry->d_inode;
@@ -301,6 +322,9 @@ static int ext2_rmdir (struct inode * dir, struct dentry *dentry)
 	return err;
 }
 
+/**
+ * ext2的rename实现方法。
+ */
 static int ext2_rename (struct inode * old_dir, struct dentry * old_dentry,
 	struct inode * new_dir,	struct dentry * new_dentry )
 {
@@ -386,6 +410,9 @@ out:
 	return err;
 }
 
+/**
+ * 目录文件的索引节点操作方法
+ */
 struct inode_operations ext2_dir_inode_operations = {
 	.create		= ext2_create,
 	.lookup		= ext2_lookup,

@@ -39,6 +39,11 @@
  * status of that page is hard.  See end_buffer_async_read() for the details.
  * There is no point in duplicating all that complexity.
  */
+/**
+ * mpage_readpage的bio的完成方法。当IO数据传输完成时，调用它。
+ * 如果没有IO错误，则设置页描述符的PG_uptodate，调用unlock_page来解锁页面，并唤醒等待该事件的进程。
+ * 最后调用bio_put来清除bio描述符。
+ */
 static int mpage_end_io_read(struct bio *bio, unsigned int bytes_done, int err)
 {
 	const int uptodate = test_bit(BIO_UPTODATE, &bio->bi_flags);
@@ -205,12 +210,22 @@ map_buffer_to_page(struct page *page, struct buffer_head *bh, int page_block)
  *
  * This all causes the disk requests to be issued in the correct order.
  */
+/**
+ * 对大多数文件来说，本函数是其readpage的实现方法。
+ */
 static struct bio *
 do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 			sector_t *last_block_in_bio, get_block_t get_block)
 {
 	struct inode *inode = page->mapping->host;
+
+	/**
+	 * 得到块的大小
+	 */
 	const unsigned blkbits = inode->i_blkbits;
+	/**
+	 * 页中的块数
+	 */
 	const unsigned blocks_per_page = PAGE_CACHE_SIZE >> blkbits;
 	const unsigned blocksize = 1 << blkbits;
 	sector_t block_in_file;
@@ -223,9 +238,16 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 	int length;
 	int fully_mapped = 1;
 
+	/**
+	 * 检查page的PG_private标志，如果该标志被置位，那么表示该页已经从磁盘上读入过，而且页中的块在磁盘上不是相邻的。
+	 * 因此以一次读一块的方式读取该页。
+	 */
 	if (page_has_buffers(page))
 		goto confused;
 
+	/**
+	 * 页中第一块的文件块号。
+	 */
 	block_in_file = page->index << (PAGE_CACHE_SHIFT - blkbits);
 	last_block = (i_size_read(inode) + blocksize - 1) >> blkbits;
 
@@ -234,10 +256,20 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 				page_block++, block_in_file++) {
 		bh.b_state = 0;
 		if (block_in_file < last_block) {
+			/**
+			 * 调用get_block得到逻辑块号，即相对于磁盘或分区开始位置的块索引。
+			 * 页中每一块的逻辑号存放在一个本地数据中。
+			 */
 			if (get_block(inode, block_in_file, &bh, 0))
 				goto confused;
 		}
 
+
+		/**
+		 * 当发生以下异常情况时，采用一次读取一块的方式读该页:
+		 *     一些块在磁盘上不相邻。
+		 *     某些块在文件洞中。
+		 */
 		if (!buffer_mapped(&bh)) {
 			fully_mapped = 0;
 			if (first_hole == blocks_per_page)
@@ -266,7 +298,13 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 		bdev = bh.b_bdev;
 	}
 
+	/**
+	 * 运行到此，说明页中的所有块在磁盘上是相邻的。
+	 */
 	if (first_hole != blocks_per_page) {
+		/**
+		 * 如果页是文件中的最后一页，某些块在磁盘中没有映像。将相应的块缓冲区填上0.
+		 */
 		char *kaddr = kmap_atomic(page, KM_USER0);
 		memset(kaddr + (first_hole << blkbits), 0,
 				PAGE_CACHE_SIZE - (first_hole << blkbits));
@@ -278,6 +316,9 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 			goto out;
 		}
 	} else if (fully_mapped) {
+		/**
+		 * 不是文件的最后一页，将页描述符的标志PG_mappedtodisk置位。
+		 */
 		SetPageMappedToDisk(page);
 	}
 
@@ -288,7 +329,7 @@ do_mpage_readpage(struct bio *bio, struct page *page, unsigned nr_pages,
 		bio = mpage_bio_submit(READ, bio);
 
 alloc_new:
-	if (bio == NULL) {
+	if (bio == NULL) {/* 分配一个bio，并初始化它 */
 		bio = mpage_alloc(bdev, blocks[0] << (blkbits - 9),
 			  	min_t(int, nr_pages, bio_get_nr_vecs(bdev)),
 				GFP_KERNEL);
@@ -302,6 +343,9 @@ alloc_new:
 		goto alloc_new;
 	}
 
+	/**
+	 * 向驱动提交bio请求。
+	 */
 	if (buffer_boundary(&bh) || (first_hole != blocks_per_page))
 		bio = mpage_bio_submit(READ, bio);
 	else
@@ -309,12 +353,21 @@ alloc_new:
 out:
 	return bio;
 
+/**
+ * 函数运行到这里，则页中含有的块在磁盘不连续。
+ */
 confused:
 	if (bio)
 		bio = mpage_bio_submit(READ, bio);
 	if (!PageUptodate(page))
-	        block_read_full_page(page, get_block);
+		/**
+		 * 页不是最新的，则调用block_read_full_page一次读一块的方式读该页。
+		 */
+	    block_read_full_page(page, get_block);
 	else
+		/**
+		 * 如果页是最新的，则调用unlock_page来对该页解锁。
+		 */
 		unlock_page(page);
 	goto out;
 }
@@ -356,14 +409,18 @@ EXPORT_SYMBOL(mpage_readpages);
 /*
  * This isn't called much at all
  */
+/**
+ * 对大多数文件来说，其address_space对象的readpage对象一般都是mpage_readpage的封装函数。
+ */
 int mpage_readpage(struct page *page, get_block_t get_block)
 {
 	struct bio *bio = NULL;
 	sector_t last_block_in_bio = 0;
 
+	/* 执行具体的工作 */
 	bio = do_mpage_readpage(bio, page, 1,
 			&last_block_in_bio, get_block);
-	if (bio)
+	if (bio)/* do_mpage_readpage还有未提交的bio，在这里提交它 */
 		mpage_bio_submit(READ, bio);
 	return 0;
 }
@@ -384,6 +441,11 @@ EXPORT_SYMBOL(mpage_readpage);
  * FIXME: This code wants an estimate of how many pages are still to be
  * written, so it can intelligently allocate a suitably-sized BIO.  For now,
  * just allocate full-size (16-page) BIOs.
+ */
+/**
+ * 许多非日志型文件系统依赖于mpage_writepage而不是自定义的writepage方法。
+ * 这样可以改善性能，因为mpage_writepage函数在进行IO传输时，在同一个bio描述符中聚集尽可能多的页。
+ * 这就使得块设备驱动程序能利用现代硬盘控制器的DMA分散、聚集能力。
  */
 static struct bio *
 mpage_writepage(struct bio *bio, struct page *page, get_block_t get_block,
@@ -519,7 +581,15 @@ page_is_mapped:
 	if (bio && *last_block_in_bio != blocks[0] - 1)
 		bio = mpage_bio_submit(WRITE, bio);
 
+	/**
+	 * 将页追加为bio描述符中的一段。
+	 */
 alloc_new:
+	/**
+	 * 如果传入的bio为空，就初始化一个新的bio描述符地址。
+	 * 并将该描述符返回给调用函数，调用函数下次调用mpage_writepage时，将该描述符再次传入。
+	 * 这样，同一个bio可以加载几个页。
+	 */
 	if (bio == NULL) {
 		bio = mpage_alloc(bdev, blocks[0] << (blkbits - 9),
 				bio_get_nr_vecs(bdev), GFP_NOFS|__GFP_HIGH);
@@ -533,6 +603,10 @@ alloc_new:
 	 * it finds all bh marked clean (i.e. it will not write anything)
 	 */
 	length = first_unmapped << blkbits;
+	/**
+	 * 如果bio中某页与上一个加载页不相邻，则调用mpage_bio_submit开始新的IO数据传输。
+	 * 然后分配一个新的bio。
+	 */
 	if (bio_add_page(bio, page, length, 0) < length) {
 		bio = mpage_bio_submit(WRITE, bio);
 		goto alloc_new;
@@ -615,6 +689,10 @@ out:
  * WB_SYNC_ALL then we were called for data integrity and we must wait for
  * existing IO to complete.
  */
+/**
+ * 将脏页写回磁盘。
+ * pdflush及同步写需要调用。
+ */
 int
 mpage_writepages(struct address_space *mapping,
 		struct writeback_control *wbc, get_block_t get_block)
@@ -632,6 +710,9 @@ mpage_writepages(struct address_space *mapping,
 	int scanned = 0;
 	int is_range = 0;
 
+	/**
+	 * 请求队列写拥塞，并且进程不希望阻塞，就直接返回。
+	 */
 	if (wbc->nonblocking && bdi_write_congested(bdi)) {
 		wbc->encountered_congestion = 1;
 		return 0;
@@ -642,9 +723,16 @@ mpage_writepages(struct address_space *mapping,
 		writepage = mapping->a_ops->writepage;
 
 	pagevec_init(&pvec, 0);
+	/**
+	 * 确定首页。如果wbc描述符指定线程无需等待IO数据传输结束，则将mapping->writeback_index设为初始页索引。
+	 * 也就是说，从上一个写回操作的最后一页开始扫描。
+	 */
 	if (wbc->sync_mode == WB_SYNC_NONE) {
 		index = mapping->writeback_index; /* Start from prev offset */
 	} else {
+		/**
+		 * 否则，进程必须等待IO数据传输完毕，从文件的第一页开始扫描。
+		 */
 		index = 0;			  /* whole-file sweep */
 		scanned = 1;
 	}
@@ -655,6 +743,9 @@ mpage_writepages(struct address_space *mapping,
 		scanned = 1;
 	}
 retry:
+	/**
+	 * pagevec_lookup_tag会调用find_get_pages_tag在页高速缓存中查找脏页描述符。
+	 */
 	while (!done && (index <= end) &&
 			(nr_pages = pagevec_lookup_tag(&pvec, mapping, &index,
 			PAGECACHE_TAG_DIRTY,
@@ -662,6 +753,9 @@ retry:
 		unsigned i;
 
 		scanned = 1;
+		/**
+		 * 处理找到的每个脏页。
+		 */
 		for (i = 0; i < nr_pages; i++) {
 			struct page *page = pvec.pages[i];
 
@@ -672,9 +766,15 @@ retry:
 			 * swizzled back from swapper_space to tmpfs file
 			 * mapping
 			 */
-
+			/**
+			 * 先锁住脏页.
+			 */
 			lock_page(page);
 
+			/**
+			 * 确认页是有效的，并在页高速缓存内。
+			 * 这是因为在锁住页之前，其他内核代码可能操作了该页。
+			 */
 			if (unlikely(page->mapping != mapping)) {
 				unlock_page(page);
 				continue;
@@ -686,9 +786,16 @@ retry:
 				continue;
 			}
 
+			/**
+			 * 检查页面PG_writeback标志，如果置位，表示页已经被刷新到磁盘。
+			 * 如果必须等待IO数据传输完毕，则调用wait_on_page_bit在PG_writeback清0之前一直阻塞当前进程。
+			 */
 			if (wbc->sync_mode != WB_SYNC_NONE)
 				wait_on_page_writeback(page);
 
+			/** 
+			 * 如果PG_writeback标志置位，则检查PG_dirty，如果该标志为0，则正在运行的写回操作将处理该页。处理下一页。
+			 */
 			if (PageWriteback(page) ||
 					!clear_page_dirty_for_io(page)) {
 				unlock_page(page);
@@ -696,6 +803,9 @@ retry:
 			}
 
 			if (writepage) {
+				/**
+				 * get_block为NULL，则调用mapping->writepage方法将页刷新到磁盘。
+				 */
 				ret = (*writepage)(page, wbc);
 				if (ret) {
 					if (ret == -ENOSPC)
@@ -706,6 +816,9 @@ retry:
 							&mapping->flags);
 				}
 			} else {
+				/**
+				 * get_block不为NULL,则调用mpage_writepage刷新页面。
+				 */
 				bio = mpage_writepage(bio, page, get_block,
 						&last_block_in_bio, &ret, wbc);
 			}
@@ -717,8 +830,14 @@ retry:
 			}
 		}
 		pagevec_release(&pvec);
+		/**
+		 * 增加一个调度点。
+		 */
 		cond_resched();
 	}
+	/**
+	 * 没有扫描完给定范围内的所有页，或者写到磁盘的有效页数小于wbc中给定的值，则继续
+	 */
 	if (!scanned && !done) {
 		/*
 		 * We hit the last page and there is more work to be done: wrap
@@ -728,8 +847,14 @@ retry:
 		index = 0;
 		goto retry;
 	}
+	/**
+	 * 如果wbc中没有给定文件内的初始位置，则将最后一个扫描的页赋给mapping->writeback_index
+	 */
 	if (!is_range)
 		mapping->writeback_index = index;
+	/**
+	 * 如果曾经调用过mpage_writepage函数，而且返回了bio描述符地址，则调用mpage_bio_submit
+	 */
 	if (bio)
 		mpage_bio_submit(WRITE, bio);
 	return ret;

@@ -134,6 +134,7 @@ static int minix_remount (struct super_block * sb, int * flags, char * data)
 	return 0;
 }
 
+/* MINIX文件系统超级块加载函数 */
 static int minix_fill_super(struct super_block *s, void *data, int silent)
 {
 	struct buffer_head *bh;
@@ -143,9 +144,11 @@ static int minix_fill_super(struct super_block *s, void *data, int silent)
 	struct inode *root_inode;
 	struct minix_sb_info *sbi;
 
+	/* 分配文件系统私有数据结构 */
 	sbi = kmalloc(sizeof(struct minix_sb_info), GFP_KERNEL);
 	if (!sbi)
 		return -ENOMEM;
+	/* 将其保存到s_fs_info中 */
 	s->s_fs_info = sbi;
 	memset(sbi, 0, sizeof(struct minix_sb_info));
 
@@ -159,9 +162,11 @@ static int minix_fill_super(struct super_block *s, void *data, int silent)
 	if (!sb_set_blocksize(s, BLOCK_SIZE))
 		goto out_bad_hblock;
 
+	/* 同步读取超级块数据，其块号为1 */
 	if (!(bh = sb_bread(s, 1)))
 		goto out_bad_sb;
 
+	/* 将超级块数据强制转为minix_super_block结构，并从中读取数据 */
 	ms = (struct minix_super_block *) bh->b_data;
 	sbi->s_ms = ms;
 	sbi->s_sbh = bh;
@@ -174,6 +179,7 @@ static int minix_fill_super(struct super_block *s, void *data, int silent)
 	sbi->s_log_zone_size = ms->s_log_zone_size;
 	sbi->s_max_size = ms->s_max_size;
 	s->s_magic = ms->s_magic;
+	/* 根据魔数确定MINIX文件系统的版本 */
 	if (s->s_magic == MINIX_SUPER_MAGIC) {
 		sbi->s_version = MINIX_V1;
 		sbi->s_dirsize = 16;
@@ -202,6 +208,7 @@ static int minix_fill_super(struct super_block *s, void *data, int silent)
 	/*
 	 * Allocate the buffer map to keep the superblock small.
 	 */
+	/* 分配结构保存i节点和逻辑块位图缓冲区 */
 	i = (sbi->s_imap_blocks + sbi->s_zmap_blocks) * sizeof(bh);
 	map = kmalloc(i, GFP_KERNEL);
 	if (!map)
@@ -211,11 +218,13 @@ static int minix_fill_super(struct super_block *s, void *data, int silent)
 	sbi->s_zmap = &map[sbi->s_imap_blocks];
 
 	block=2;
+	/* 读取i节点位图 */
 	for (i=0 ; i < sbi->s_imap_blocks ; i++) {
 		if (!(sbi->s_imap[i]=sb_bread(s, block)))
 			goto out_no_bitmap;
 		block++;
 	}
+	/* 读取逻辑块位图 */
 	for (i=0 ; i < sbi->s_zmap_blocks ; i++) {
 		if (!(sbi->s_zmap[i]=sb_bread(s, block)))
 			goto out_no_bitmap;
@@ -226,11 +235,14 @@ static int minix_fill_super(struct super_block *s, void *data, int silent)
 	minix_set_bit(0,sbi->s_zmap[0]->b_data);
 
 	/* set up enough so that it can read an inode */
+	/* 在读取inode前设置超级块回调 */
 	s->s_op = &minix_sops;
+	/* 读取根节点 */
 	root_inode = iget(s, MINIX_ROOT_INO);
 	if (!root_inode || is_bad_inode(root_inode))
 		goto out_no_root;
 
+	/* 分配根inode */
 	s->s_root = d_alloc_root(root_inode);
 	if (!s->s_root)
 		goto out_iput;

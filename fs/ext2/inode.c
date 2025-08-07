@@ -91,6 +91,9 @@ void ext2_discard_prealloc (struct inode * inode)
 #endif
 }
 
+/**
+ * 在ext2分区搜索一个空闲块。如果需要，该函数还为间接寻址分配相应的块
+ */
 static int ext2_alloc_block (struct inode * inode, unsigned long goal, int *err)
 {
 #ifdef EXT2FS_DEBUG
@@ -103,19 +106,19 @@ static int ext2_alloc_block (struct inode * inode, unsigned long goal, int *err)
 	struct ext2_inode_info *ei = EXT2_I(inode);
 	write_lock(&ei->i_meta_lock);
 	if (ei->i_prealloc_count &&
-	    (goal == ei->i_prealloc_block || goal + 1 == ei->i_prealloc_block))
+	    (goal == ei->i_prealloc_block || goal + 1 == ei->i_prealloc_block))/* 正被分配的块与前面已经分配的块有连续的文件块号 */
 	{
-		result = ei->i_prealloc_block++;
+		result = ei->i_prealloc_block++;/* 使用预分配的块 */
 		ei->i_prealloc_count--;
 		write_unlock(&ei->i_meta_lock);
 		ext2_debug ("preallocation hit (%lu/%lu).\n",
 			    ++alloc_hits, ++alloc_attempts);
-	} else {
+	} else {/* 不能预分配 */
 		write_unlock(&ei->i_meta_lock);
-		ext2_discard_prealloc (inode);
+		ext2_discard_prealloc (inode);/* 暂停预分配 */
 		ext2_debug ("preallocation miss (%lu/%lu).\n",
 			    alloc_hits, ++alloc_attempts);
-		if (S_ISREG(inode->i_mode))
+		if (S_ISREG(inode->i_mode))/* 在块组中分配一个块 */
 			result = ext2_new_block (inode, goal, 
 				 &ei->i_prealloc_count,
 				 &ei->i_prealloc_block, err);
@@ -523,7 +526,11 @@ changed:
  * allocations is needed - we simply release blocks and do not touch anything
  * reachable from inode.
  */
-
+/**
+ * 分配一个数据块来保存ext2普通文件的数据。
+ * 如果块不存在，就自动为文件分配块。尽量在最后一次分配的块附近搜索块，必要时会在其他块组中获得空闲块。
+ * 同时还采用预分配策略。
+ */
 int ext2_get_block(struct inode *inode, sector_t iblock, struct buffer_head *bh_result, int create)
 {
 	int err = -EIO;
@@ -576,6 +583,9 @@ out:
 		goto changed;
 
 	left = (chain + depth) - partial;
+	/**
+	 * 在ext2分区中搜索一个空闲块。
+	 */
 	err = ext2_alloc_branch(inode, left, goal,
 					offsets+(partial-chain), partial);
 	if (err)
@@ -612,6 +622,9 @@ ext2_readpages(struct file *file, struct address_space *mapping,
 	return mpage_readpages(mapping, pages, nr_pages, ext2_get_block);
 }
 
+/**
+ * ext2的prepare_write实现方法。
+ */
 static int
 ext2_prepare_write(struct file *file, struct page *page,
 			unsigned from, unsigned to)
@@ -654,6 +667,9 @@ ext2_direct_IO(int rw, struct kiocb *iocb, const struct iovec *iov,
 				offset, nr_segs, ext2_get_blocks, NULL);
 }
 
+/**
+ * 将脏页写回磁盘。
+ */
 static int
 ext2_writepages(struct address_space *mapping, struct writeback_control *wbc)
 {
@@ -865,6 +881,9 @@ static void ext2_free_branches(struct inode *inode, __le32 *p, __le32 *q, int de
 		ext2_free_data(inode, p, q);
 }
 
+/**
+ * ext2的truncate实现方法。
+ */
 void ext2_truncate (struct inode * inode)
 {
 	__le32 *i_data = EXT2_I(inode)->i_data;
@@ -1249,6 +1268,9 @@ int ext2_sync_inode(struct inode *inode)
 	return sync_inode(inode, &wbc);
 }
 
+/**
+ * ext2的setattr实现方法。
+ */
 int ext2_setattr(struct dentry *dentry, struct iattr *iattr)
 {
 	struct inode *inode = dentry->d_inode;

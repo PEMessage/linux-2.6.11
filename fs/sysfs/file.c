@@ -375,7 +375,11 @@ int sysfs_add_file(struct dentry * dir, const struct attribute * attr, int type)
  *	@kobj:	object we're creating for. 
  *	@attr:	atrribute descriptor.
  */
-
+/**
+ * 为kobject在目录中创建一个属性文件。
+ * 如果kobject的属性比默认属性还多，可以调用本方法在sysfs中创建一个属性。
+ * 新属性的show和store函数仍然调用kobj_type->sysfs_ops。需要确保sysfs_ops能够处理这个新增的属性。
+ */
 int sysfs_create_file(struct kobject * kobj, const struct attribute * attr)
 {
 	BUG_ON(!kobj || !kobj->dentry || !attr);
@@ -434,7 +438,10 @@ int sysfs_update_file(struct kobject * kobj, const struct attribute * attr)
  *
  *	Hash the attribute name and kill the victim.
  */
-
+/**
+ * 从文件系统中移除kobject的一个属性。
+ * 在移除后，用户空间可能仍然保持了一个对此属性文件的描述符。因此，show、restore仍然可能被调用。
+ */
 void sysfs_remove_file(struct kobject * kobj, const struct attribute * attr)
 {
 	sysfs_hash_and_remove(kobj->dentry,attr->name);

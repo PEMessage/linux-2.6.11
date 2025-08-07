@@ -28,6 +28,9 @@
  * from ext2_open_file: open gets called at every open, but release
  * gets called only when /all/ the files are closed.
  */
+/**
+ * ext2的release实现方法。
+ */
 static int ext2_release_file (struct inode * inode, struct file * filp)
 {
 	if (filp->f_mode & FMODE_WRITE)
@@ -38,6 +41,9 @@ static int ext2_release_file (struct inode * inode, struct file * filp)
 /*
  * We have mostly NULL's here: the current defaults are ok for
  * the ext2 filesystem.
+ */
+/**
+ * ext2文件系统的文件操作。
  */
 struct file_operations ext2_file_operations = {
 	.llseek		= generic_file_llseek,
@@ -55,6 +61,9 @@ struct file_operations ext2_file_operations = {
 	.sendfile	= generic_file_sendfile,
 };
 
+/**
+ * 普通文件的索引节点操作方法。
+ */
 struct inode_operations ext2_file_inode_operations = {
 	.truncate	= ext2_truncate,
 #ifdef CONFIG_EXT2_FS_XATTR

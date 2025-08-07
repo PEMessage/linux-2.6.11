@@ -178,7 +178,9 @@ struct file_operations bin_fops = {
  *	@attr:	attribute descriptor.
  *
  */
-
+/**
+ * 创建二进制属性。
+ */
 int sysfs_create_bin_file(struct kobject * kobj, struct bin_attribute * attr)
 {
 	BUG_ON(!kobj || !kobj->dentry || !attr);
@@ -193,7 +195,9 @@ int sysfs_create_bin_file(struct kobject * kobj, struct bin_attribute * attr)
  *	@attr:	attribute descriptor.
  *
  */
-
+/**
+ * 删除二进制属性。
+ */
 int sysfs_remove_bin_file(struct kobject * kobj, struct bin_attribute * attr)
 {
 	sysfs_hash_and_remove(kobj->dentry,attr->attr.name);

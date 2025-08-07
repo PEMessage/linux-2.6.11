@@ -86,6 +86,10 @@ nfs_proc_get_root(struct nfs_server *server, struct nfs_fh *fhandle,
 /*
  * One function for each procedure in the NFS protocol.
  */
+/**
+ * 调用服务器端的NFS_GETATTR。
+ * nfs_fattr定义了NFS的文件属性结构
+ */
 static int
 nfs_proc_getattr(struct nfs_server *server, struct nfs_fh *fhandle,
 		struct nfs_fattr *fattr)
@@ -100,6 +104,10 @@ nfs_proc_getattr(struct nfs_server *server, struct nfs_fh *fhandle,
 	return status;
 }
 
+/**
+ * 客户机设置文件的某些属性。客户机不能设置所有属性（例如fsid、rdev、fileid等）。如果调用成功，将会返回改变后文件的属性。
+ * 		sattr			:修改后的属性。
+ */
 static int
 nfs_proc_setattr(struct dentry *dentry, struct nfs_fattr *fattr,
 		 struct iattr *sattr)
@@ -118,6 +126,12 @@ nfs_proc_setattr(struct dentry *dentry, struct nfs_fattr *fattr,
 	return status;
 }
 
+/**
+ * 一个目录中搜索某个文件。如果成功，则返回的值由该文件的属性及其句柄组成。
+ * 			name		:是搜索的文件名.
+ *			dir			:是搜索所在的目录.
+ *			fhandle,fattr		:返回值。
+ */
 static int
 nfs_proc_lookup(struct inode *dir, struct qstr *name,
 		struct nfs_fh *fhandle, struct nfs_fattr *fattr)
@@ -140,6 +154,9 @@ nfs_proc_lookup(struct inode *dir, struct qstr *name,
 	return status;
 }
 
+/**
+ * 允许客户机把符号连接的值读出来。
+ */
 static int nfs_proc_readlink(struct inode *inode, struct page *page,
 		unsigned int pgbase, unsigned int pglen)
 {
@@ -157,6 +174,9 @@ static int nfs_proc_readlink(struct inode *inode, struct page *page,
 	return status;
 }
 
+/**
+ * 允许客户机从某个文件中读出数据。服务器如果操作成功，返回结果包含了所需要的数据及该文件的属性；如果操作失败，则状态值包含了一个差错代码。
+ */
 static int nfs_proc_read(struct nfs_read_data *rdata)
 {
 	int			flags = rdata->flags;
@@ -186,6 +206,9 @@ static int nfs_proc_read(struct nfs_read_data *rdata)
 	return status;
 }
 
+/**
+ * 允许客户向一个远程文件写入数据。调用成功返回文件的属性，否则包含一个错误代码。
+ */
 static int nfs_proc_write(struct nfs_write_data *wdata)
 {
 	int			flags = wdata->flags;

@@ -491,6 +491,10 @@ struct file *open_exec(const char *name)
 	struct file *file;
 
 	nd.intent.open.flags = FMODE_READ;
+	/**
+	 * 调用path_lookup,dentry_open,path_release以获得与可执行文件
+	 * 相关的目录项对象、文件对象和索引结点对象。
+	 */
 	err = path_lookup(name, LOOKUP_FOLLOW|LOOKUP_OPEN, &nd);
 	file = ERR_PTR(err);
 
@@ -499,6 +503,9 @@ struct file *open_exec(const char *name)
 		file = ERR_PTR(-EACCES);
 		if (!(nd.mnt->mnt_flags & MNT_NOEXEC) &&
 		    S_ISREG(inode->i_mode)) {
+		    /**
+		     * 检查执行权限
+		     */
 			int err = permission(inode, MAY_EXEC, &nd);
 			if (!err && !(inode->i_mode & 0111))
 				err = -EACCES;
@@ -506,6 +513,10 @@ struct file *open_exec(const char *name)
 			if (!err) {
 				file = dentry_open(nd.dentry, nd.mnt, O_RDONLY);
 				if (!IS_ERR(file)) {
+					/**
+					 * deny_write_access通过检查索引结点的i_writecount字段，
+					 * 确定可执行文件没有被写入。并把-1存放在这个字段以禁止进一步的写访问
+					 */
 					err = deny_write_access(file);
 					if (err) {
 						fput(file);
@@ -540,6 +551,9 @@ int kernel_read(struct file *file, unsigned long offset,
 
 EXPORT_SYMBOL(kernel_read);
 
+/**
+ * 释放分配给进程的内存描述符、所有线性区及所有页框，并清除进程的页表。
+ */
 static int exec_mmap(struct mm_struct *mm)
 {
 	struct task_struct *tsk;
@@ -587,6 +601,10 @@ static int exec_mmap(struct mm_struct *mm)
  * so that flush_signal_handlers can later reset the handlers without
  * disturbing other processes.  (Other processes might share the signal
  * table via the CLONE_SIGHAND option to clone().)
+ */
+/**
+ * 如果信号处理程序的表为其他进程所共享，那么就分配一个新表并把旧表的引用计数减一。
+ * 而且它将进程从旧的线程组脱离。
  */
 static inline int de_thread(struct task_struct *tsk)
 {
@@ -814,7 +832,7 @@ void get_task_comm(char *buf, struct task_struct *tsk)
 {
 	/* buf must be at least sizeof(tsk->comm) in size */
 	task_lock(tsk);
-	strncpy(buf, tsk->comm, sizeof(tsk->comm));
+	memcpy(buf, tsk->comm, sizeof(tsk->comm));
 	task_unlock(tsk);
 }
 
@@ -920,11 +938,17 @@ int prepare_binprm(struct linux_binprm *bprm)
 	 * Check execute perms again - if the caller has CAP_DAC_OVERRIDE,
 	 * generic_permission lets a non-executable through
 	 */
+	/**
+	 * 检测可执行文件是否可执行
+	 */
 	if (!(mode & 0111))	/* with at least _one_ execute bit set */
 		return -EACCES;
 	if (bprm->file->f_op == NULL)
 		return -EACCES;
 
+	/**
+	 * 初始化e_uid和e_gid字段。后面还需要根据这两个值检测用户权能。
+	 */
 	bprm->e_uid = current->euid;
 	bprm->e_gid = current->egid;
 
@@ -952,6 +976,10 @@ int prepare_binprm(struct linux_binprm *bprm)
 	if (retval)
 		return retval;
 
+	/**
+	 * 用可执行文件的前128个字节填充linux_binprm结构的buf字段。这些字节包含的是适合于识别可
+	 * 执行文件的一个魔数和其他信息。
+	 */
 	memset(bprm->buf,0,BINPRM_BUF_SIZE);
 	return kernel_read(bprm->file,0,bprm->buf,BINPRM_BUF_SIZE);
 }
@@ -1119,6 +1147,9 @@ EXPORT_SYMBOL(search_binary_handler);
 /*
  * sys_execve() executes a new program.
  */
+/**
+ * 
+ */
 int do_execve(char * filename,
 	char __user *__user *argv,
 	char __user *__user *envp,
@@ -1130,16 +1161,29 @@ int do_execve(char * filename,
 	int i;
 
 	retval = -ENOMEM;
+	/**
+	 * 动态分配linux_binprm结构，并用新的可执行文件的数据填充这个结构。
+	 */
 	bprm = kmalloc(sizeof(*bprm), GFP_KERNEL);
 	if (!bprm)
 		goto out_ret;
 	memset(bprm, 0, sizeof(*bprm));
 
+	/**
+	 * open_exec调用path_lookup,dentry_open,path_release以获得与可执行文件
+	 * 相关的目录项对象、文件对象和索引结点对象。
+	 * file也可能是错误码，所以调用IS_ERR(file)进行判断
+	 * 注：open_exec也会检查执行权限。
+	 */
 	file = open_exec(filename);
 	retval = PTR_ERR(file);
 	if (IS_ERR(file))
 		goto out_kfree;
 
+	/**
+	 * 在多处理器中，调用sched_exec以确定最小负载CPU以执行新程序。
+	 * 并把当前进程转移过去。
+	 */
 	sched_exec();
 
 	bprm->p = PAGE_SIZE*MAX_ARG_PAGES-sizeof(void *);
@@ -1152,6 +1196,10 @@ int do_execve(char * filename,
 	if (!bprm->mm)
 		goto out_file;
 
+	/**
+	 * init_new_context检查当前进程是否使用自定义局部描述符表。
+	 * 如果是，函数为新程序分配和准备一个新的LDT
+	 */
 	retval = init_new_context(current, bprm->mm);
 	if (retval < 0)
 		goto out_mm;
@@ -1168,10 +1216,17 @@ int do_execve(char * filename,
 	if (retval)
 		goto out;
 
+	/**
+	 * prepare_binprm填充linux_binprm数据结构。
+	 */
 	retval = prepare_binprm(bprm);
 	if (retval < 0)
 		goto out;
 
+	/**
+	 * 把路径名，命令行参数，环境串复制到一个或者多个新分配的页框中，
+	 * 最终，它们会被分配给用户态地址空间
+	 */
 	retval = copy_strings_kernel(1, &bprm->filename, bprm);
 	if (retval < 0)
 		goto out;
@@ -1185,8 +1240,15 @@ int do_execve(char * filename,
 	if (retval < 0)
 		goto out;
 
+	/**
+	 * 调用search_binary_handler函数对formats链表进行扫描，并尽力应用每个元素的load_binary方法，把
+	 * linxu_binprm数据结构传递给这个函数。只要load_binary方法成功应答了文件的可执行格式。对formats的扫描就终止。
+	 */
 	retval = search_binary_handler(bprm,regs);
 	if (retval >= 0) {
+		/**
+		 * 在formats中找到了，就释放linux_binprm数据结构，并返回load_binary所获得的代码。
+		 */
 		free_arg_pages(bprm);
 
 		/* execve success */
@@ -1199,6 +1261,9 @@ int do_execve(char * filename,
 
 out:
 	/* Something went wrong, return the inode and free the argument pages*/
+	/**
+	 * 可执行文件格式不在formats链表中，就释放所分配的所有页框并返回错误码-ENOEXEC
+	 */
 	for (i = 0 ; i < MAX_ARG_PAGES ; i++) {
 		struct page * page = bprm->page[i];
 		if (page)

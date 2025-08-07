@@ -329,6 +329,9 @@ static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
 	return err;
 }
 
+/**
+ * fcntl系统调用，可以实现对文件加POSIX锁。
+ */
 asmlinkage long sys_fcntl(unsigned int fd, unsigned int cmd, unsigned long arg)
 {	
 	struct file *filp;

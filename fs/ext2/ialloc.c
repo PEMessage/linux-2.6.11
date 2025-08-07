@@ -104,6 +104,9 @@ static void ext2_release_inode(struct super_block *sb, int group, int dir)
  * though), and then we'd have two inodes sharing the
  * same inode number and space on the harddisk.
  */
+/**
+ * 删除ext2索引节点。
+ */
 void ext2_free_inode (struct inode * inode)
 {
 	struct super_block * sb = inode->i_sb;
@@ -132,6 +135,9 @@ void ext2_free_inode (struct inode * inode)
 	is_directory = S_ISDIR(inode->i_mode);
 
 	/* Do this BEFORE marking the inode not in use or returning an error */
+	/**
+	 * 调用clear_inode删除与索引节点关联的间接脏缓冲区，等待IO数据传送结束......
+	 */
 	clear_inode (inode);
 
 	if (ino < EXT2_FIRST_INO(sb) ||
@@ -140,22 +146,34 @@ void ext2_free_inode (struct inode * inode)
 			    "reserved or nonexistent inode %lu", ino);
 		goto error_return;
 	}
+	/**
+	 * 计算包含这个磁盘索引节点的块组的索引。
+	 */
 	block_group = (ino - 1) / EXT2_INODES_PER_GROUP(sb);
 	bit = (ino - 1) % EXT2_INODES_PER_GROUP(sb);
 	brelse(bitmap_bh);
+	/**
+	 * 得到索引节点位图。
+	 */
 	bitmap_bh = read_inode_bitmap(sb, block_group);
 	if (!bitmap_bh)
 		goto error_return;
 
 	/* Ok, now we can actually update the inode bitmaps.. */
+	/**
+	 * 清除位图。
+	 */
 	if (!ext2_clear_bit_atomic(sb_bgl_lock(EXT2_SB(sb), block_group),
 				bit, (void *) bitmap_bh->b_data))
 		ext2_error (sb, "ext2_free_inode",
 			      "bit already cleared for inode %lu", ino);
 	else
-		ext2_release_inode(sb, block_group, is_directory);
+		ext2_release_inode(sb, block_group, is_directory);/* 删除文件或者目录时，对一些统计进行计数，并将所在的缓冲区标记为脏。 */
+	/**
+	 * 将位图缓冲区标记为脏。
+	 */
 	mark_buffer_dirty(bitmap_bh);
-	if (sb->s_flags & MS_SYNCHRONOUS)
+	if (sb->s_flags & MS_SYNCHRONOUS)/* 如果有此安装标志，则等待位图缓冲区上的写操作完成。 */
 		sync_dirty_buffer(bitmap_bh);
 error_return:
 	brelse(bitmap_bh);
@@ -172,6 +190,9 @@ error_return:
  *   stalling the writes while we read the inode block.
  *
  * FIXME: ext2_get_group_desc() needs to be simplified.
+ */
+/**
+ * 预读inode对应的块。
  */
 static void ext2_preread_inode(struct inode *inode)
 {
@@ -269,6 +290,9 @@ static int find_group_dir(struct super_block *sb, struct inode *parent)
 #define INODE_COST 64
 #define BLOCK_COST 256
 
+/**
+ * 为目录找到合适的块组。
+ */
 static int find_group_orlov(struct super_block *sb, struct inode *parent)
 {
 	int parent_group = EXT2_I(parent)->i_block_group;
@@ -293,6 +317,10 @@ static int find_group_orlov(struct super_block *sb, struct inode *parent)
 	avefreeb = free_blocks / ngroups;
 	ndirs = percpu_counter_read_positive(&sbi->s_dirs_counter);
 
+	/**
+	 * 以文件系统根root为父目录的目录应该分散在各个组。
+	 * 函数在这些块组去查找一个组：它的空闲索引结点数和空闲块数比平均值高。
+	 */
 	if ((parent == sb->s_root->d_inode) ||
 	    (EXT2_I(parent)->i_flags & EXT2_TOPDIR_FL)) {
 		struct ext2_group_desc *best_desc = NULL;
@@ -318,12 +346,18 @@ static int find_group_orlov(struct super_block *sb, struct inode *parent)
 			best_desc = desc;
 			best_bh = bh;
 		}
+
 		if (best_group >= 0) {
 			desc = best_desc;
 			bh = best_bh;
 			group = best_group;
 			goto found;
 		}
+		/**
+		 * 以文件系统根root为父目录的目录应该分散在各个组。
+		 * 函数在这些块组去查找一个组：它的空闲索引结点数和空闲块数比平均值高。
+		 * 但是这样的组没有找到，就退一步，跳到fallback，找一个次优的块组。
+		 */		
 		goto fallback;
 	}
 
@@ -446,6 +480,11 @@ found:
 	return group;
 }
 
+/**
+ * 创建ext2磁盘的索引结点。返回相应索引结点对象的地址。
+ * dir-一个目录对应的索引结点对象的地址。
+ * mode-要创建的索引结点的类型。如果包含MS_SYNCHRONOUS标志，那么标志请求当前进程一直挂起，直到索引结点被分配。
+ */
 struct inode *ext2_new_inode(struct inode *dir, int mode)
 {
 	struct super_block *sb;
@@ -461,6 +500,10 @@ struct inode *ext2_new_inode(struct inode *dir, int mode)
 	int err;
 
 	sb = dir->i_sb;
+	/**
+	 * new_inode分配一个新的VFS索引结点对象。并把它的i_sb字段初始化为dir->i_sb中的超级块地址。
+	 * 然后把它追加到正在用的索引结点链表与超级块链表中。
+	 */
 	inode = new_inode(sb);
 	if (!inode)
 		return ERR_PTR(-ENOMEM);
@@ -468,12 +511,21 @@ struct inode *ext2_new_inode(struct inode *dir, int mode)
 	ei = EXT2_I(inode);
 	sbi = EXT2_SB(sb);
 	es = sbi->s_es;
+	/**
+	 * 如果新结点是目录，就调用find_group_orlov为目录找到一个合适的块组。
+	 * 当然，如果安装ext2文件系统时，有OLDALLOC选项，就强制内核使用更简单、老式的分配策略。
+	 * 这个策略由find_group_dir实现。
+	 */
 	if (S_ISDIR(mode)) {
 		if (test_opt(sb, OLDALLOC))
 			group = find_group_dir(sb, dir);
 		else
 			group = find_group_orlov(sb, dir);
 	} else 
+		/**
+		 * 如果新索引结点不是目录，则调用find_group_other
+		 * 在有空闲索引结点的块组中分配一个。它首先从父目录所在的组开始找。
+		 */
 		group = find_group_other(sb, dir);
 
 	if (group == -1) {
@@ -484,6 +536,10 @@ struct inode *ext2_new_inode(struct inode *dir, int mode)
 	for (i = 0; i < sbi->s_groups_count; i++) {
 		gdp = ext2_get_group_desc(sb, group, &bh2);
 		brelse(bitmap_bh);
+		/**
+		 * read_inode_bitmap得到所选块组的索引结点位图。并从中寻找第一个空位。
+		 * 这样就行到了第一个空闲磁盘索引结点号。
+		 */
 		bitmap_bh = read_inode_bitmap(sb, group);
 		if (!bitmap_bh) {
 			err = -EIO;
@@ -492,6 +548,7 @@ struct inode *ext2_new_inode(struct inode *dir, int mode)
 		ino = 0;
 
 repeat_in_this_group:
+
 		ino = ext2_find_next_zero_bit((unsigned long *)bitmap_bh->b_data,
 					      EXT2_INODES_PER_GROUP(sb), ino);
 		if (ino >= EXT2_INODES_PER_GROUP(sb)) {
@@ -507,6 +564,10 @@ repeat_in_this_group:
 				group = 0;
 			continue;
 		}
+		/**
+		 * 分配索引结点，把索引结点位图中的相应位置置位。
+		 * 并把相应缓冲区标记为脏。
+		 */		
 		if (ext2_set_bit_atomic(sb_bgl_lock(sbi, group),
 						ino, bitmap_bh->b_data)) {
 			/* we lost this inode */
@@ -529,6 +590,10 @@ repeat_in_this_group:
 	goto fail;
 got:
 	mark_buffer_dirty(bitmap_bh);
+	/**
+	 * 如果有MS_SYNCHRONOUS标志，就调用sync_dirty_buffer
+	 * 开始IO写操作，并等待直到写操作终止。
+	 */
 	if (sb->s_flags & MS_SYNCHRONOUS)
 		sync_dirty_buffer(bitmap_bh);
 	brelse(bitmap_bh);
@@ -548,8 +613,14 @@ got:
 		percpu_counter_inc(&sbi->s_dirs_counter);
 
 	spin_lock(sb_bgl_lock(sbi, group));
+	/**
+	 * 减小组描述符的bg_free_inodes_count字段。
+	 */
 	gdp->bg_free_inodes_count =
                 cpu_to_le16(le16_to_cpu(gdp->bg_free_inodes_count) - 1);
+	/**
+	 * 如果是目录，还要增加bg_used_dirs_count字段
+	 */
 	if (S_ISDIR(mode)) {
 		if (sbi->s_debts[group] < 255)
 			sbi->s_debts[group]++;
@@ -561,6 +632,9 @@ got:
 	}
 	spin_unlock(sb_bgl_lock(sbi, group));
 
+	/**
+	 * 将超级块s_dirt标志置1，表示包含它的缓冲区已经为脏。
+	 */
 	sb->s_dirt = 1;
 	mark_buffer_dirty(bh2);
 	inode->i_uid = current->fsuid;
@@ -574,6 +648,9 @@ got:
 		inode->i_gid = current->fsgid;
 	inode->i_mode = mode;
 
+	/**
+	 * 初始化这个索引结点对象。
+	 */
 	inode->i_ino = ino;
 	inode->i_blksize = PAGE_SIZE;	/* This is the optimal IO size (for stat), not the fs block size */
 	inode->i_blocks = 0;
@@ -602,6 +679,9 @@ got:
 	spin_lock(&sbi->s_next_gen_lock);
 	inode->i_generation = sbi->s_next_generation++;
 	spin_unlock(&sbi->s_next_gen_lock);
+	/**
+	 * 将新索引结点插入到散列表inode_hashtable
+	 */
 	insert_inode_hash(inode);
 
 	if (DQUOT_ALLOC_INODE(inode)) {
@@ -609,6 +689,9 @@ got:
 		err = -ENOSPC;
 		goto fail2;
 	}
+	/**
+	 * 初始化访问控制列表（ACL）
+	 */
 	err = ext2_init_acl(inode, dir);
 	if (err) {
 		DQUOT_FREE_INODE(inode);
@@ -616,6 +699,9 @@ got:
 	}
 	mark_inode_dirty(inode);
 	ext2_debug("allocating inode %lu\n", inode->i_ino);
+	/**
+	 * 预读新创建的索引结点对应的块。这是合理的，一般来说，新创建的块当然会被读写了。
+	 */
 	ext2_preread_inode(inode);
 	return inode;
 

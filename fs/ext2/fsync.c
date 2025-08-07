@@ -31,7 +31,9 @@
  *	File may be NULL when we are called. Perhaps we shouldn't
  *	even pass file to fsync ?
  */
-
+/**
+ * ext2的fsync实现。
+ */
 int ext2_sync_file(struct file *file, struct dentry *dentry, int datasync)
 {
 	struct inode *inode = dentry->d_inode;

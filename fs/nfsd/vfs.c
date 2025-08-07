@@ -139,6 +139,10 @@ out:
  *   clients and is explicitly disallowed for NFSv3
  *      NeilBrown <neilb@cse.unsw.edu.au>
  */
+/**
+ * 处理NFS客户端lookup请求。
+ * 主要负责根据查找目录的句柄fhp和文件名name找到这个目录下有这个文件名的文件，并返回它的文件句柄。
+ */
 int
 nfsd_lookup(struct svc_rqst *rqstp, struct svc_fh *fhp, const char *name,
 					int len, struct svc_fh *resfh)
@@ -151,6 +155,9 @@ nfsd_lookup(struct svc_rqst *rqstp, struct svc_fh *fhp, const char *name,
 	dprintk("nfsd: nfsd_lookup(fh %s, %.*s)\n", SVCFH_fmt(fhp), len,name);
 
 	/* Obtain dentry and export. */
+	/**
+	 * 调用fh_verify对传过来的句柄进行校验，如果失败，则返回错误；成功则返回dentry指针和这个目录所在的export表信息；
+	 */
 	err = fh_verify(rqstp, fhp, S_IFDIR, MAY_EXEC);
 	if (err)
 		return err;
@@ -200,6 +207,9 @@ nfsd_lookup(struct svc_rqst *rqstp, struct svc_fh *fhp, const char *name,
 		}
 	} else {
 		fh_lock(fhp);
+		/**
+		 * 根据这个dentry指针和文件名调用lookup_dentry找到所需要文件的dentry指针；
+		 */
 		dentry = lookup_one_len(name, dparent, len);
 		err = PTR_ERR(dentry);
 		if (IS_ERR(dentry))
@@ -217,6 +227,9 @@ nfsd_lookup(struct svc_rqst *rqstp, struct svc_fh *fhp, const char *name,
 	/*
 	 * Note: we compose the file handle now, but as the
 	 * dentry may be negative, it may need to be updated.
+	 */
+	/**
+	 * 根据这个dentry指针和查找目录的export表信息，组建出这个文件的NFS文件句柄，并返回这个句柄。
 	 */
 	err = fh_compose(resfh, exp, dentry, fhp);
 	if (!err && !dentry->d_inode)

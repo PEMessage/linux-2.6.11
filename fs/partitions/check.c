@@ -323,70 +323,86 @@ static void disk_sysfs_symlinks(struct gendisk *disk)
 }
 
 /* Not exported, helper to add_disk(). */
+/* 将磁盘注册到sysfs文件系统，并扫描其分区 */
 void register_disk(struct gendisk *disk)
 {
 	struct block_device *bdev;
 	char *s;
 	int err;
 
+	/* 设置磁盘名称 */
 	strlcpy(disk->kobj.name,disk->disk_name,KOBJ_NAME_LEN);
 	/* ewww... some of these buggers have / in name... */
 	s = strchr(disk->kobj.name, '/');
 	if (s)
 		*s = '!';
+	/* 将磁盘设备添加到sys文件系统中 */
 	if ((err = kobject_add(&disk->kobj)))
 		return;
 	disk_sysfs_symlinks(disk);
 
 	/* No minors to use for partitions */
-	if (disk->minors == 1) {
+	if (disk->minors == 1) {/* 没有逻辑分区，将设备添加到dev中 */
 		if (disk->devfs_name[0] != '\0')
 			devfs_add_disk(disk);
 		return;
 	}
 
 	/* always add handle for the whole disk */
+	/* 处理磁盘分区 */
 	devfs_add_partitioned(disk);
 
 	/* No such device (e.g., media were just removed) */
+	/* 设备已经被移除，退出 */
 	if (!get_capacity(disk))
 		return;
 
+	/* 获取设备的引用计数 */
 	bdev = bdget_disk(disk, 0);
 	if (!bdev)
 		return;
 
+	/* 读取磁盘分区标志 */
 	bdev->bd_invalidated = 1;
+	/* 扫描磁盘分区，建立磁盘与分区的关系，并将分区添加到系统中 */
 	if (blkdev_get(bdev, FMODE_READ, 0) < 0)
 		return;
 	blkdev_put(bdev);
 }
 
+/* 扫描磁盘分区 */
 int rescan_partitions(struct gendisk *disk, struct block_device *bdev)
 {
 	struct parsed_partitions *state;
 	int p, res;
 
+	/* 分区打开计数次数大于0，表示有分区在使用，退出 */
 	if (bdev->bd_part_count)
 		return -EBUSY;
+	/* 将所有磁盘块写入到磁盘中 */
 	res = invalidate_partition(disk, 0);
 	if (res)
 		return res;
 	bdev->bd_invalidated = 0;
+	/* 删除内存中的分区信息 */
 	for (p = 1; p < disk->minors; p++)
 		delete_partition(disk, p);
+	/* 对某些特定的磁盘来说，调用回调来使其分区失效 */
 	if (disk->fops->revalidate_disk)
 		disk->fops->revalidate_disk(disk);
+	/* 如果磁盘已经被移除，或者没有分区表，则退出 */
 	if (!get_capacity(disk) || !(state = check_partition(disk, bdev)))
 		return 0;
+	/* 将check_partition检测到的分区添加到系统中 */
 	for (p = 1; p < state->limit; p++) {
 		sector_t size = state->parts[p].size;
 		sector_t from = state->parts[p].from;
-		if (!size)
+		if (!size)/* 分区长度为0，忽略 */
 			continue;
+		/* 将分区添加到系统中 */
 		add_partition(disk, p, from, size);
 #ifdef CONFIG_BLK_DEV_MD
-		if (state->parts[p].flags)
+		if (state->parts[p].flags)/* 对RAID分区来说，调用md_autodetect_dev为自动检测做准备 */
 			md_autodetect_dev(bdev->bd_dev+p);
 #endif
 	}
@@ -418,6 +434,9 @@ fail:
 
 EXPORT_SYMBOL(read_dev_sector);
 
+/**
+ * 卸载磁盘。
+ */
 void del_gendisk(struct gendisk *disk)
 {
 	int p;

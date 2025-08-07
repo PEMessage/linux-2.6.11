@@ -13,7 +13,9 @@
 #include <asm/current.h>
 #include <asm/uaccess.h>
 
-
+/**
+ * ext2的ioctl实现方法。
+ */
 int ext2_ioctl (struct inode * inode, struct file * filp, unsigned int cmd,
 		unsigned long arg)
 {

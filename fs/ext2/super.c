@@ -132,8 +132,16 @@ static void ext2_put_super (struct super_block * sb)
 	return;
 }
 
+/**
+ * inode高速缓存分配器。
+ */
 static kmem_cache_t * ext2_inode_cachep;
 
+/**
+ * alloc_inode超级块方法实现。
+ * 首先从ext2_inode_cachep_slab分配器高速缓存得到一个ext2_inode_info描述符。
+ * 然后返回在这个ext2_inode_info描述符中的索引结点对象的地址。
+ */
 static struct inode *ext2_alloc_inode(struct super_block *sb)
 {
 	struct ext2_inode_info *ei;
@@ -208,6 +216,9 @@ static ssize_t ext2_quota_read(struct super_block *sb, int type, char *data, siz
 static ssize_t ext2_quota_write(struct super_block *sb, int type, const char *data, size_t len, loff_t off);
 #endif
 
+/**
+ * ext2超级块方法
+ */
 static struct super_operations ext2_sops = {
 	.alloc_inode	= ext2_alloc_inode,
 	.destroy_inode	= ext2_destroy_inode,
@@ -547,6 +558,9 @@ static unsigned long descriptor_loc(struct super_block *sb,
 	return (first_data_block + has_super + (bg * sbi->s_blocks_per_group));
 }
 
+/**
+ * 从ext2磁盘分区中读取磁盘超级块。
+ */
 static int ext2_fill_super(struct super_block *sb, void *data, int silent)
 {
 	struct buffer_head * bh;
@@ -563,6 +577,9 @@ static int ext2_fill_super(struct super_block *sb, void *data, int silent)
 	int i, j;
 	__le32 features;
 
+	/**
+	 * 分配一个ext2超级块ext2_sb_info，并放到超级块的s_fs_info
+	 */
 	sbi = kmalloc(sizeof(*sbi), GFP_KERNEL);
 	if (!sbi)
 		return -ENOMEM;
@@ -593,6 +610,9 @@ static int ext2_fill_super(struct super_block *sb, void *data, int silent)
 		logic_sb_block = sb_block;
 	}
 
+	/**
+	 * 调用bread在缓冲区页中分配一个缓冲区和缓冲区首部。然后从磁盘读入超级块存放在缓冲区。
+	 */
 	if (!(bh = sb_bread(sb, logic_sb_block))) {
 		printk ("EXT2-fs: unable to read superblock\n");
 		goto failed_sbi;
@@ -602,6 +622,9 @@ static int ext2_fill_super(struct super_block *sb, void *data, int silent)
 	 *       some ext2 macro-instructions depend on its value
 	 */
 	es = (struct ext2_super_block *) (((char *)bh->b_data) + offset);
+	/**
+	 * 将缓冲区首部地址存放起来。
+	 */
 	sbi->s_es = es;
 	sb->s_magic = le16_to_cpu(es->s_magic);
 
@@ -772,6 +795,9 @@ static int ext2_fill_super(struct super_block *sb, void *data, int silent)
 				       EXT2_BLOCKS_PER_GROUP(sb);
 	db_count = (sbi->s_groups_count + EXT2_DESC_PER_BLOCK(sb) - 1) /
 		   EXT2_DESC_PER_BLOCK(sb);
+	/**
+	 * 分配一个数组，用于存放缓冲区首部指针。每个组描述符一个。
+	 */
 	sbi->s_group_desc = kmalloc (db_count * sizeof (struct buffer_head *), GFP_KERNEL);
 	if (sbi->s_group_desc == NULL) {
 		printk ("EXT2-fs: not enough memory\n");
@@ -781,6 +807,9 @@ static int ext2_fill_super(struct super_block *sb, void *data, int silent)
 	percpu_counter_init(&sbi->s_freeinodes_counter);
 	percpu_counter_init(&sbi->s_dirs_counter);
 	bgl_lock_init(&sbi->s_blockgroup_lock);
+	/**
+	 * 分配一个字节数据，并将其存到s_debts中，用于创建索引节点。
+	 */
 	sbi->s_debts = kmalloc(sbi->s_groups_count * sizeof(*sbi->s_debts),
 			       GFP_KERNEL);
 	if (!sbi->s_debts) {
@@ -788,6 +817,9 @@ static int ext2_fill_super(struct super_block *sb, void *data, int silent)
 		goto failed_mount_group_desc;
 	}
 	memset(sbi->s_debts, 0, sbi->s_groups_count * sizeof(*sbi->s_debts));
+	/**
+	 * 重复调用__bread分配缓冲区，并从磁盘读入包含ext2组描述符的块。
+	 */
 	for (i = 0; i < db_count; i++) {
 		block = descriptor_loc(sb, logic_sb_block, i);
 		sbi->s_group_desc[i] = sb_bread(sb, block);
@@ -1006,9 +1038,17 @@ static int ext2_statfs (struct super_block * sb, struct kstatfs * buf)
 	return 0;
 }
 
+/**
+ * 分配并初始化超级块。
+ */
 static struct super_block *ext2_get_sb(struct file_system_type *fs_type,
 	int flags, const char *dev_name, void *data)
 {
+	/**
+	 * get_sb_bdev分配并初始化一个适合于磁盘文件系统的超级块。
+	 * ext2_fill_super从ext2磁盘分区读取磁盘超级块。
+	 * 对特殊文件系统来说，有一个get_sb_pseudo，get_sb_single及get_sb_nodev。
+	 */
 	return get_sb_bdev(fs_type, flags, dev_name, data, ext2_fill_super);
 }
 

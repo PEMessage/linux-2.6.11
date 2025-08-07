@@ -91,6 +91,9 @@ static inline struct bio_vec *bvec_alloc(int gfp_mask, int nr, unsigned long *id
 /*
  * default destructor for a bio allocated with bio_alloc()
  */
+/**
+ * 释放bio时的回调函数
+ */
 static void bio_destructor(struct bio *bio)
 {
 	const int pool_idx = BIO_POOL_IDX(bio);
@@ -130,6 +133,11 @@ inline void bio_init(struct bio *bio)
  *   If %__GFP_WAIT is set then we will block on the internal pool waiting
  *   for a &struct bio to become free.
  **/
+/**
+ * 分配一个新的BIO结构，通常，BIO结构是由slab分配器分配的。
+ * 但是，当内存不足时，内核也会使用一个备用的BIO小内存池。
+ * 内核也会为BIO-VEV结构分配内存池-毕竟，分配BIO结构而不能分配其中的段描述符也是没有什么意义的。
+ */
 struct bio *bio_alloc(int gfp_mask, int nr_iovecs)
 {
 	struct bio *bio = mempool_alloc(bio_pool, gfp_mask);
@@ -165,6 +173,9 @@ out:
  *   Put a reference to a &struct bio, either one you have gotten with
  *   bio_alloc or bio_get. The last put of a bio will free it.
  **/
+/**
+ * bio_put函数减少bio中引用计数器（bi_cnt）的值，如果该值等于0，则释放bio结构以及相关的bio_vec结构
+ */
 void bio_put(struct bio *bio)
 {
 	BIO_BUG_ON(!atomic_read(&bio->bi_cnt));
@@ -799,21 +810,25 @@ void bio_check_pages_dirty(struct bio *bio)
  *   case something went wrong. Noone should call bi_end_io() directly on
  *   a bio unless they own it and thus know that it has an end_io function.
  **/
+/**
+ * BIO上的IO操作完成时所执行回调函数，只有该bio上有数据传输就会调用此函数
+ */
 void bio_endio(struct bio *bio, unsigned int bytes_done, int error)
 {
-	if (error)
+	if (error)/* 有错误，清除BIO_UPTODATE标志 */
 		clear_bit(BIO_UPTODATE, &bio->bi_flags);
 
-	if (unlikely(bytes_done > bio->bi_size)) {
+	if (unlikely(bytes_done > bio->bi_size)) {/* 这不应当发生 */
 		printk("%s: want %u bytes done, only %u left\n", __FUNCTION__,
 						bytes_done, bio->bi_size);
 		bytes_done = bio->bi_size;
 	}
 
+	/* 更新未完成字节数，起始扇区编号 */
 	bio->bi_size -= bytes_done;
 	bio->bi_sector += (bytes_done >> 9);
 
-	if (bio->bi_end_io)
+	if (bio->bi_end_io)/* 回调bio的函数，做一些后继处理，如弹性缓冲区处理 */
 		bio->bi_end_io(bio, bytes_done, error);
 }
 

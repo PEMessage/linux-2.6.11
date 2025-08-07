@@ -71,7 +71,13 @@ static unsigned int i_hash_shift;
  */
 
 LIST_HEAD(inode_in_use);
+/**
+ * 未用索引节点链表。
+ */
 LIST_HEAD(inode_unused);
+/**
+ * 所有索引节点对象的哈希表。
+ */
 static struct hlist_head *inode_hashtable;
 
 /*
@@ -240,9 +246,15 @@ void __iget(struct inode * inode)
  * that the inode is no longer useful. We just
  * terminate it with extreme prejudice.
  */
+/**
+ * 删除inode时用。
+ */
 void clear_inode(struct inode *inode)
 {
 	might_sleep();
+	/**
+	 * 删除间接脏缓冲区。
+	 */
 	invalidate_inode_buffers(inode);
        
 	if (inode->i_data.nrpages)
@@ -251,14 +263,26 @@ void clear_inode(struct inode *inode)
 		BUG();
 	if (inode->i_state & I_CLEAR)
 		BUG();
+	/**
+	 * 如果索引节点的I_LOCK标志被设置，说明索引节点的某些缓冲区正在进行IO操作，等待其他完成。
+	 */
 	wait_on_inode(inode);
 	DQUOT_DROP(inode);
+	/**
+	 * 超级块对象的方法，对ext2文件系统来说，没有实现的这个方法
+	 */
 	if (inode->i_sb && inode->i_sb->s_op->clear_inode)
 		inode->i_sb->s_op->clear_inode(inode);
+	/**
+	 * 如果索引节点指向一个设备文件，则从设备的索引节点链表中删除索引节点对象。
+	 */
 	if (inode->i_bdev)
 		bd_forget(inode);
 	if (inode->i_cdev)
 		cd_forget(inode);
+	/**
+	 * 把索引节点的状态置为I_CLEAR
+	 */
 	inode->i_state = I_CLEAR;
 }
 
@@ -420,6 +444,9 @@ static int can_unuse(struct inode *inode)
  * If the inode has metadata buffers attached to mapping->private_list then
  * try to remove them.
  */
+/**
+ * 在索引节点高速缓存中回收页框。
+ */
 static void prune_icache(int nr_to_scan)
 {
 	LIST_HEAD(freeable);
@@ -429,9 +456,15 @@ static void prune_icache(int nr_to_scan)
 
 	down(&iprune_sem);
 	spin_lock(&inode_lock);
+	/**
+	 * 扫描inode_unused链表，进行索引节点回收。
+	 */
 	for (nr_scanned = 0; nr_scanned < nr_to_scan; nr_scanned++) {
 		struct inode *inode;
 
+		/**
+		 * 如果已经扫描完整个未用索引节点链表。
+		 */
 		if (list_empty(&inode_unused))
 			break;
 
@@ -482,16 +515,29 @@ static void prune_icache(int nr_to_scan)
  * This function is passed the number of inodes to scan, and it returns the
  * total number of remaining possibly-reclaimable inodes.
  */
+/**
+ * 从索引节点高速缓存回收页框。
+ * 未用是指一个索引节点不再有一个控制目录项对象。
+ */
 static int shrink_icache_memory(int nr, unsigned int gfp_mask)
 {
+	/**
+	 * 如果nr为0，表示上层应用仅仅需要知道可以回收的页面个数。
+	 */
 	if (nr) {
 		/*
 		 * Nasty deadlock avoidance.  We may hold various FS locks,
 		 * and we don't want to recurse into the FS that called us
 		 * in clear_inode() and friends..
 	 	 */
+	 	/**
+ 	 	 * 与shrink_dcache_memory类似，仍然需要检查__GFP_FS标志。
+ 	 	 */
 		if (!(gfp_mask & __GFP_FS))
 			return -1;
+		/**
+		 * 进行有效的索引节点页框释放操作。
+		 */
 		prune_icache(nr);
 	}
 	return (inodes_stat.nr_unused / 100) * sysctl_vfs_cache_pressure;

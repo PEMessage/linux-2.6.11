@@ -57,11 +57,17 @@ nfsroot_mount(struct sockaddr_in *addr, char *path, struct nfs_fh *fh,
 			(unsigned)ntohl(addr->sin_addr.s_addr), path);
 
 	sprintf(hostname, "%u.%u.%u.%u", NIPQUAD(addr->sin_addr.s_addr));
+	/**
+	 * 产生用于连接的rpc_clnt客户端数据结构。
+	 */
 	mnt_clnt = mnt_create(hostname, addr, version, protocol);
 	if (IS_ERR(mnt_clnt))
 		return PTR_ERR(mnt_clnt);
 
 	call = (version == NFS_MNT3_VERSION) ? MOUNTPROC3_MNT : MNTPROC_MNT;
+	/**
+	 * 调用rpc远程函数rpc_call，实现对nfs_fh的取得。
+	 */
 	status = rpc_call(mnt_clnt, call, path, &result, 0);
 	return status < 0? status : (result.status? -EACCES : 0);
 }
@@ -73,10 +79,16 @@ mnt_create(char *hostname, struct sockaddr_in *srvaddr, int version,
 	struct rpc_xprt	*xprt;
 	struct rpc_clnt	*clnt;
 
+	/**
+	 * Xprt_create_proto主要构造了rpc传输层接口数据结构
+	 */
 	xprt = xprt_create_proto(protocol, srvaddr, NULL);
 	if (IS_ERR(xprt))
 		return (struct rpc_clnt *)xprt;
 
+	/**
+	 * rpc_create_client函数实现了RPC客户机的高层信息的构造，得到的信息保存在rpc_clnt结构中。
+	 */
 	clnt = rpc_create_client(xprt, hostname,
 				&mnt_program, version,
 				RPC_AUTH_UNIX);
@@ -174,6 +186,9 @@ static struct rpc_version *	mnt_version[] = {
 
 static struct rpc_stat		mnt_stats;
 
+/**
+ * MNT远程程序的程序号、版本号等
+ */
 struct rpc_program	mnt_program = {
 	.name		= "mount",
 	.number		= NFS_MNT_PROGRAM,

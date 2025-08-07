@@ -86,6 +86,10 @@ static struct {
 	},
 };
 
+/**
+ * NFS服务器端控制系统调用。
+ *		cmd:		服务的种类。如NFSCTL_SVC
+ */
 long
 asmlinkage sys_nfsservctl(int cmd, struct nfsctl_arg __user *arg, void __user *res)
 {

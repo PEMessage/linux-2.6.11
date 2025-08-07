@@ -4,7 +4,13 @@
 /*
  * second extended file system inode data in memory
  */
+/**
+ * 内存中的ext2索引节点
+ */
 struct ext2_inode_info {
+	/**
+	 * 磁盘索引节点中的大部分信息。
+	 */
 	__le32	i_data[15];
 	__u32	i_flags;
 	__u32	i_faddr;
@@ -13,6 +19,9 @@ struct ext2_inode_info {
 	__u16	i_state;
 	__u32	i_file_acl;
 	__u32	i_dir_acl;
+	/**
+	 * 删除时间。
+	 */
 	__u32	i_dtime;
 
 	/*
@@ -22,12 +31,18 @@ struct ext2_inode_info {
 	 * place a file's data blocks near its inode block, and new inodes
 	 * near to their parent directory's inode.
 	 */
+	/**
+	 * 包含这个索引节点的块组索引。
+	 */
 	__u32	i_block_group;
 
 	/*
 	 * i_next_alloc_block is the logical (file-relative) number of the
 	 * most-recently-allocated block in this file.  Yes, it is misnamed.
 	 * We use this for detecting linearly ascending allocation requests.
+	 */
+	/**
+	 * 最近为文件分配的磁盘块的逻辑块号。
 	 */
 	__u32	i_next_alloc_block;
 
@@ -37,7 +52,13 @@ struct ext2_inode_info {
 	 * allocated to this file.  This give us the goal (target) for the next
 	 * allocation when we detect linearly ascending requests.
 	 */
+	/**
+	 * 最近为文件分配的物理块号。
+	 */
 	__u32	i_next_alloc_goal;
+	/**
+	 * 用于数据块预分配。
+	 */
 	__u32	i_prealloc_block;
 	__u32	i_prealloc_count;
 	__u32	i_dir_start_lookup;
@@ -49,13 +70,22 @@ struct ext2_inode_info {
 	 * instead we synchronize on xattr_sem when reading or changing
 	 * EAs.
 	 */
+	/**
+	 * 允许增强属性与文件数据同时读入的信号号。
+	 */
 	struct rw_semaphore xattr_sem;
 #endif
 #ifdef CONFIG_EXT2_FS_POSIX_ACL
+	/**
+	 * 指向文件的访问控制列表。
+	 */
 	struct posix_acl	*i_acl;
 	struct posix_acl	*i_default_acl;
 #endif
 	rwlock_t i_meta_lock;
+	/**
+	 * VFS索引节点对象。
+	 */
 	struct inode	vfs_inode;
 };
 

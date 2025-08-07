@@ -82,6 +82,7 @@ void devfs_add_partitioned(struct gendisk *disk)
 	char dirname[64], symlink[16];
 
 	devfs_mk_dir(disk->devfs_name);
+
 	devfs_mk_bdev(MKDEV(disk->major, disk->first_minor),
 			S_IFBLK|S_IRUSR|S_IWUSR,
 			"%s/disc", disk->devfs_name);

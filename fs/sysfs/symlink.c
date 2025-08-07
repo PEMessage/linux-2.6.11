@@ -79,6 +79,11 @@ exit1:
  *	@target:	object we're pointing to.
  *	@name:		name of the symlink.
  */
+/**
+ * 在sysfs不同子树之间建立符号链接。
+ * 例如，在sysfs/bus下面保存了所有驱动，在sysfs/devices下面保存了所有设备。
+ * 可以通过本函数将驱动管理的设备链接起来。
+ */
 int sysfs_create_link(struct kobject * kobj, struct kobject * target, char * name)
 {
 	struct dentry * dentry = kobj->dentry;
@@ -98,7 +103,9 @@ int sysfs_create_link(struct kobject * kobj, struct kobject * target, char * nam
  *	@kobj:	object we're acting for.
  *	@name:	name of the symlink to remove.
  */
-
+/**
+ * 删除符号链接。
+ */
 void sysfs_remove_link(struct kobject * kobj, char * name)
 {
 	sysfs_hash_and_remove(kobj->dentry,name);

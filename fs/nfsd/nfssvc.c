@@ -75,6 +75,9 @@ int nfsd_nrthreads(void)
 		return nfsd_serv->sv_nrthreads;
 }
 
+/**
+ * NFS服务器端注册一个RPC服务。在这个服务上建立几个线程，以及socket。
+ */
 int
 nfsd_svc(unsigned short port, int nrservs)
 {
@@ -98,9 +101,16 @@ nfsd_svc(unsigned short port, int nrservs)
 	if (!nfsd_serv) {
 		atomic_set(&nfsd_busy, 0);
 		error = -ENOMEM;
+		/**
+		 * 建立一个svc_serv结构，并填写相应数据.
+		 * 调用svc_register通知本机的portmapper进程unregister过时的项。
+		 */
 		nfsd_serv = svc_create(&nfsd_program, NFSD_BUFSIZE);
 		if (nfsd_serv == NULL)
 			goto out;
+		/**
+		 * 调用svc_create_socket在指定端口上建立一个套接字，并进行绑定，然后建立一个svc_socket结构。
+		 */
 		error = svc_makesock(nfsd_serv, IPPROTO_UDP, port);
 		if (error < 0)
 			goto failure;
@@ -114,6 +124,10 @@ nfsd_svc(unsigned short port, int nrservs)
 	} else
 		nfsd_serv->sv_nrthreads++;
 	nrservs -= (nfsd_serv->sv_nrthreads-1);
+	/**
+	 * 根据请求的个数，在刚才建立的svc_serv 结构上调用kernel_thread函数创建n个线程，这n个线程都执行nfsd过程。
+	 * 其中每一个nfsd将不断在套接字上等待请求的到来，如果有请求到达，则接收并处理客户端发来的请求，并进行处理。
+	 */
 	while (nrservs > 0) {
 		nrservs--;
 		__module_get(THIS_MODULE);
@@ -167,6 +181,9 @@ update_thread_usage(int busy_threads)
 
 /*
  * This is the NFS server kernel thread
+ */
+/**
+ * NFS服务器端守护线程，处理客户端发来的请求。
  */
 static void
 nfsd(struct svc_rqst *rqstp)

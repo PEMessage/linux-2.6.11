@@ -111,10 +111,20 @@ int sb_min_blocksize(struct super_block *sb, int size)
 
 EXPORT_SYMBOL(sb_min_blocksize);
 
+/**
+ * 被block_prepare_write，blkdev_writepage,blkdev_readpage等过程回调。
+ * 用于将相对于文件开始处的文件块号转换为相对于块设备开始处的逻辑块号。
+ * 对块设备来说，这两个数是一样的
+ */
 static int
 blkdev_get_block(struct inode *inode, sector_t iblock,
 		struct buffer_head *bh, int create)
 {
+	/**
+	 * 检查页中第一个块的块号是否超过块设备的最后一块的索引值（存放在bdev->bd_inode->i_size中的块设备大小除以存放bdev->bd_block_size中的块大小得到该索引值，bdev指向块设备描述符）
+	 * 如果超过，那么对于写操作它返回-EIO，对于读操作返回0(超出块设备读也是不允许的，但是不返回错误代码)
+	 * 内核可以对块设备的最后数据试着发出读请求，而得到的缓冲区只被部分映射.
+	 */
 	if (iblock >= max_block(I_BDEV(inode))) {
 		if (create)
 			return -EIO;
@@ -127,8 +137,17 @@ blkdev_get_block(struct inode *inode, sector_t iblock,
 		 */
 		return 0;
 	}
+	/**
+	 * 设置缓冲区首部的b_dev字段为b_dev
+	 */
 	bh->b_bdev = I_BDEV(inode);
+	/**
+	 * 设置缓冲区首部的b_blocknr字段为文件块号。
+	 */
 	bh->b_blocknr = iblock;
+	/**
+	 * 设置缓冲区首部的BH_Mapped标志，以表明缓冲区首部的b_dev和b_blocknr字段是有效的。
+	 */
 	set_buffer_mapped(bh);
 	return 0;
 }
@@ -171,21 +190,38 @@ blkdev_direct_IO(int rw, struct kiocb *iocb, const struct iovec *iov,
 				iov, offset, nr_segs, blkdev_get_blocks, NULL);
 }
 
+/**
+ * 块设备的writepage方法。
+ */
 static int blkdev_writepage(struct page *page, struct writeback_control *wbc)
 {
 	return block_write_full_page(page, blkdev_get_block, wbc);
 }
 
+/**
+ * 块设备的readpage方法。
+ */
 static int blkdev_readpage(struct file * file, struct page * page)
 {
+	/**
+	 * blkdev_get_block函数把相对于文件开始处的文件块号转换为相对于块设备开始处的逻辑块号。
+	 * 对块设备来说，这两个值是一样的。
+	 */
 	return block_read_full_page(page, blkdev_get_block);
 }
 
+/**
+ * 块设备文件的address_space对象的prepare_write方法
+ * 它调用了block_prepare_write，唯一的差异是第二个参数。它是一个指向函数的指针，该函数把相对于文件开始处的文件块号转换为相对于块设备开始处的逻辑块号。
+ */
 static int blkdev_prepare_write(struct file *file, struct page *page, unsigned from, unsigned to)
 {
 	return block_prepare_write(page, from, to, blkdev_get_block);
 }
 
+/**
+ * 实现块设备文件的commit_write方法
+ */
 static int blkdev_commit_write(struct file *file, struct page *page, unsigned from, unsigned to)
 {
 	return block_commit_write(page, from, to);
@@ -227,7 +263,8 @@ static loff_t block_llseek(struct file *file, loff_t offset, int origin)
  *	Filp is never NULL; the only case when ->fsync() is called with
  *	NULL first argument is nfsd_sync_dir() and that's not a directory.
  */
- 
+
+
 static int block_fsync(struct file *filp, struct dentry *dentry, int datasync)
 {
 	return sync_blockdev(I_BDEV(filp->f_mapping->host));
@@ -352,13 +389,21 @@ static int bdev_set(struct inode *inode, void *data)
 	return 0;
 }
 
+/**
+ * 所有的块设备描述符被插入在一个全局链表中，链表首部是由变量all_bdevs表示的。
+ * 链表链表所用的指针位于块设备描述符的bd_list字段中。
+ */
 static LIST_HEAD(all_bdevs);
 
+/**
+ * 根据主次设备号获取块设备描述符的的地址。
+ */
 struct block_device *bdget(dev_t dev)
 {
 	struct block_device *bdev;
 	struct inode *inode;
 
+	/* 在dev文件系统中找到设备的inode */
 	inode = iget5_locked(bd_mnt->mnt_sb, hash(dev),
 			bdev_test, bdev_set, &dev);
 
@@ -409,24 +454,43 @@ void bdput(struct block_device *bdev)
 }
 
 EXPORT_SYMBOL(bdput);
- 
+
+/**
+ * 获得块设备描述符bdev的地址.该函数接收索引结点对象的地址
+ */
 static struct block_device *bd_acquire(struct inode *inode)
 {
 	struct block_device *bdev;
 	spin_lock(&bdev_lock);
 	bdev = inode->i_bdev;
+	/**
+	 * 检查索引结点对象的i_bdev字段是否不为NULL.
+	 * 如果是,表明块设备文件已经打开了.该字段存放了相应块描述符的地址.
+	 * 在这种情况下,增加bd_inode索引结点的引用计数器的值,并返回描述符inode->i_bdev的地址
+	 */
 	if (bdev && igrab(bdev->bd_inode)) {
 		spin_unlock(&bdev_lock);
 		return bdev;
 	}
+
+	/**
+	 * 块设备文件没有被打开.根据设备文件的主设备号和次设备号,执行bdget获得描述符的地址.
+	 * 如果描述符不存在,bdget就分配一个.当然,也可能存在描述符了(比如其他块设备文件已经访问了该块设备).
+	 */
 	spin_unlock(&bdev_lock);
 	bdev = bdget(inode->i_rdev);
 	if (bdev) {
 		spin_lock(&bdev_lock);
 		if (inode->i_bdev)
 			__bd_forget(inode);
+		/**
+		 * 将描述符地址存放到inode->i_bdev中,以便加速将来对相同块设备文件的打开操作.
+		 */
 		inode->i_bdev = bdev;
 		inode->i_mapping = bdev->bd_inode->i_mapping;
+		/**
+		 * 将索引结点插入到由bd_inodes确立的块设备描述符的已打开索引结点链表中
+		 */
 		list_add(&inode->i_devices, &bdev->bd_inodes);
 		spin_unlock(&bdev_lock);
 	}
@@ -443,6 +507,9 @@ void bd_forget(struct inode *inode)
 	spin_unlock(&bdev_lock);
 }
 
+/**
+ * bd_claim函数将block_device的holder字段设置为一个特定的地址。
+ */
 int bd_claim(struct block_device *bdev, void *holder)
 {
 	int res;
@@ -480,6 +547,9 @@ int bd_claim(struct block_device *bdev, void *holder)
 
 EXPORT_SYMBOL(bd_claim);
 
+/**
+ * bd_release将bdev的bd_holder字段设置为NULL
+ */
 void bd_release(struct block_device *bdev)
 {
 	spin_lock(&bdev_lock);
@@ -564,8 +634,18 @@ static int do_open(struct block_device *bdev, struct file *file)
 	int ret = -ENXIO;
 	int part;
 
+	/**
+	 * 在调用do_open前，blkdev_open会调用bd_acquire，在bd_acquire中
+	 * inode->imapping字段会被设置为bdev索引结点中相应字段的值。该字段指向地址空间对象(address_space)
+	 * 现在将它赋给f_mapping
+	 */
 	file->f_mapping = bdev->bd_inode->i_mapping;
 	lock_kernel();
+	/**
+	 * 获取与块设备相关的gendisk描述符地址。
+	 * 如果打开的块设备是一个分区，则返回的索引值存放在part中，否则part为0
+	 * get_gendisk函数简单的在kobject映射域bdev_map上调用kobj_lookup来传递设备的主设备号和次设备号。
+	 */
 	disk = get_gendisk(bdev->bd_dev, &part);
 	if (!disk) {
 		unlock_kernel();
@@ -575,12 +655,23 @@ static int do_open(struct block_device *bdev, struct file *file)
 	owner = disk->fops->owner;
 
 	down(&bdev->bd_sem);
-	if (!bdev->bd_openers) {
+	/**
+	 * bdev->bd_openers!=0表示设备已经打开。
+	 */
+	if (!bdev->bd_openers) {/* 还没有打开 */
+		/**
+		 * 第一次访问，以前没有打开过
+		 * 就初始化它的bd_disk
+		 */
 		bdev->bd_disk = disk;
 		bdev->bd_contains = bdev;
-		if (!part) {
+		if (!part) {/* 是一个整盘，而不是分区 */
 			struct backing_dev_info *bdi;
 			if (disk->fops->open) {
+				/**
+				 * 该盘定义了打开方法。就执行它
+				 * 该方法是由块设备驱动程序定义的定制函数。
+				 */
 				ret = disk->fops->open(bdev->bd_inode, file);
 				if (ret)
 					goto out_first;
@@ -594,9 +685,14 @@ static int do_open(struct block_device *bdev, struct file *file)
 			}
 			if (bdev->bd_invalidated)
 				rescan_partitions(disk, bdev);
-		} else {
+		} else {/* 设备是一个分区 */
+		 
 			struct hd_struct *p;
 			struct block_device *whole;
+			/**
+			 * 再次调用bdget_disk。这次参数不一样
+			 * 获得整盘的块描述符地址whole
+			 */
 			whole = bdget_disk(disk, 0);
 			ret = -ENOMEM;
 			if (!whole)
@@ -604,9 +700,20 @@ static int do_open(struct block_device *bdev, struct file *file)
 			ret = blkdev_get(whole, file->f_mode, file->f_flags);
 			if (ret)
 				goto out_first;
+			/**
+			 * 设置描述符:dev是分区，则指向分区所在整盘描述符
+			 * 否则指向块设备描述符
+			 */
 			bdev->bd_contains = whole;
 			down(&whole->bd_sem);
+			/**
+			 * 增加bd_part_count从而说明磁盘分区上新的打开操作。
+			 */
 			whole->bd_part_count++;
+			/**
+			 * 用disk->part[part - 1]的值设置bdev->bd_part
+			 * 它是分区描述符hd_struct的地址。
+			 */
 			p = disk->part[part - 1];
 			bdev->bd_inode->i_data.backing_dev_info =
 			   whole->bd_inode->i_data.backing_dev_info;
@@ -616,20 +723,40 @@ static int do_open(struct block_device *bdev, struct file *file)
 				ret = -ENXIO;
 				goto out_first;
 			}
+			/**
+			 * 增加分区引用计数器的值。
+			 */
 			kobject_get(&p->kobj);
 			bdev->bd_part = p;
+			/**
+			 * 设置索引结点中分区大小和扇区大小
+			 */
 			bd_set_size(bdev, (loff_t) p->nr_sects << 9);
 			up(&whole->bd_sem);
 		}
 	} else {
+		/** 
+		 * 设备已经打开了
+		 */
 		put_disk(disk);
 		module_put(owner);
+		/**
+		 * bdev->bd_contains == bdev表示设备是一个整盘
+		 */
 		if (bdev->bd_contains == bdev) {
+			/**
+			 * 调用块设备的open方法。
+			 */
 			if (bdev->bd_disk->fops->open) {
 				ret = bdev->bd_disk->fops->open(bdev->bd_inode, file);
 				if (ret)
 					goto out;
 			}
+			/**
+			 * 检查bdev->bd_invalidated，如果有必要就调用rescan_partitions
+			 * 如果设置了bdev->bd_invalidated就调用rescan_partitions扫描分区表并更新分区描述符。
+			 * 该标志是由check_disk_change块设备方法设备的，仅适用于可移动设备(U盘、软盘??)。
+			 */
 			if (bdev->bd_invalidated)
 				rescan_partitions(bdev->bd_disk, bdev);
 		} else {
@@ -638,6 +765,9 @@ static int do_open(struct block_device *bdev, struct file *file)
 			up(&bdev->bd_contains->bd_sem);
 		}
 	}
+	/**
+	 * 无论如何，都增加打开计数
+	 */
 	bdev->bd_openers++;
 	up(&bdev->bd_sem);
 	unlock_kernel();
@@ -679,6 +809,9 @@ int blkdev_get(struct block_device *bdev, mode_t mode, unsigned flags)
 
 EXPORT_SYMBOL(blkdev_get);
 
+/**
+ * 块设备文件的缺省操作-open
+ */
 static int blkdev_open(struct inode * inode, struct file * filp)
 {
 	struct block_device *bdev;
@@ -692,18 +825,30 @@ static int blkdev_open(struct inode * inode, struct file * filp)
 	 */
 	filp->f_flags |= O_LARGEFILE;
 
+	/**
+	 * 执行bd_acquire从而获得块设备描述符bdev的地址。
+	 */
 	bdev = bd_acquire(inode);
 
 	res = do_open(bdev, filp);
 	if (res)
 		return res;
 
+	/**
+	 * 不是独占打开，就返回了
+	 */
 	if (!(filp->f_flags & O_EXCL) )
 		return 0;
 
+	/**
+	 * 否则是独占打开，就调用bd_claim设置块设备的持有者。
+	 */
 	if (!(res = bd_claim(bdev, filp)))
 		return 0;
 
+	/**
+	 * bd_claim失败了，说明已经被其他人占有了，就释放块设备描述符并返回错误。
+	 */
 	blkdev_put(bdev);
 	return res;
 }
@@ -753,6 +898,9 @@ int blkdev_put(struct block_device *bdev)
 
 EXPORT_SYMBOL(blkdev_put);
 
+/**
+ * 缺省的块设备文件操作方法-release
+ */
 static int blkdev_close(struct inode * inode, struct file * filp)
 {
 	struct block_device *bdev = I_BDEV(filp->f_mapping->host);
@@ -769,6 +917,9 @@ static ssize_t blkdev_file_write(struct file *file, const char __user *buf,
 	return generic_file_write_nolock(file, &local_iov, 1, ppos);
 }
 
+/**
+ * 缺省的块设备文件操作-aio_write
+ */
 static ssize_t blkdev_file_aio_write(struct kiocb *iocb, const char __user *buf,
 				   size_t count, loff_t pos)
 {
@@ -793,6 +944,9 @@ struct address_space_operations def_blk_aops = {
 	.direct_IO	= blkdev_direct_IO,
 };
 
+/**
+ * 处理设备文件的VFS时，dentry_open函数会定制文件对象的方法。它的f_op字段设置为表def_blk_fops的地址
+ */
 struct file_operations def_blk_fops = {
 	.open		= blkdev_open,
 	.release	= blkdev_close,

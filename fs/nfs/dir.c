@@ -570,6 +570,9 @@ int nfs_neg_need_reval(struct inode *dir, struct dentry *dentry,
  * If the parent directory is seen to have changed, we throw out the
  * cached dentry and do a new lookup.
  */
+/**
+ * 查找到一个dentry后，将对这个dentry的有效性进行检查。如果仍然有效，就保持不动；如果已经失效了，就重新刷新这个dentry，使它反映最新的情况。
+ */
 static int nfs_lookup_revalidate(struct dentry * dentry, struct nameidata *nd)
 {
 	struct inode *dir;
@@ -589,12 +592,21 @@ static int nfs_lookup_revalidate(struct dentry * dentry, struct nameidata *nd)
 	if (nd && !(nd->flags & LOOKUP_CONTINUE) && (nd->flags & LOOKUP_OPEN))
 		isopen = 1;
 
+	/**
+	 * 首先检查这个dentry的inode指针是不是存在。
+	 */
 	if (!inode) {
+		/**
+		 * 如果不存在，就认为这个dentry是临时产生的dentry，然后检查它的有效期
+		 */
 		if (nfs_neg_need_reval(dir, dentry, nd))
-			goto out_bad;
-		goto out_valid;
+			goto out_bad; /* 没有过有效期，就认为它有效返回 */
+		goto out_valid;/* 否则认为这个dentry无效并返回。 */
 	}
 
+	/**
+	 * 这个inode已经过失效期
+	 */
 	if (is_bad_inode(inode)) {
 		dfprintk(VFS, "nfs_lookup_validate: %s/%s has dud inode\n",
 			dentry->d_parent->d_name.name, dentry->d_name.name);
@@ -615,11 +627,20 @@ static int nfs_lookup_revalidate(struct dentry * dentry, struct nameidata *nd)
 		goto out_bad;
 
 	verifier = nfs_save_change_attribute(dir);
+	/**
+	 * 调用nfs_proc_lookup得到这个目录所对应NFS文件句柄和文件属性
+	 */
 	error = NFS_PROTO(dir)->lookup(dir, &dentry->d_name, &fhandle, &fattr);
 	if (error)
 		goto out_bad;
+	/**
+	 * 如果和现有的文件句柄不相符，则认为这个dentry失效并返回
+	 */
 	if (nfs_compare_fh(NFS_FH(inode), &fhandle))
 		goto out_bad;
+	/**
+	 * 对dentry所在的inode进行刷新。
+	 */
 	if ((error = nfs_refresh_inode(inode, &fattr)) != 0)
 		goto out_bad;
 
@@ -702,6 +723,9 @@ int nfs_is_exclusive_create(struct inode *dir, struct nameidata *nd)
 	return (nd->intent.open.flags & O_EXCL) != 0;
 }
 
+/**
+ * 在对dentry进行查找失败的时候实际进行查找dentry操作，它在NFS文件系统中所对应的函数是nfs_lookup(只有目录类型的文件有这种操作)
+ */
 static struct dentry *nfs_lookup(struct inode *dir, struct dentry * dentry, struct nameidata *nd)
 {
 	struct dentry *res;
@@ -718,6 +742,9 @@ static struct dentry *nfs_lookup(struct inode *dir, struct dentry * dentry, stru
 		goto out;
 
 	res = ERR_PTR(-ENOMEM);
+	/**
+	 * 将dentry的操作函数数组设为NFS的dentry操作函数数组；
+	 */
 	dentry->d_op = NFS_PROTO(dir)->dentry_ops;
 
 	lock_kernel();
@@ -728,6 +755,10 @@ static struct dentry *nfs_lookup(struct inode *dir, struct dentry * dentry, stru
 	if (nfs_is_exclusive_create(dir, nd))
 		goto no_entry;
 
+	/**
+	 * 调用nfs_proc_lookup在目录中寻找符合名称的文件。
+	 * 如果找到，得到这个文件的NFS文件句柄和文件属性。
+	 */
 	error = NFS_PROTO(dir)->lookup(dir, &dentry->d_name, &fhandle, &fattr);
 	if (error == -ENOENT)
 		goto no_entry;
@@ -736,6 +767,11 @@ static struct dentry *nfs_lookup(struct inode *dir, struct dentry * dentry, stru
 		goto out_unlock;
 	}
 	res = ERR_PTR(-EACCES);
+	/**
+	 * 调用nfs_fhget，寻找这个文件句柄所对应的inode结构（如果没有，就创建一个inode结构）。
+	 * 如果找到，将dentry的inode指针指向找到的inode结构。
+	 * 在nfs_fhget中如果找到inode，需要根据文件属性所反映的文件类型确定不同的操作函数组
+	 */
 	inode = nfs_fhget(dentry->d_sb, &fhandle, &fattr);
 	if (!inode)
 		goto out_unlock;
@@ -978,6 +1014,9 @@ out_err:
  * that the operation succeeded on the server, but an error in the
  * reply path made it appear to have failed.
  */
+/**
+ * 负责在一个目录上创建一个新的文件
+ */
 static int nfs_create(struct inode *dir, struct dentry *dentry, int mode,
 		struct nameidata *nd)
 {
@@ -997,9 +1036,15 @@ static int nfs_create(struct inode *dir, struct dentry *dentry, int mode,
 
 	lock_kernel();
 	nfs_begin_data_update(dir);
+	/**
+	 * 调用nfs_proc_create在远程机器上创建一个文件，并得到这个文件的文件句柄和文件属性；
+	 */
 	inode = NFS_PROTO(dir)->create(dir, dentry, &attr, open_flags);
 	nfs_end_data_update(dir);
 	if (!IS_ERR(inode)) {
+		/**
+		 * 调用nfs_fhget找到这个文件句柄所对应的inode结构，并加入到dentry中去。
+		 */
 		d_instantiate(dentry, inode);
 		nfs_renew_times(dentry);
 		nfs_set_verifier(dentry, nfs_save_change_attribute(dir));

@@ -174,6 +174,13 @@ static void group_release_blocks(struct super_block *sb, int group_no,
 }
 
 /* Free given blocks, update quota and i_blocks field */
+/**
+ * 释放一组含有一个或多个相邻块的数据块。除ext2_truncate外，丢弃文件的预分配块也调用它。
+ * ext2_truncate或者丢弃文件的预分配块时都会调用它。
+ * inode-文件索引结点对象的地址。
+ * block-要释放的第一个块的逻辑号。
+ * count-要释放的相邻块数。
+ */
 void ext2_free_blocks (struct inode * inode, unsigned long block,
 		       unsigned long count)
 {
@@ -215,6 +222,9 @@ do_more:
 		count -= overflow;
 	}
 	brelse(bitmap_bh);
+	/**
+	 * 获得要释放的块的位图。
+	 */
 	bitmap_bh = read_block_bitmap(sb, block_group);
 	if (!bitmap_bh)
 		goto error_return;
@@ -234,6 +244,9 @@ do_more:
 			    "Block = %lu, count = %lu",
 			    block, count);
 
+	/**
+	 * 将块位图清0。
+	 */
 	for (i = 0, group_freed = 0; i < count; i++) {
 		if (!ext2_clear_bit_atomic(sb_bgl_lock(sbi, block_group),
 						bit + i, bitmap_bh->b_data)) {
@@ -244,10 +257,16 @@ do_more:
 		}
 	}
 
+	/**
+	 * 将位图所在的缓冲区设置为脏。
+	 */
 	mark_buffer_dirty(bitmap_bh);
-	if (sb->s_flags & MS_SYNCHRONOUS)
+	if (sb->s_flags & MS_SYNCHRONOUS)/* 如果设置了此标志，则等待位图缓冲区被写入磁盘 */
 		sync_dirty_buffer(bitmap_bh);
 
+	/**
+	 * 增加块组描述符的空闲块字段，并将相应的缓冲区标记为脏。把超级块也设置为脏。
+	 */
 	group_release_blocks(sb, block_group, desc, bh2, group_freed);
 	freed += group_freed;
 
@@ -322,6 +341,9 @@ got_it:
  * each block group the search first looks for an entire free byte in the block
  * bitmap, and then for any free bit if that fails.
  * This function also updates quota and i_blocks field.
+ */
+/**
+ * 在ext2分区内搜寻一个空闲块。当预分配的块失效时使用。
  */
 int ext2_new_block(struct inode *inode, unsigned long goal,
 			u32 *prealloc_count, u32 *prealloc_block, int *err)

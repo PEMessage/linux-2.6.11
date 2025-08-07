@@ -157,10 +157,15 @@ loop:
 	jbd_debug(1, "commit_sequence=%d, commit_request=%d\n",
 		journal->j_commit_sequence, journal->j_commit_request);
 
+	/**
+	 * 希望提交的日志编号，与已经提交的编号不相等
+	 * 说明有提交日志的需求
+	 */
 	if (journal->j_commit_sequence != journal->j_commit_request) {
 		jbd_debug(1, "OK, requests differ\n");
 		spin_unlock(&journal->j_state_lock);
 		del_timer_sync(journal->j_commit_timer);
+		/* 提交日志 */
 		journal_commit_transaction(journal);
 		spin_lock(&journal->j_state_lock);
 		goto loop;
@@ -435,21 +440,30 @@ int __log_space_left(journal_t *journal)
 /*
  * Called under j_state_lock.  Returns true if a transaction was started.
  */
+/**
+ * 唤醒日志线程，处理事务
+ */
 int __log_start_commit(journal_t *journal, tid_t target)
 {
 	/*
 	 * Are we already doing a recent enough commit?
 	 */
-	if (!tid_geq(journal->j_commit_request, target)) {
+	if (!tid_geq(journal->j_commit_request, target)) {/* 新的请求 */
 		/*
 		 * We want a new commit: OK, mark the request and wakup the
 		 * commit thread.  We do _not_ do the commit ourselves.
 		 */
 
+		/**
+		 * 标记请求的ID号
+		 */
 		journal->j_commit_request = target;
 		jbd_debug(1, "JBD: requesting commit %d/%d\n",
 			  journal->j_commit_request,
 			  journal->j_commit_sequence);
+		/**
+		 * 唤醒日志线程，开始干活了:)
+		 */
 		wake_up(&journal->j_wait_commit);
 		return 1;
 	}
@@ -530,6 +544,9 @@ int journal_start_commit(journal_t *journal, tid_t *ptid)
  * Wait for a specified commit to complete.
  * The caller may not hold the journal lock.
  */
+/**
+ * 等待某个事务完成
+ */
 int log_wait_commit(journal_t *journal, tid_t tid)
 {
 	int err = 0;
@@ -544,11 +561,17 @@ int log_wait_commit(journal_t *journal, tid_t tid)
 	spin_unlock(&journal->j_state_lock);
 #endif
 	spin_lock(&journal->j_state_lock);
+	/**
+	 * 当前事务还没有被提交
+	 */
 	while (tid_gt(tid, journal->j_commit_sequence)) {
 		jbd_debug(1, "JBD: want %d, j_commit_sequence=%d\n",
 				  tid, journal->j_commit_sequence);
+		/* 唤醒日志线程 */
 		wake_up(&journal->j_wait_commit);
+		/* 等待之前需要关闭自旋锁 */
 		spin_unlock(&journal->j_state_lock);
+		/* 等待日志线程完成后将当前任务唤醒 */
 		wait_event(journal->j_wait_done_commit,
 				!tid_gt(tid, journal->j_commit_sequence));
 		spin_lock(&journal->j_state_lock);

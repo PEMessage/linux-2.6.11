@@ -168,9 +168,17 @@ __sync_single_inode(struct inode *inode, struct writeback_control *wbc)
 
 	spin_unlock(&inode_lock);
 
+	/**
+	 * do_writepages使用索引结点的writepages方法，或者在没有这个方法的情况下使用mpage_writepages函数
+	 * 来写wbc->nr_to_write个脏页。
+	 */
 	ret = do_writepages(mapping, wbc);
 
 	/* Don't write the inode if only I_DIRTY_PAGES was set */
+	/**
+	 * 如果索引节点是脏的，就用超级块的write_inode方法把索引节点写到磁盘。
+	 * 通常是使用submit_bh来传输一个数据块。
+	 */
 	if (dirty & (I_DIRTY_SYNC | I_DIRTY_DATASYNC)) {
 		int err = write_inode(inode, wait);
 		if (ret == 0)
@@ -186,6 +194,9 @@ __sync_single_inode(struct inode *inode, struct writeback_control *wbc)
 	spin_lock(&inode_lock);
 	inode->i_state &= ~I_LOCK;
 	if (!(inode->i_state & I_FREEING)) {
+		/*
+		 * 检查索引节点的状态。如果索引节点还有脏页，就把索引节点移回sb->s_dirty链表。
+		 */
 		if (!(inode->i_state & I_DIRTY) &&
 		    mapping_tagged(mapping, PAGECACHE_TAG_DIRTY)) {
 			/*
@@ -220,12 +231,12 @@ __sync_single_inode(struct inode *inode, struct writeback_control *wbc)
 			 * the pages.
 			 */
 			list_move(&inode->i_list, &sb->s_dirty);
-		} else if (atomic_read(&inode->i_count)) {
+		} else if (atomic_read(&inode->i_count)) {/* 如果索引节点引用计数器不为0，就把索引节点移到inode_in_use链表 */
 			/*
 			 * The inode is clean, inuse
 			 */
 			list_move(&inode->i_list, &inode_in_use);
-		} else {
+		} else {/* 如果索引节点引用计数器为0，就把索引节点移到inode_unused链表 */
 			/*
 			 * The inode is clean, unused
 			 */
@@ -240,12 +251,18 @@ __sync_single_inode(struct inode *inode, struct writeback_control *wbc)
 /*
  * Write out an inode's dirty pages.  Called under inode_lock.
  */
+/**
+ * 回写脏页缓冲区
+ */
 static int
 __writeback_single_inode(struct inode *inode,
 			struct writeback_control *wbc)
 {
 	wait_queue_head_t *wqh;
 
+	/**
+	 * 如果索引节点被锁定，就把它移到脏索引节点链表中，并返回0.
+	 */
 	if ((wbc->sync_mode != WB_SYNC_ALL) && (inode->i_state & I_LOCK)) {
 		list_move(&inode->i_list, &inode->i_sb->s_dirty);
 		return 0;
@@ -253,6 +270,9 @@ __writeback_single_inode(struct inode *inode,
 
 	/*
 	 * It's a data-integrity sync.  We must wait.
+	 */
+	/**
+	 * 如果必须等待页面解锁，就等待。
 	 */
 	if (inode->i_state & I_LOCK) {
 		DEFINE_WAIT_BIT(wq, &inode->i_state, __I_LOCK);
@@ -300,15 +320,21 @@ __writeback_single_inode(struct inode *inode,
  * on the writer throttling path, and we get decent balancing between many
  * throttled threads: we don't want them all piling up on __wait_on_inode.
  */
+/**
+ * 将超级块中的脏页写回到磁盘。
+ */
 static void
 sync_sb_inodes(struct super_block *sb, struct writeback_control *wbc)
 {
 	const unsigned long start = jiffies;	/* livelock avoidance */
 
+	/**
+	 * 将s_dirty中的所有索引节点插入sb->s_io指向的链表，并清空脏索引节点链表。
+	 */
 	if (!wbc->for_kupdate || list_empty(&sb->s_io))
 		list_splice_init(&sb->s_dirty, &sb->s_io);
 
-	while (!list_empty(&sb->s_io)) {
+	while (!list_empty(&sb->s_io)) {/* 遍历s_io链表，直到该链表为空 */
 		struct inode *inode = list_entry(sb->s_io.prev,
 						struct inode, i_list);
 		struct address_space *mapping = inode->i_mapping;
@@ -348,28 +374,51 @@ sync_sb_inodes(struct super_block *sb, struct writeback_control *wbc)
 		}
 
 		/* Was this inode dirtied after sync_sb_inodes was called? */
+		/**
+		 * 该页是在sync_sb_inodes执行后，才变成脏页的，略过它。
+		 * 这样，sb->s_io中可能残留一些脏索引结点。
+		 */
 		if (time_after(inode->dirtied_when, start))
 			break;
 
 		/* Was this inode dirtied too recently? */
+		/**
+		 * 该页变成脏页的时间晚于控制参数中设定的时间，略过。
+		 */
 		if (wbc->older_than_this && time_after(inode->dirtied_when,
 						*wbc->older_than_this))
 			break;
 
 		/* Is another pdflush already flushing this queue? */
+		/**
+		 * 如果当前进程是pdflush线程，函数就检查是否另外一个CPU上的pdflush线程是否已经试图刷新这个块设备的脏页。
+		 */
 		if (current_is_pdflush() && !writeback_acquire(bdi))
 			break;
 
 		BUG_ON(inode->i_state & I_FREEING);
+		/**
+		 * 运行到这里，说明该脏页需要写回到磁盘。
+		 * 首先将节点引用计数加1.
+		 */
 		__iget(inode);
 		pages_skipped = wbc->pages_skipped;
+		/**
+		 *__writeback_single_inode回写与所选的索引节点相关的脏缓冲区。
+		 */
 		__writeback_single_inode(inode, wbc);
 		if (wbc->sync_mode == WB_SYNC_HOLD) {
 			inode->dirtied_when = jiffies;
 			list_move(&inode->i_list, &sb->s_dirty);
 		}
+		/**
+		 * 如果当前是pdflush内核线程，就将BDI_pdflush标志清除。
+		 */
 		if (current_is_pdflush())
 			writeback_release(bdi);
+		/**
+		 * 如果略过了索引节点中的某些页，就将这些锁定的页移到s_dirty链表中。
+		 */
 		if (wbc->pages_skipped != pages_skipped) {
 			/*
 			 * writeback is not making progress due to locked
@@ -379,8 +428,14 @@ sync_sb_inodes(struct super_block *sb, struct writeback_control *wbc)
 		}
 		spin_unlock(&inode_lock);
 		cond_resched();
+		/**
+		 * 索引结点引用计数减1.
+		 */
 		iput(inode);
 		spin_lock(&inode_lock);
+		/**
+		 * 如果回写的页超过wbc中指定的值，就退出。
+		 */
 		if (wbc->nr_to_write <= 0)
 			break;
 	}
@@ -406,6 +461,9 @@ sync_sb_inodes(struct super_block *sb, struct writeback_control *wbc)
  * sync_sb_inodes will seekout the blockdev which matches `bdi'.  Maybe not
  * super-efficient but we're about to do a ton of I/O...
  */
+/**
+ * 函数根据wbc的要求将缓存中的脏页写回磁盘，并将结果保存到wbc中。
+ */
 void
 writeback_inodes(struct writeback_control *wbc)
 {
@@ -415,7 +473,15 @@ writeback_inodes(struct writeback_control *wbc)
 	spin_lock(&sb_lock);
 restart:
 	sb = sb_entry(super_blocks.prev);
+	/**
+	 * 扫描super_block中的超级块链表，直到扫描完整个链表或者到达预期数量。
+	 */
 	for (; sb != sb_entry(&super_blocks); sb = sb_entry(sb->s_list.prev)) {
+		/**
+		 * 检查sb->s_dirty或者sb->s_io链表是否为空。
+		 * 第一项是检查超级块的脏索引节点。
+		 * 第二项是检查等待被传输到磁盘的索引节点。
+		 */
 		if (!list_empty(&sb->s_dirty) || !list_empty(&sb->s_io)) {
 			/* we're making our own get_super here */
 			sb->s_count++;
@@ -428,6 +494,9 @@ restart:
 			if (down_read_trylock(&sb->s_umount)) {
 				if (sb->s_root) {
 					spin_lock(&inode_lock);
+					/**
+					 * 超级块有脏索引结点。对超级块调用sync_sb_inodes。
+					 */
 					sync_sb_inodes(sb, wbc);
 					spin_unlock(&inode_lock);
 				}
@@ -437,6 +506,9 @@ restart:
 			if (__put_super_and_need_restart(sb))
 				goto restart;
 		}
+		/**
+		 * 到达预期数量，停止扫描。
+		 */
 		if (wbc->nr_to_write <= 0)
 			break;
 	}
@@ -590,10 +662,12 @@ EXPORT_SYMBOL(write_inode_now);
  *
  * The caller must have a ref on the inode.
  */
+/* 将文件inode的元数据同步到磁盘 */
 int sync_inode(struct inode *inode, struct writeback_control *wbc)
 {
 	int ret;
 
+	/* 在inode锁的保护下写入inode */
 	spin_lock(&inode_lock);
 	ret = __writeback_single_inode(inode, wbc);
 	spin_unlock(&inode_lock);

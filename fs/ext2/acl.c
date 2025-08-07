@@ -292,6 +292,9 @@ ext2_check_acl(struct inode *inode, int mask)
 	return -EAGAIN;
 }
 
+/**
+ * ext2的permission实现方法。
+ */
 int
 ext2_permission(struct inode *inode, int mask, struct nameidata *nd)
 {

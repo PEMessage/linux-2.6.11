@@ -30,6 +30,9 @@ typedef struct svc_buf	svc_buf;
 #define NFSDDBG_FACILITY		NFSDDBG_PROC
 
 
+/**
+ * NFS_NULL调用的实现，客户端用此确定服务器是否响应。
+ */
 static int
 nfsd_proc_null(struct svc_rqst *rqstp, void *argp, void *resp)
 {

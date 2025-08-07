@@ -43,7 +43,7 @@
  *				from being used (thanks to Leo Spiekman)
  *	Andy Walker	:	Allow to specify the NFS server in nfs_root
  *				without giving a path name
- *	Swen Th�mmler	:	Allow to specify the NFS options in nfs_root
+ *	Swen Th黰mler	:	Allow to specify the NFS options in nfs_root
  *				without giving a path name. Fix BOOTP request
  *				for domainname (domainname is NIS domain, not
  *				DNS domain!). Skip dummy devices for BOOTP.
@@ -363,8 +363,11 @@ int __init root_nfs_init(void)
 	 * be able to use the client IP address for the remote root
 	 * directory (necessary for pure RARP booting).
 	 */
+	/**
+	 * root_nfs_name对nfs_data进行填充，对选项参数进行语法分析的两个主要函数是root_nfs_parse和root_nfs_parse。
+	 */
 	if (root_nfs_name(nfs_root_name) < 0 ||
-	    root_nfs_addr() < 0)
+	    root_nfs_addr() < 0) /* 分析命令行中的服务器名称和IP地址。 */
 		return -1;
 
 #ifdef NFSROOT_DEBUG
@@ -378,6 +381,9 @@ int __init root_nfs_init(void)
 /*
  *  Parse NFS server and directory information passed on the kernel
  *  command line.
+ */
+/**
+ * 从核心命令行下获取NFS服务器和目录信息
  */
 int __init nfs_root_setup(char *line)
 {
@@ -454,6 +460,10 @@ static int __init root_nfs_ports(void)
 	proto = (nfs_data.flags & NFS_MOUNT_TCP) ? IPPROTO_TCP : IPPROTO_UDP;
 
 	if (nfs_port < 0) {
+		/**
+		 * 根据servaddr中的远程nfs服务器地址，调用rpc远程过程rpc_getport_external(机器地址，程序号，版本号，协议)。
+		 * 向目的服务器端口映射器的知名端口发出请求，由服务器的相应守护进程mountd和nfsd对请求进行处理，返回所请求程序使用的端口号。
+		 */
 		if ((port = root_nfs_getport(NFS_PROGRAM, nfsd_ver, proto)) < 0) {
 			printk(KERN_ERR "Root-NFS: Unable to get nfsd port "
 					"number from server, using default\n");
@@ -491,6 +501,9 @@ static int __init root_nfs_get_handle(void)
 					NFS_MNT3_VERSION : NFS_MNT_VERSION;
 
 	set_sockaddr(&sin, servaddr, mount_port);
+	/**
+	 * 得到远程文件系统句柄。
+	 */
 	status = nfsroot_mount(&sin, nfs_path, &fh, version, protocol);
 	if (status < 0)
 		printk(KERN_ERR "Root-NFS: Server returned error %d "
@@ -509,9 +522,9 @@ static int __init root_nfs_get_handle(void)
  */
 void * __init nfs_root_data(void)
 {
-	if (root_nfs_init() < 0
-	 || root_nfs_ports() < 0
-	 || root_nfs_get_handle() < 0)
+	if (root_nfs_init() < 0 /* 分析参数选项 */
+	 || root_nfs_ports() < 0 /* 完成对nfs远程服务器的端口映射器的搜索，得到用于实现nfs协议的mount端口和nfs文件操作端口，分别置于变量mount_port和nfs_port中。 */
+	 || root_nfs_get_handle() < 0) /* 根据servaddr中的服务器地址，mount_port中的远程程序所用端口，以及nfs_path中记录的nfs目录信息。再调用nfs_mount子函数，将返回的根文件系统句柄赋与nfs_data.root。 */
 		return NULL;
 	set_sockaddr((struct sockaddr_in *) &nfs_data.addr, servaddr, nfs_port);
 	return (void*)&nfs_data;

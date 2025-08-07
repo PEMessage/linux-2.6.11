@@ -60,6 +60,9 @@ error:
 	return -EIO;
 }
 
+/**
+ * 对NFS的链接文件进行操作。
+ */
 static int nfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
 	struct inode *inode = dentry->d_inode;

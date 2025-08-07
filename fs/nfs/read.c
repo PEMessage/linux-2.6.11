@@ -76,6 +76,9 @@ int nfs_return_empty_page(struct page *page)
 /*
  * Read a page synchronously.
  */
+/**
+ * 同步读取NFS文件的一页数据。
+ */
 static int nfs_readpage_sync(struct nfs_open_context *ctx, struct inode *inode,
 		struct page *page)
 {
@@ -484,6 +487,9 @@ void nfs_readpage_result(struct rpc_task *task)
  * We read the page synchronously in the following case:
  *  -	The error flag is set for this page. This happens only when a
  *	previous async read operation failed.
+ */
+/**
+ * nfs客户端的readpage回调。
  */
 int nfs_readpage(struct file *file, struct page *page)
 {

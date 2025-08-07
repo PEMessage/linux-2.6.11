@@ -84,14 +84,29 @@
   which nodes are currently valid. JFFSv1 always used to keep that whole
   map in core for each inode.
 */
+/**
+ * flash上每个数据实体的位置、长度都由jffs2_raw_node_ref数据结构描述
+ */
 struct jffs2_raw_node_ref
 {
+	/**
+	 * 将同一文件的多个描述符链接起来。文件的第一个描述符由文件描述符的jffs2_inode_cache数据结构的nodes域表示。
+	 */
 	struct jffs2_raw_node_ref *next_in_ino; /* Points to the next raw_node_ref
 		for this inode. If this is the last, it points to the inode_cache
 		for this inode instead. The inode_cache will have NULL in the first
 		word so you know when you've got there :) */
+	/**
+	 * 一个flash擦除块内所有数据实体的内核描述符由next_phys域组织成一个链表，其首尾元素分别由擦除块描述符jffs2_eraseblock数据结构的first_node和last_node域指向。
+	 */
 	struct jffs2_raw_node_ref *next_phys;
+	/**
+	 * 相应数据实体在flash分区上的物理地址
+	 */
 	uint32_t flash_offset;
+	/**
+	 * 包括后继数据的总长度
+	 */
 	uint32_t __totlen; /* This may die; use ref_totlen(c, jeb, ) below */
 };
 
@@ -114,14 +129,26 @@ struct jffs2_raw_node_ref
    dirent nodes) would take more space than this does. We also keep
    a pointer to the first physical node which is part of this inode, too.
 */
+/**
+ * 每个jffs2文件的描述符。
+ */
 struct jffs2_inode_cache {
 	struct jffs2_full_dirent *scan_dents; /* Used during scan to hold
 		temporary lists of dirents, and later must be set to
 		NULL to mark the end of the raw_node_ref->next_in_ino
 		chain. */
+	/**
+	 * 用于组织冲突的hash链表。
+	 */
 	struct jffs2_inode_cache *next;
 	struct jffs2_raw_node_ref *nodes;
+	/**
+	 * 文件在文件系统中唯一的索引节点号。
+	 */
 	uint32_t ino;
+	/**
+	 * 文件的硬链接个数。在挂载文件系统时会计算指向每个文件的目录项个数，然后赋值给nlink。
+	 */
 	int nlink;
 	int state;
 };

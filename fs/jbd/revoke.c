@@ -324,6 +324,11 @@ void journal_destroy_revoke(journal_t *journal)
  * by one.
  */
 
+/** 
+ * 撤销块
+ * 针对元数据
+ * 加快replay的速度
+ */
 int journal_revoke(handle_t *handle, unsigned long blocknr, 
 		   struct buffer_head *bh_in)
 {
@@ -346,6 +351,7 @@ int journal_revoke(handle_t *handle, unsigned long blocknr,
 	bh = bh_in;
 
 	if (!bh) {
+		/* 读取对应的缓冲区 */
 		bh = __find_get_block(bdev, blocknr, journal->j_blocksize);
 		if (bh)
 			BUFFER_TRACE(bh, "found on hash");
@@ -394,6 +400,9 @@ int journal_revoke(handle_t *handle, unsigned long blocknr,
 	}
 
 	jbd_debug(2, "insert revoke for block %lu, bh_in=%p\n", blocknr, bh_in);
+	/**
+	 * 将块加入到撤销表中
+	 */
 	err = insert_revoke_hash(journal, blocknr,
 				handle->h_transaction->t_tid);
 	BUFFER_TRACE(bh_in, "exit");
@@ -645,14 +654,17 @@ int journal_set_revoke(journal_t *journal,
 {
 	struct jbd_revoke_record_s *record;
 
+	/* 撤销块在哈希表中存在吗? */
 	record = find_revoke_record(journal, blocknr);
-	if (record) {
+	if (record) {/* 存在 */
 		/* If we have multiple occurrences, only record the
 		 * latest sequence number in the hashed record */
+		/* 新的事务序号更大吗? */
 		if (tid_gt(sequence, record->sequence))
-			record->sequence = sequence;
+			record->sequence = sequence;/* 记录最新的事务号 */
 		return 0;
 	} 
+	/* 还不存在，直接插入到哈希表 */
 	return insert_revoke_hash(journal, blocknr, sequence);
 }
 

@@ -15,7 +15,7 @@
  *  Added kerneld support: Jacques Gelinas and Bjorn Ekwall
  *  Added change_root: Werner Almesberger & Hans Lermen, Feb '96
  *  Added options to /proc/mounts:
- *    Torbj�rn Lindh (torbjorn.lindh@gopta.se), April 14, 1996.
+ *    Torbj鰎n Lindh (torbjorn.lindh@gopta.se), April 14, 1996.
  *  Added devfs support: Richard Gooch <rgooch@atnf.csiro.au>, 13-JAN-1998
  *  Heavily rewritten for 'one fs - one tree' dcache architecture. AV, Mar 2000
  */
@@ -379,30 +379,42 @@ void sync_filesystems(int wait)
 	struct super_block *sb;
 	static DECLARE_MUTEX(mutex);
 
+	/* 这个信号量是防止s_need_sync_fs被重写，导致产生活锁 */
 	down(&mutex);		/* Could be down_interruptible */
+	/* 这个锁是保护超级块链表 */
 	spin_lock(&sb_lock);
+	/* 遍历所有超级块 */
 	for (sb = sb_entry(super_blocks.next); sb != sb_entry(&super_blocks);
 			sb = sb_entry(sb->s_list.next)) {
+		/* 没有定义回写方法，略过 */
 		if (!sb->s_op->sync_fs)
 			continue;
+		/* 只读模式，不需要回写 */
 		if (sb->s_flags & MS_RDONLY)
 			continue;
+		/* 设置其需要回写的标志 */
 		sb->s_need_sync_fs = 1;
 	}
 	spin_unlock(&sb_lock);
 
 restart:
 	spin_lock(&sb_lock);
+	/* 再次遍历所有超级块 */
 	for (sb = sb_entry(super_blocks.next); sb != sb_entry(&super_blocks);
 			sb = sb_entry(sb->s_list.next)) {
+		/* 该超级块不需要回写，略过 */
 		if (!sb->s_need_sync_fs)
 			continue;
+		/* 清除回写标志 */
 		sb->s_need_sync_fs = 0;
+		/* 只读模式，不需要回写 */
 		if (sb->s_flags & MS_RDONLY)
 			continue;	/* hm.  Was remounted r/o meanwhile */
 		sb->s_count++;
 		spin_unlock(&sb_lock);
+		/* 获取信号量，防止回写过程中文件系统被卸载 */
 		down_read(&sb->s_umount);
+		/* 调用文件系统的方法进行回写 */
 		if (sb->s_root && (wait || sb->s_dirt))
 			sb->s_op->sync_fs(sb, wait);
 		drop_super(sb);
@@ -522,6 +534,10 @@ static void mark_files_ro(struct super_block *sb)
  *
  *	Alters the mount options of a mounted file system.
  */
+/**
+ * 如果do_unmount函数认为用户要卸载要文件系统，且用户并不要求真正把它卸载下来，
+ * 就会调用do_remount_sb，它重新安装根文件系统为只读并终止。
+ */
 int do_remount_sb(struct super_block *sb, int flags, void *data, int force)
 {
 	int retval;
@@ -589,9 +605,15 @@ void emergency_remount(void)
  * filesystems which don't use real block-devices.  -- jrs
  */
 
+/**
+ * 用于为特殊文件系统分配次设备号。
+ */
 static struct idr unnamed_dev_idr;
 static DEFINE_SPINLOCK(unnamed_dev_lock);/* protects the above */
 
+/**
+ * 初始化特殊文件系统的超级。
+ */
 int set_anon_super(struct super_block *s, void *data)
 {
 	int dev;
@@ -621,6 +643,9 @@ int set_anon_super(struct super_block *s, void *data)
 
 EXPORT_SYMBOL(set_anon_super);
 
+/**
+ * 移除特殊文件系统的超级块。
+ */
 void kill_anon_super(struct super_block *sb)
 {
 	int slot = MINOR(sb->s_dev);
@@ -669,6 +694,9 @@ static void bdev_uevent(struct block_device *bdev, enum kobject_action action)
 	}
 }
 
+/**
+ * 一般磁盘文件的get_sb函数。
+ */
 struct super_block *get_sb_bdev(struct file_system_type *fs_type,
 	int flags, const char *dev_name, void *data,
 	int (*fill_super)(struct super_block *, void *, int))
@@ -677,6 +705,9 @@ struct super_block *get_sb_bdev(struct file_system_type *fs_type,
 	struct super_block *s;
 	int error = 0;
 
+	/**
+	 * 打开块设备。获得块设备描述符的指针。
+	 */
 	bdev = open_bdev_excl(dev_name, flags, fs_type);
 	if (IS_ERR(bdev))
 		return (struct super_block *)bdev;
@@ -687,25 +718,35 @@ struct super_block *get_sb_bdev(struct file_system_type *fs_type,
 	 * while we are mounting
 	 */
 	down(&bdev->bd_mount_sem);
+	/**
+	 * 搜索文件系统的超级块对象链表。如果找到一个与块设备相关的超级块，则返回它的地址，
+	 * 否则分配并初始化一个新对象并插入到文件系统链表和超级块全局链表中。
+	 */
 	s = sget(fs_type, test_bdev_super, set_bdev_super, bdev);
 	up(&bdev->bd_mount_sem);
 	if (IS_ERR(s))
 		goto out;
 
-	if (s->s_root) {
-		if ((flags ^ s->s_flags) & MS_RDONLY) {
+	if (s->s_root) {/* 不是新的超级块，说明文件系统已经安装。 */
+		if ((flags ^ s->s_flags) & MS_RDONLY) {/* 与以前的装载有冲突 */
 			up_write(&s->s_umount);
-			deactivate_super(s);
+			deactivate_super(s);/* 关闭设备并返回 */
 			s = ERR_PTR(-EBUSY);
 		}
 		goto out;
 	} else {
 		char b[BDEVNAME_SIZE];
 
+		/**
+		 * 复制安装标志。及其他文件系统相关的值。
+		 */
 		s->s_flags = flags;
 		strlcpy(s->s_id, bdevname(bdev, b), sizeof(s->s_id));
 		s->s_old_blocksize = block_size(bdev);
 		sb_set_blocksize(s, s->s_old_blocksize);
+		/**
+		 * 每个文件系统传入的fill_super不一样，调用它来访问磁盘上的超级块信息，并填充超级块对象的其他字段。
+		 */
 		error = fill_super(s, data, flags & MS_VERBOSE ? 1 : 0);
 		if (error) {
 			up_write(&s->s_umount);
@@ -738,11 +779,18 @@ void kill_block_super(struct super_block *sb)
 
 EXPORT_SYMBOL(kill_block_super);
 
+/**
+ * 特殊文件系统的get_sb方法，如初始根文件系统。
+ */
 struct super_block *get_sb_nodev(struct file_system_type *fs_type,
 	int flags, void *data,
 	int (*fill_super)(struct super_block *, void *, int))
 {
 	int error;
+	/**
+	 * 分配新的超级块。
+	 * set_anon_super会初始化特殊文件系统的超级块。
+	 */
 	struct super_block *s = sget(fs_type, NULL, set_anon_super, NULL);
 
 	if (IS_ERR(s))
@@ -750,6 +798,10 @@ struct super_block *get_sb_nodev(struct file_system_type *fs_type,
 
 	s->s_flags = flags;
 
+	/**
+	 * 调用fill_super填充超级块。
+	 * 对初始根文件系统来说，调用ramfs_fill_super。它分配索引节点对象和对应的目录项对象，并填充超级块字段值。
+	 */
 	error = fill_super(s, data, flags & MS_VERBOSE ? 1 : 0);
 	if (error) {
 		up_write(&s->s_umount);
@@ -793,20 +845,34 @@ struct super_block *get_sb_single(struct file_system_type *fs_type,
 
 EXPORT_SYMBOL(get_sb_single);
 
+/**
+ * 被do_new_mount调用.
+ * 参数有:文件系统类型.安装标志及块设备名.
+ * 这处理实际的安装操作并返回一个新安装文件系统描述符的地址.
+ */
 struct vfsmount *
 do_kern_mount(const char *fstype, int flags, const char *name, void *data)
 {
+	/**
+	 * 获得文件系统名称对应的文件系统对象。
+	 */
 	struct file_system_type *type = get_fs_type(fstype);
 	struct super_block *sb = ERR_PTR(-ENOMEM);
 	struct vfsmount *mnt;
 	int error;
 	char *secdata = NULL;
 
+	/**
+	 * 错误的文件系统类型。
+	 */
 	if (!type)
 		return ERR_PTR(-ENODEV);
 
+	/**
+	 * 分配一个新的已安装文件系统的描述符
+	 */
 	mnt = alloc_vfsmnt(name);
-	if (!mnt)
+	if (!mnt)/* 内存不足 */
 		goto out;
 
 	if (data) {
@@ -823,6 +889,10 @@ do_kern_mount(const char *fstype, int flags, const char *name, void *data)
 		}
 	}
 
+	/**
+	 * 调用文件系统的get_sb分配并初始化一个新的超级块。
+	 * 例如ext2的get_sb方法是ext2_get_sb。
+	 */
 	sb = type->get_sb(type, flags, name, data);
 	if (IS_ERR(sb))
 		goto out_free_secdata;
@@ -830,14 +900,24 @@ do_kern_mount(const char *fstype, int flags, const char *name, void *data)
  	if (error)
  		goto out_sb;
 	mnt->mnt_sb = sb;
+	/**
+	 * 将此字段初始化为与文件系统根目录对应的目录项对象的地址。并增加其引用计数值。
+	 */
 	mnt->mnt_root = dget(sb->s_root);
 	mnt->mnt_mountpoint = sb->s_root;
+	/**
+	 * 将mnt_parent指向自身，表示它是一个独立的根。
+	 * 上层调用者可以修改它。
+	 */
 	mnt->mnt_parent = mnt;
 	mnt->mnt_namespace = current->namespace;
 	up_write(&sb->s_umount);
 	put_filesystem(type);
 	return mnt;
 out_sb:
+	/**
+	 * 释放超级块的读写信号量。
+	 */
 	up_write(&sb->s_umount);
 	deactivate_super(sb);
 	sb = ERR_PTR(error);

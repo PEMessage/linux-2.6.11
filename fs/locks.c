@@ -142,6 +142,9 @@ LIST_HEAD(file_lock_list);
 
 EXPORT_SYMBOL(file_lock_list);
 
+/**
+ * 所有阻塞锁。
+ */
 static LIST_HEAD(blocked_list);
 
 static kmem_cache_t *filelock_cache;
@@ -697,6 +700,9 @@ EXPORT_SYMBOL(posix_locks_deadlock);
  * at the head of the list, but that's secret knowledge known only to
  * flock_lock_file and posix_lock_file.
  */
+/**
+ * 在文件上创建一个文件锁。
+ */
 static int flock_lock_file(struct file *filp, struct file_lock *new_fl)
 {
 	struct file_lock **before;
@@ -705,34 +711,43 @@ static int flock_lock_file(struct file *filp, struct file_lock *new_fl)
 	int found = 0;
 
 	lock_kernel();
-	for_each_lock(inode, before) {
+	for_each_lock(inode, before) {/* 遍历文件上的所有锁 */
 		struct file_lock *fl = *before;
 		if (IS_POSIX(fl))
 			break;
 		if (IS_LEASE(fl))
 			continue;
+		/**
+		 * 已经存在FL_FLOCK锁。
+		 */
 		if (filp != fl->fl_file)
 			continue;
+		/**
+		 * FL_FLOCK锁的类型与申请的类型一样，则返回0.
+		 */
 		if (new_fl->fl_type == fl->fl_type)
 			goto out;
 		found = 1;
+		/**
+		 * 从索引节点锁链表和全局文件锁链表中删除锁，唤醒等待的进程，并释放锁结构。
+		 */
 		locks_delete_lock(before);
 		break;
 	}
 	unlock_kernel();
 
-	if (new_fl->fl_type == F_UNLCK)
+	if (new_fl->fl_type == F_UNLCK)/* 锁已经被释放，因此解锁操作可以直接退出了。 */
 		return 0;
 
 	/*
 	 * If a higher-priority process was blocked on the old file lock,
 	 * give it the opportunity to lock the file.
 	 */
-	if (found)
+	if (found)/* 有FL_FLOCK锁存在，则给高优先级进程一个机会，使其可以先获得锁。 */
 		cond_resched();
 
 	lock_kernel();
-	for_each_lock(inode, before) {
+	for_each_lock(inode, before) {/* 再次搜索链表，以验证现有的锁并不与申请的锁冲突。 */
 		struct file_lock *fl = *before;
 		if (IS_POSIX(fl))
 			break;
@@ -741,11 +756,14 @@ static int flock_lock_file(struct file *filp, struct file_lock *new_fl)
 		if (!flock_locks_conflict(new_fl, fl))
 			continue;
 		error = -EAGAIN;
-		if (new_fl->fl_flags & FL_SLEEP) {
+		if (new_fl->fl_flags & FL_SLEEP) {/* 发现冲突，并且允许阻塞，将新锁插入阻塞链表中 */
 			locks_insert_block(fl, new_fl);
 		}
 		goto out;
 	}
+	/**
+	 * 没有冲突的锁，将新的锁结构插入索引节点锁链表和全局文件锁链表中，并返回0.
+	 */
 	locks_insert_lock(&inode->i_flock, new_fl);
 	error = 0;
 
@@ -756,6 +774,9 @@ out:
 
 EXPORT_SYMBOL(posix_lock_file);
 
+/**
+ * 不阻塞的获得文件POSIX锁
+ */
 static int __posix_lock_file(struct inode *inode, struct file_lock *request)
 {
 	struct file_lock *fl;
@@ -773,26 +794,30 @@ static int __posix_lock_file(struct inode *inode, struct file_lock *request)
 	new_fl2 = locks_alloc_lock();
 
 	lock_kernel();
-	if (request->fl_type != F_UNLCK) {
-		for_each_lock(inode, before) {
+	if (request->fl_type != F_UNLCK) {/* 本次请求不是释放锁，则应当是申请锁 */
+		for_each_lock(inode, before) {/* 遍历文件上的所有文件锁 */
 			struct file_lock *fl = *before;
-			if (!IS_POSIX(fl))
+			if (!IS_POSIX(fl))/* 不是POSIX锁，忽略 */
 				continue;
-			if (!posix_locks_conflict(request, fl))
+			if (!posix_locks_conflict(request, fl))/* 该锁是POSIX锁，但是与请求不冲突 */
 				continue;
 			error = -EAGAIN;
+			/* 存在冲突锁，但是不允许阻塞，退出，返回错误码。 */
 			if (!(request->fl_flags & FL_SLEEP))
 				goto out;
 			error = -EDEADLK;
+			/* 检查等待POSIX锁的进程之间是否可能存在死锁，如果有，则退出。避免死锁。 */
 			if (posix_locks_deadlock(request, fl))
 				goto out;
 			error = -EAGAIN;
+			/* 不死锁，则将锁插入到冲突锁和阻塞链表中 */
 			locks_insert_block(fl, request);
 			goto out;
   		}
   	}
 
 	/* If we're just looking for a conflict, we're done. */
+	/* 运行到这里，说明不存在冲突的POSIX锁。 */
 	error = 0;
 	if (request->fl_flags & FL_ACCESS)
 		goto out;
@@ -807,7 +832,7 @@ static int __posix_lock_file(struct inode *inode, struct file_lock *request)
 	 * 
 	 * Find the first old lock with the same owner as the new lock.
 	 */
-	
+	/* 下面的代码是处理锁区域重叠的情况。 */
 	before = &inode->i_flock;
 
 	/* First skip locks owned by other processes.  */
@@ -1451,14 +1476,26 @@ out_unlock:
  *
  * Add a FLOCK style lock to a file.
  */
+/**
+ * 执行真正的文件锁操作。
+ */
 int flock_lock_file_wait(struct file *filp, struct file_lock *fl)
 {
 	int error;
 	might_sleep();
 	for (;;) {
+		/**
+		 * 无阻塞的获得文件锁
+		 */
 		error = flock_lock_file(filp, fl);
+		/**
+		 * 不能重试，则退出并返回错误码。
+		 */
 		if ((error != -EAGAIN) || !(fl->fl_flags & FL_SLEEP))
 			break;
+		/**
+		 * 等待释放锁的线程唤醒它。
+		 */
 		error = wait_event_interruptible(fl->fl_wait, !fl->fl_next);
 		if (!error)
 			continue;
@@ -1490,6 +1527,11 @@ EXPORT_SYMBOL(flock_lock_file_wait);
  *	%LOCK_MAND can be combined with %LOCK_READ or %LOCK_WRITE to allow other
  *	processes read and write access respectively.
  */
+/**
+ * FLOCK锁，对一个文件上申请或者释放劝告锁。
+ * 		fd:要操作的文件句柄。
+ *		cmd:操作类型，如LOCK_NB
+ */
 asmlinkage long sys_flock(unsigned int fd, unsigned int cmd)
 {
 	struct file *filp;
@@ -1498,36 +1540,46 @@ asmlinkage long sys_flock(unsigned int fd, unsigned int cmd)
 	int error;
 
 	error = -EBADF;
+	/* 根据句柄获得文件对象 */
 	filp = fget(fd);
-	if (!filp)
+	if (!filp)/* 文件不存在 */
 		goto out;
 
 	can_sleep = !(cmd & LOCK_NB);
 	cmd &= ~LOCK_NB;
 	unlock = (cmd == LOCK_UN);
 
+	/**
+	 * 检查读写权限。
+	 */
 	if (!unlock && !(cmd & LOCK_MAND) && !(filp->f_mode & 3))
 		goto out_putf;
 
+	/**
+	 * 获得一个新的文件锁对象并初始化它。
+	 */
 	error = flock_make_lock(filp, &lock, cmd);
 	if (error)
 		goto out_putf;
-	if (can_sleep)
+	if (can_sleep)/* 允许阻塞，设置FL_SLEEP标志 */
 		lock->fl_flags |= FL_SLEEP;
 
 	error = security_file_lock(filp, cmd);
 	if (error)
 		goto out_free;
 
+	/**
+	 * 回调文件系统的flock函数。
+	 */
 	if (filp->f_op && filp->f_op->flock)
 		error = filp->f_op->flock(filp,
 					  (can_sleep) ? F_SETLKW : F_SETLK,
 					  lock);
-	else
+	else/* 通常情况下，没有定制的flock，而是调用常用的flock_lock_file_wait来实现文件加锁 */
 		error = flock_lock_file_wait(filp, lock);
 
  out_free:
-	if (list_empty(&lock->fl_link)) {
+	if (list_empty(&lock->fl_link)) {/* 锁没有被加入活动或者阻塞链表，则释放它 */
 		locks_free_lock(lock);
 	}
 
@@ -1598,6 +1650,9 @@ out:
 /* Apply the lock described by l to an open file descriptor.
  * This implements both the F_SETLK and F_SETLKW commands of fcntl().
  */
+/**
+ * 获得POSIX文件锁
+ */
 int fcntl_setlk(struct file *filp, unsigned int cmd, struct flock __user *l)
 {
 	struct file_lock *file_lock = locks_alloc_lock();
@@ -1620,28 +1675,29 @@ int fcntl_setlk(struct file *filp, unsigned int cmd, struct flock __user *l)
 	/* Don't allow mandatory locks on files that may be memory mapped
 	 * and shared.
 	 */
-	if (IS_MANDLOCK(inode) &&
-	    (inode->i_mode & (S_ISGID | S_IXGRP)) == S_ISGID &&
-	    mapping_writably_mapped(filp->f_mapping)) {
-		error = -EAGAIN;
+	if (IS_MANDLOCK(inode) &&/* 允许对该文件进行强制加锁 */
+	    (inode->i_mode & (S_ISGID | S_IXGRP)) == S_ISGID &&/* 需要强制加锁 */
+	    mapping_writably_mapped(filp->f_mapping)) {/* 共享映射 */
+		error = -EAGAIN;/* 这种情况下，说明文件正在被其他进程访问，不能申请强制锁。 */
 		goto out;
 	}
 
+	/* 根据用户态传入的参数，初始化一个file_lock结构。 */
 	error = flock_to_posix_lock(filp, file_lock, &flock);
 	if (error)
 		goto out;
-	if (cmd == F_SETLKW) {
+	if (cmd == F_SETLKW) {/* 允许阻塞申请锁，设置FL_SLEEP标志 */
 		file_lock->fl_flags |= FL_SLEEP;
 	}
 	
 	error = -EBADF;
 	switch (flock.l_type) {
 	case F_RDLCK:
-		if (!(filp->f_mode & FMODE_READ))
+		if (!(filp->f_mode & FMODE_READ))/* 申请读锁，需要有读权限 */
 			goto out;
 		break;
 	case F_WRLCK:
-		if (!(filp->f_mode & FMODE_WRITE))
+		if (!(filp->f_mode & FMODE_WRITE))/* 申请写锁，需要有写权限 */
 			goto out;
 		break;
 	case F_UNLCK:
@@ -1655,15 +1711,18 @@ int fcntl_setlk(struct file *filp, unsigned int cmd, struct flock __user *l)
 	if (error)
 		goto out;
 
+	/* 如果文件有自定义的lock方法，则调用它。一般磁盘文件系统不会定义此方法 */
 	if (filp->f_op && filp->f_op->lock != NULL) {
 		error = filp->f_op->lock(filp, cmd, file_lock);
 		goto out;
 	}
 
-	for (;;) {
-		error = __posix_lock_file(inode, file_lock);
+	for (;;) {/* 多次尝试获取锁，因为可能会存在锁冲突 */
+		error = __posix_lock_file(inode, file_lock);/* 不阻塞的获取文件锁 */
+		/* 失败了，也不允许阻塞，则退出返回错误码 */
 		if ((error != -EAGAIN) || (cmd == F_SETLK))
 			break;
+		/* 允许阻塞，则等待其他任务释放锁后重试。 */
 		error = wait_event_interruptible(file_lock->fl_wait,
 				!file_lock->fl_next);
 		if (!error)

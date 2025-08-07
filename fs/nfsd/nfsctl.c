@@ -388,14 +388,29 @@ static struct file_system_type nfsd_fs_type = {
 	.kill_sb	= kill_litter_super,
 };
 
+/**
+ * 初始化NFSD服务。在加载模块时调用。
+ */
 static int __init init_nfsd(void)
 {
 	int retval;
 	printk(KERN_INFO "Installing knfsd (copyright (C) 1996 okir@monad.swb.de).\n");
 
+	/**
+	 * 统计初始化 
+	 */
 	nfsd_stat_init();	/* Statistics */
+	/**
+	 * RPC应答缓冲区初始化 
+	 */
 	nfsd_cache_init();	/* RPC reply cache */
+	/**
+	 * 可以提供服务列表初始化 
+	 */
 	nfsd_export_init();	/* Exports table */
+	/**
+	 * lockd->nfsd回调函数初始化
+	 */
 	nfsd_lockd_init();	/* lockd->nfsd callbacks */
 #ifdef CONFIG_NFSD_V4
 	nfsd_idmap_init();      /* Name to ID mapping */

@@ -27,7 +27,13 @@
  *	Once the reference is obtained we can drop the spinlock.
  */
 
+/**
+ * 文件系统类型链表头指针。
+ */
 static struct file_system_type *file_systems;
+/**
+ * 保护file_systems的读写锁。
+ */
 static DEFINE_RWLOCK(file_systems_lock);
 
 /* WARNING: This can be used only if we _already_ own a reference */
@@ -41,6 +47,9 @@ void put_filesystem(struct file_system_type *fs)
 	module_put(fs->owner);
 }
 
+/**
+ * 查找指定类型的文件系统。
+ */
 static struct file_system_type **find_filesystem(const char *name)
 {
 	struct file_system_type **p;
@@ -62,7 +71,10 @@ static struct file_system_type **find_filesystem(const char *name)
  *	structures and must not be freed until the file system has been
  *	unregistered.
  */
- 
+
+/**
+ * 注册文件系统，将相应的file_system_type加入到链表中。
+ */
 int register_filesystem(struct file_system_type * fs)
 {
 	int res = 0;
@@ -96,7 +108,9 @@ EXPORT_SYMBOL(register_filesystem);
  *	Once this function has returned the &struct file_system_type structure
  *	may be freed or reused.
  */
- 
+/**
+ * 当文件系统是被模块装载进内核时，可以用该函数卸载它。
+ */
 int unregister_filesystem(struct file_system_type * fs)
 {
 	struct file_system_type ** tmp;

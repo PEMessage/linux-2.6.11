@@ -111,6 +111,11 @@ static void buffer_io_error(struct buffer_head *bh)
  * Default synchronous end-of-IO handler..  Just mark it up-to-date and
  * unlock the buffer. This is what ll_rw_block uses too.
  */
+/**
+ * ll_rw_block需要把缓冲区首部传递到通用块层，这样就增加了bh的引用计数。
+ * 那么，在完成了IO传输后，就需要减少引用计数。这个工作是在bh的b_end_io中完成的。
+ * b_end_io最终后调用end_buffer_read_sync或者end_buffer_write_sync
+ */
 void end_buffer_read_sync(struct buffer_head *bh, int uptodate)
 {
 	if (uptodate) {
@@ -123,6 +128,11 @@ void end_buffer_read_sync(struct buffer_head *bh, int uptodate)
 	put_bh(bh);
 }
 
+/**
+ * ll_rw_block需要把缓冲区首部传递到通用块层，这样就增加了bh的引用计数。
+ * 那么，在完成了IO传输后，就需要减少引用计数。这个工作是在bh的b_end_io中完成的。
+ * b_end_io最终后调用end_buffer_read_sync或者end_buffer_write_sync
+ */
 void end_buffer_write_sync(struct buffer_head *bh, int uptodate)
 {
 	char b[BDEVNAME_SIZE];
@@ -277,11 +287,28 @@ EXPORT_SYMBOL(thaw_bdev);
  */
 static void do_sync(unsigned long wait)
 {
+	/**
+	 * 启动pdflush内核线程。将所有脏页写入到磁盘。
+	 */
 	wakeup_bdflush(0);
+	/**
+	 * 扫描超级块的链表，以搜索要刷新的脏索引节点。
+	 */
 	sync_inodes(0);		/* All mappings, inodes and their blockdevs */
 	DQUOT_SYNC(NULL);
+	/**
+	 * 把脏超级块写到磁盘。
+	 */
 	sync_supers();		/* Write the superblocks */
+	/**
+	 * 为所有可写的文件系统执行sys_fs超级块方法。
+	 * 这是文件系统的一个钩子，象ext3这样的日志文件系统使用这个方法。
+	 */
 	sync_filesystems(0);	/* Start syncing the filesystems */
+	/**
+	 * sync_filesystems和sync_inodes被再次调用。
+	 * 这两个函数的参数有了变化。
+	 */
 	sync_filesystems(wait);	/* Waitingly sync the filesystems */
 	sync_inodes(wait);	/* Mappings, inodes and blockdevs, again. */
 	if (!wait)
@@ -290,6 +317,9 @@ static void do_sync(unsigned long wait)
 		laptop_sync_completion();
 }
 
+/**
+ * sync系统调用的实现函数。
+ */
 asmlinkage long sys_sync(void)
 {
 	do_sync(1);
@@ -330,6 +360,10 @@ int file_fsync(struct file *filp, struct dentry *dentry, int datasync)
 	return ret;
 }
 
+/**
+ * 系统调用fsync的实现。
+ * 将fd对应的所有脏缓冲区写到磁盘中，如果需要，还包括存有索引节点的缓冲区。
+ */
 asmlinkage long sys_fsync(unsigned int fd)
 {
 	struct file * file;
@@ -337,6 +371,9 @@ asmlinkage long sys_fsync(unsigned int fd)
 	int ret, err;
 
 	ret = -EBADF;
+	/**
+	 * 获得文件对象的地址。
+	 */
 	file = fget(fd);
 	if (!file)
 		goto out;
@@ -357,6 +394,10 @@ asmlinkage long sys_fsync(unsigned int fd)
 	 * which could cause livelocks in fsync_buffers_list
 	 */
 	down(&mapping->host->i_sem);
+	/**
+	 * 调用文件对象的fsync方法进行数据同步。
+	 * 该回调函数通常是__writeback_single_inode。
+	 */
 	err = file->f_op->fsync(file, file->f_dentry, 0);
 	if (!ret)
 		ret = err;
@@ -418,6 +459,9 @@ out:
  * succeeds, there is no need to take private_lock. (But if
  * private_lock is contended then so is mapping->tree_lock).
  */
+/**
+ * 在高速缓存中搜索缓冲区首部。
+ */
 static struct buffer_head *
 __find_get_block_slow(struct block_device *bdev, sector_t block, int unused)
 {
@@ -430,8 +474,18 @@ __find_get_block_slow(struct block_device *bdev, sector_t block, int unused)
 	struct page *page;
 	int all_mapped = 1;
 
+	/**
+	 * 根据块号和块大小得到与块设备相关的页索引。
+	 */
 	index = block >> (PAGE_CACHE_SHIFT - bd_inode->i_blkbits);
+	/**
+	 * 调用find_get_page确定请求的块缓冲区页的会在页高速缓存中的位置。
+	 */
 	page = find_get_page(bd_mapping, index);
+
+	/**
+	 * 页没有在高速缓存中，块也当然不在高速缓存中。
+	 */
 	if (!page)
 		goto out;
 
@@ -440,6 +494,9 @@ __find_get_block_slow(struct block_device *bdev, sector_t block, int unused)
 		goto out_unlock;
 	head = page_buffers(page);
 	bh = head;
+	/**
+	 * 在页的缓冲区首部链表中搜索逻辑块号等于block的块。
+	 */
 	do {
 		if (bh->b_blocknr == block) {
 			ret = bh;
@@ -465,6 +522,9 @@ __find_get_block_slow(struct block_device *bdev, sector_t block, int unused)
 	}
 out_unlock:
 	spin_unlock(&bd_mapping->private_lock);
+	/**
+	 * 递减描述符的count字段(find_get_page曾递增它的值)。
+	 */
 	page_cache_release(page);
 out:
 	return ret;
@@ -516,16 +576,32 @@ void invalidate_bdev(struct block_device *bdev, int destroy_dirty_buffers)
 /*
  * Kick pdflush then try to free up some ZONE_NORMAL memory.
  */
+/**
+ * 内存紧缺回收。在分配VFS缓冲区或缓冲区首部时，内核调用此函数。
+ */
 static void free_more_memory(void)
 {
 	struct zone **zones;
 	pg_data_t *pgdat;
 
+	/**
+	 * 唤醒pdflush，并触发页高速缓存中1024个脏页的写操作。
+	 * 写脏页到磁盘的操作将最终使包含缓冲区、缓冲区首部和其他VFS数据结构的页框成为可释放的。
+	 */
 	wakeup_bdflush(1024);
+	/**
+	 * 调用yield使pdflush内核线程能够有机会得到执行。
+	 */
 	yield();
 
+	/**
+	 * 对系统的所有内存节点，启动一个循环。
+	 */
 	for_each_pgdat(pgdat) {
 		zones = pgdat->node_zonelists[GFP_NOFS&GFP_ZONEMASK].zones;
+		/**
+		 * 对每个节点，调用try_to_free_pages，将紧缺内存管理区链表作为参数。
+		 */
 		if (*zones)
 			try_to_free_pages(zones, GFP_NOFS, 0);
 	}
@@ -535,6 +611,10 @@ static void free_more_memory(void)
  * I/O completion handler for block_read_full_page() - pages
  * which come unlocked at the end of I/O.
  */
+/**
+ * 是缓冲区首部的完成方法。对块缓冲区的IO数据传输一结束，它就执行。
+ * 它是block_read_full_page的I/O完成处理函数。
+ */
 static void end_buffer_async_read(struct buffer_head *bh, int uptodate)
 {
 	static DEFINE_SPINLOCK(page_uptodate_lock);
@@ -543,12 +623,14 @@ static void end_buffer_async_read(struct buffer_head *bh, int uptodate)
 	struct page *page;
 	int page_uptodate = 1;
 
+	/* 在block_read_full_page中应当设置了此标志，在此确认 */
 	BUG_ON(!buffer_async_read(bh));
 
 	page = bh->b_page;
-	if (uptodate) {
+	if (uptodate) {/* IO执行成功，设置uptodate标志 */
 		set_buffer_uptodate(bh);
 	} else {
+		/* 否则设置页面错误标志 */
 		clear_buffer_uptodate(bh);
 		if (printk_ratelimit())
 			buffer_io_error(bh);
@@ -564,12 +646,12 @@ static void end_buffer_async_read(struct buffer_head *bh, int uptodate)
 	clear_buffer_async_read(bh);
 	unlock_buffer(bh);
 	tmp = bh;
-	do {
-		if (!buffer_uptodate(tmp))
+	do {/* 循环检查页面中的所有缓冲区首部 */
+		if (!buffer_uptodate(tmp))/* 某个缓冲区首部还没有更新，则清除页面uptodate标志 */
 			page_uptodate = 0;
-		if (buffer_async_read(tmp)) {
+		if (buffer_async_read(tmp)) {/* 某个缓冲区还没有完成，仍然存在BH_Async_Read标志 */
 			BUG_ON(!buffer_locked(tmp));
-			goto still_busy;
+			goto still_busy;/* 整个页面还没有完成，退出，待所有缓冲区首部都完成后再继续 */
 		}
 		tmp = tmp->b_this_page;
 	} while (tmp != bh);
@@ -579,8 +661,9 @@ static void end_buffer_async_read(struct buffer_head *bh, int uptodate)
 	 * If none of the buffers had errors and they are all
 	 * uptodate then we can set the page uptodate.
 	 */
-	if (page_uptodate && !PageError(page))
-		SetPageUptodate(page);
+	if (page_uptodate && !PageError(page))/* 整个页面都完成了，并且没有错误 */
+		SetPageUptodate(page);/* 设置页面更新标志 */
+	/* 解锁页面 */
 	unlock_page(page);
 	return;
 
@@ -593,6 +676,7 @@ still_busy:
  * Completion handler for block_write_full_page() - pages which are unlocked
  * during I/O, and which have PageWriteback cleared upon I/O completion.
  */
+/* 块缓冲区被成功写入磁盘后,回调此函数 */
 void end_buffer_async_write(struct buffer_head *bh, int uptodate)
 {
 	char b[BDEVNAME_SIZE];
@@ -601,35 +685,40 @@ void end_buffer_async_write(struct buffer_head *bh, int uptodate)
 	struct buffer_head *tmp;
 	struct page *page;
 
+	/* 在block_write_full_page函数中，为脏块设置了此标志，这里检测标志，避免内存方面的问题 */
 	BUG_ON(!buffer_async_write(bh));
 
 	page = bh->b_page;
-	if (uptodate) {
+	if (uptodate) {/* 成功回写，设置uptodate标志表示缓冲区已经更新 */
 		set_buffer_uptodate(bh);
 	} else {
-		if (printk_ratelimit()) {
+		if (printk_ratelimit()) {/* 打印提示信息 */
 			buffer_io_error(bh);
 			printk(KERN_WARNING "lost page write due to "
 					"I/O error on %s\n",
 			       bdevname(bh->b_bdev, b));
 		}
+		/* 设置错误标志，清除uptodate标志 */
 		set_bit(AS_EIO, &page->mapping->flags);
 		clear_buffer_uptodate(bh);
 		SetPageError(page);
 	}
 
 	spin_lock_irqsave(&page_uptodate_lock, flags);
+	/* 清除此标志，表示写已经完成 */
 	clear_buffer_async_write(bh);
 	unlock_buffer(bh);
 	tmp = bh->b_this_page;
+	/* 遍历缓冲区,并检查其脏标志 */
 	while (tmp != bh) {
-		if (buffer_async_write(tmp)) {
+		if (buffer_async_write(tmp)) {/* 如果某个缓冲区块还没有写完,则表示页面未完全完成 */
 			BUG_ON(!buffer_locked(tmp));
 			goto still_busy;
 		}
 		tmp = tmp->b_this_page;
 	}
 	spin_unlock_irqrestore(&page_uptodate_lock, flags);
+	/* 页面已经全部回写,设置页面的标志 */
 	end_page_writeback(page);
 	return;
 
@@ -783,13 +872,17 @@ repeat:
  * the blockdev which "owns" the buffers and @mapping is a file or directory
  * which needs those buffers to be written for a successful fsync().
  */
+/* 将缓冲区同步到磁盘，并等待其结束 */
 int sync_mapping_buffers(struct address_space *mapping)
 {
+	/* 获得和文件inode地址空间相关联的地址空间，即块设备inode的地址空间 */
 	struct address_space *buffer_mapping = mapping->assoc_mapping;
 
+	/* 确保块设备地址空间不为空，并且其private_list是块设备的同步元数据不为空(表示有元数据需要同步) */
 	if (buffer_mapping == NULL || list_empty(&mapping->private_list))
 		return 0;
 
+	/* 将块设备的元数据同步到磁盘 */
 	return fsync_buffers_list(&buffer_mapping->private_lock,
 					&mapping->private_list);
 }
@@ -1022,6 +1115,10 @@ int remove_inode_buffers(struct inode *inode)
  * The retry flag is used to differentiate async IO (paging, swapping)
  * which may not fail from ordinary buffer allocations.
  */
+/**
+ * 根据页中所请求的块大小分配缓冲区首部，并把它们插入由b_this_page字段实现的单向循环链表
+ * 此外，函数用页描述符的地址初始化缓冲区首部的b_page字段。用块缓冲区在页内的线性地址或偏移量初始化b_data字段
+ */
 struct buffer_head *alloc_page_buffers(struct page *page, unsigned long size,
 		int retry)
 {
@@ -1127,6 +1224,9 @@ init_page_buffers(struct page *page, struct block_device *bdev,
  *
  * This is user purely for blockdev mappings.
  */
+/**
+ * 创建新的块设备缓冲区页。
+ */
 static struct page *
 grow_dev_page(struct block_device *bdev, sector_t block,
 		pgoff_t index, int size)
@@ -1135,6 +1235,10 @@ grow_dev_page(struct block_device *bdev, sector_t block,
 	struct page *page;
 	struct buffer_head *bh;
 
+	/**
+	 * 调用find_or_create_page，传递的参数是块设备的address_space对象、页偏移index以及GFP_NOFS标志。
+	 * 该函数在页调整缓存中搜索需要的页，如果需要，就把新页插入页调整缓存。
+	 */
 	page = find_or_create_page(inode->i_mapping, index, GFP_NOFS);
 	if (!page)
 		return NULL;
@@ -1142,18 +1246,35 @@ grow_dev_page(struct block_device *bdev, sector_t block,
 	if (!PageLocked(page))
 		BUG();
 
+	/**
+	 * 页已经在页高速缓存中。检查它的PG_private标志。
+	 */
 	if (page_has_buffers(page)) {
+		/**
+		 * 页已经是缓冲区页。从页描述符的private字段获得第一个缓冲区首部的地址bh。
+		 */
 		bh = page_buffers(page);
+		/**
+		 * 检查页中块的大小
+		 */
 		if (bh->b_size == size) {
 			init_page_buffers(page, bdev, block, size);
 			return page;
 		}
+		/**
+		 * 页中块的大小有错误，就调用try_to_free_buffers释放缓冲区页的上一个缓冲区首部。
+		 */
 		if (!try_to_free_buffers(page))
 			goto failed;
 	}
 
 	/*
 	 * Allocate some buffers for this page
+	 */
+	/**
+	 * 页还不是缓冲区页，调用alloc_page_buffers根据页中请求的块大小分配缓冲区首部。
+	 * 并将它们插入由b_this_page字段实现的单向循环链表中。
+	 * 此外，函数用页描述符的地址初始化缓冲区首部的b_page字段，用块缓冲区在页内的纯属地址或者偏移量初始化b_data字段。
 	 */
 	bh = alloc_page_buffers(page, size, 0);
 	if (!bh)
@@ -1164,8 +1285,15 @@ grow_dev_page(struct block_device *bdev, sector_t block,
 	 * lock to be atomic wrt __find_get_block(), which does not
 	 * run under the page lock.
 	 */
+	/**
+	 * 在字段private中存放第一个缓冲区首部的地址，把PG_private字段置位。并递增页的使用计数器。
+	 */ 
 	spin_lock(&inode->i_mapping->private_lock);
 	link_dev_buffers(page, bh);
+	/**
+	 * init_page_buffers函数初始化连接到页的缓冲区首部的b_bdev、b+blocknr和b_bstate字段。
+	 * 因为所有的块在磁盘上都是相邻的，因此逻辑块号是连续的。
+	 */
 	init_page_buffers(page, bdev, block, size);
 	spin_unlock(&inode->i_mapping->private_lock);
 	return page;
@@ -1186,6 +1314,12 @@ failed:
  * some of those buffers may be aliases of filesystem data.
  * grow_dev_page() will go BUG() if this happens.
  */
+/**
+ * 把块设备缓冲区页添加到页高速缓存中。
+ * bdev:		块设备描述符
+ * block:		逻辑块号
+ * size:		块大小
+ */
 static inline int
 grow_buffers(struct block_device *bdev, sector_t block, int size)
 {
@@ -1193,6 +1327,9 @@ grow_buffers(struct block_device *bdev, sector_t block, int size)
 	pgoff_t index;
 	int sizebits;
 
+	/**
+	  * 计算数据页在所请求块的块设备中的偏移量
+	  */
 	sizebits = -1;
 	do {
 		sizebits++;
@@ -1202,14 +1339,26 @@ grow_buffers(struct block_device *bdev, sector_t block, int size)
 	block = index << sizebits;
 
 	/* Create a page with the proper size buffers.. */
+	/**
+	 * 调用grow_dev_page创建新的块设备缓冲区页。
+	 */
 	page = grow_dev_page(bdev, block, index, size);
 	if (!page)
 		return 0;
+	/**
+	 * 为页解锁，因为在grow_dev_page中为page加了锁。
+	 */
 	unlock_page(page);
+	/**
+	 * 递减页的使用计数器(函数find_or_create_page曾递增了计数器)
+	 */
 	page_cache_release(page);
 	return 1;
 }
 
+/**
+ * 为请求的页分配的一个新的缓冲区。
+ */
 struct buffer_head *
 __getblk_slow(struct block_device *bdev, sector_t block, int size)
 {
@@ -1228,12 +1377,18 @@ __getblk_slow(struct block_device *bdev, sector_t block, int size)
 	for (;;) {
 		struct buffer_head * bh;
 
+		/**
+		 * 确定缓冲区是否已经在页调整缓存中。
+		 */
 		bh = __find_get_block(bdev, block, size);
 		if (bh)
 			return bh;
 
+		/**
+		 * 不在页高速缓存中，则调用grow_buffers为所请求的页分配一个新的缓冲区页。
+		 */
 		if (!grow_buffers(bdev, block, size))
-			free_more_memory();
+			free_more_memory();/* 分配页失败，则试图通过调用函数free_more_memory回收一部分内存 */
 	}
 }
 
@@ -1284,6 +1439,10 @@ void fastcall mark_buffer_dirty(struct buffer_head *bh)
  * in preparation for freeing it (sometimes, rarely, buffers are removed from
  * a page but it ends up not being freed, and buffers may later be reattached).
  */
+/**
+ * 当内核控制路径停止访问块缓冲区时，需要调用brelse递减相应的引用计数器。
+ * 请注意它与__bforget之间的差别。
+ */
 void __brelse(struct buffer_head * buf)
 {
 	if (atomic_read(&buf->b_count)) {
@@ -1298,6 +1457,12 @@ void __brelse(struct buffer_head * buf)
  * bforget() is like brelse(), except it discards any
  * potentially dirty data.
  */
+/**
+ * 当内核停止访问块缓冲区时，应该调用__brelse或者__bforget递减相应的引用计数器。
+ * 实际上，__bforget还会：从间接块链表（缓冲区首部的b_assoc_buufers字段）中删除块。
+ * 并把该缓冲区标记为干净的。因此强制内核忽略对缓冲区所做的任何修改。
+ * 但是，实际上缓冲区仍然必须被写回磁盘。
+ */
 void __bforget(struct buffer_head *bh)
 {
 	clear_buffer_dirty(bh);
@@ -1310,7 +1475,9 @@ void __bforget(struct buffer_head *bh)
 	}
 	__brelse(bh);
 }
-
+/**
+ * 从块设备中读取缓冲区首部
+ */
 static struct buffer_head *__bread_slow(struct buffer_head *bh)
 {
 	lock_buffer(bh);
@@ -1318,9 +1485,21 @@ static struct buffer_head *__bread_slow(struct buffer_head *bh)
 		unlock_buffer(bh);
 		return bh;
 	} else {
+		/**
+		 * 首先增加缓冲区的引用计数。
+		 */
 		get_bh(bh);
+		/**
+		 * 将end_buffer_read_sync赋给b_end_io。当块设备读取完数据后，会回调此函数。
+		 */
 		bh->b_end_io = end_buffer_read_sync;
+		/**
+		 * submit_bh把缓冲区首部传送到通用块层。
+		 */
 		submit_bh(READ, bh);
+		/**
+		 * 把当前进入插入到等待队列，直到I/O操作完成。
+		 */
 		wait_on_buffer(bh);
 		if (buffer_uptodate(bh))
 			return bh;
@@ -1349,6 +1528,13 @@ struct bh_lru {
 	struct buffer_head *bhs[BH_LRU_SIZE];
 };
 
+/**
+ * 在页高速缓存中搜索块时，为了提高性能，内核维持一个小的磁盘高速缓存数组bh_lrus（每CPU变量）。
+ * 即所谓的最近最少使用（LRU）块高速缓存。
+ * 每个磁盘高速缓存有8个指针，指向被指定CPU最近访问过的缓冲区首部。
+ * 对每个CPU的数据进行排序。使指向最后被使用过的那个缓冲区首部的指针索引为0。
+ * 相同的缓冲区首部可能出现在几个CPU数组中。
+ */
 static DEFINE_PER_CPU(struct bh_lru, bh_lrus) = {{ NULL }};
 
 #ifdef CONFIG_SMP
@@ -1447,16 +1633,32 @@ lookup_bh_lru(struct block_device *bdev, sector_t block, int size)
  * it in the LRU and mark it as accessed.  If it is not present then return
  * NULL
  */
+/**
+ * 返回页高速缓存中的块缓冲区对应的缓冲区首部的地址。如果不存在，就返回NULL。
+ * bdev:	设备描述符。
+ * block:	要搜索的块号。
+ * size:	块大小。
+ */
 struct buffer_head *
 __find_get_block(struct block_device *bdev, sector_t block, int size)
 {
+	/**
+	 * 检查CPU的LRU块调整缓存数组中是否有一个缓冲区首部。
+	 * 如果缓冲区首部在LRU块调整缓存中，就刷新数组中的元素，以便让指针指在第一个位置，递增它的b_count字段。
+	 */
 	struct buffer_head *bh = lookup_bh_lru(bdev, block, size);
 
 	if (bh == NULL) {
+		/**
+		 * 缓冲区首部不在LRU块调整缓存中，则调用__find_get_block_slow在高速缓存中搜索。
+		 */
 		bh = __find_get_block_slow(bdev, block, size);
 		if (bh)
 			bh_lru_install(bh);
 	}
+	/**
+	 * 如果有必要，就调用mark_page_accessed把缓冲区移至适当的LRU链表中。
+	 */
 	if (bh)
 		touch_buffer(bh);
 	return bh;
@@ -1475,12 +1677,28 @@ EXPORT_SYMBOL(__find_get_block);
  * __getblk() will lock up the machine if grow_dev_page's try_to_free_buffers()
  * attempt is failing.  FIXME, perhaps?
  */
-struct buffer_head *
+/**
+ * 确定块在页高速缓存中的位置。
+ * 它自动完成引用计数的增加，因此高层函数不必再增加块缓冲区的引用计数器。
+ *
+ * 返回页高速缓存中的块缓冲区对应的缓冲区首部的地址。如果不存在，就分配块设备缓冲区页并返回缓冲区首部指针。
+ * bdev:	设备描述符。
+ * block:	要搜索的块号。
+ * size:	块大小。
+ */
+ struct buffer_head *
 __getblk(struct block_device *bdev, sector_t block, int size)
 {
+	/**
+	 * __find_get_block检查块是否已经在页高速缓存中。如果找到，就返回缓冲区首部地址。
+	 */
 	struct buffer_head *bh = __find_get_block(bdev, block, size);
 
 	might_sleep();
+	/**
+	 * 没有在调整缓存首部找到所请求的页。
+	 * 则调用grow_buffers为所请求的页分配一个新的缓冲区页。
+	 */
 	if (bh == NULL)
 		bh = __getblk_slow(bdev, block, size);
 	return bh;
@@ -1506,12 +1724,24 @@ EXPORT_SYMBOL(__breadahead);
  *  Reads a specified block, and returns buffer head that contains it.
  *  It returns NULL if the block was unreadable.
  */
+/**
+ * 该函数与__getblk类似，但是与__getblk相反的是，如果需要的话，它就会在返回缓冲区首部之前从磁盘中读取块的内容。
+ */
 struct buffer_head *
 __bread(struct block_device *bdev, sector_t block, int size)
 {
+	/**
+	 * 调用__getblk在页高速缓存中查找与所请求的块相关的缓冲区页。并获得指向相应的缓冲区首部的指针。
+	 */
 	struct buffer_head *bh = __getblk(bdev, block, size);
 
+	/**
+	 * 块中还没有包含有效数据(BH_Uptodate标志没有被置位)
+	 */
 	if (!buffer_uptodate(bh))
+		/**
+		 * __bread_slow会调用通用块层的函数读取数据到内存中。
+		 */
 		bh = __bread_slow(bh);
 	return bh;
 }
@@ -1533,7 +1763,8 @@ static void invalidate_bh_lru(void *arg)
 	}
 	put_cpu_var(bh_lrus);
 }
-	
+
+
 static void invalidate_bh_lrus(void)
 {
 	on_each_cpu(invalidate_bh_lru, NULL, 1, 1);
@@ -1585,16 +1816,30 @@ static inline void discard_buffer(struct buffer_head * bh)
  *
  * NOTE: @gfp_mask may go away, and this function may become non-blocking.
  */
+/**
+ * 释放缓冲区页。
+ * page:	要释放的页描述符地址。
+ */
 int try_to_release_page(struct page *page, int gfp_mask)
 {
 	struct address_space * const mapping = page->mapping;
 
 	BUG_ON(!PageLocked(page));
+	/**
+	 * 正在试图将页写回磁盘，因此不能将页释放。
+	 */ 
 	if (PageWriteback(page))
 		return 0;
-	
+
+	/**
+	 * 如果定义了块设备的address_space对象的releasepage方法，就调用它。
+	 * 该回调函数通常是没有定义的。
+	 */
 	if (mapping && mapping->a_ops->releasepage)
 		return mapping->a_ops->releasepage(page, gfp_mask);
+	/**
+	 * try_to_free_buffers函数依次检查页中的缓冲区首部标志。
+	 */
 	return try_to_free_buffers(page);
 }
 EXPORT_SYMBOL(try_to_release_page);
@@ -1655,6 +1900,9 @@ EXPORT_SYMBOL(block_invalidatepage);
  * We attach and possibly dirty the buffers atomically wrt
  * __set_page_dirty_buffers() via private_lock.  try_to_free_buffers
  * is already excluded via the page lock.
+ */
+/**
+ * 为页所含块缓冲区分配缓冲区首部。
  */
 void create_empty_buffers(struct page *page,
 			unsigned long blocksize, unsigned long b_state)
@@ -1754,8 +2002,11 @@ static int __block_write_full_page(struct inode *inode, struct page *page,
 
 	BUG_ON(!PageLocked(page));
 
+	/* 计算文件最后一个块的编号 */
 	last_block = (i_size_read(inode) - 1) >> inode->i_blkbits;
-
+	/**
+	 * 象block_read_full_page一样，如果还没有在缓冲区页中，就分配缓冲区首部
+	 */
 	if (!page_has_buffers(page)) {
 		create_empty_buffers(page, 1 << inode->i_blkbits,
 					(1 << BH_Dirty)|(1 << BH_Uptodate));
@@ -1779,8 +2030,9 @@ static int __block_write_full_page(struct inode *inode, struct page *page,
 	 * Get all the dirty buffers mapped to disk addresses and
 	 * handle any aliases from the underlying blockdev's mapping.
 	 */
+	/* 确保已经映射了所有缓冲区 */
 	do {
-		if (block > last_block) {
+		if (block > last_block) {/* 超过了文件块 */
 			/*
 			 * mapped buffers outside i_size will occur, because
 			 * this page can be outside i_size when there is a
@@ -1789,9 +2041,11 @@ static int __block_write_full_page(struct inode *inode, struct page *page,
 			/*
 			 * The buffer was zeroed by block_write_full_page()
 			 */
+			/* 上层调用者必须清除了页面内容，这里将缓冲区脏标记清除，并设置uptodate标志 */
 			clear_buffer_dirty(bh);
 			set_buffer_uptodate(bh);
-		} else if (!buffer_mapped(bh) && buffer_dirty(bh)) {
+		} else if (!buffer_mapped(bh) && buffer_dirty(bh)) {/* 如果还没有映射到磁盘，并且缓冲区为脏 */
+			/* 获得磁盘逻辑块，必要时创建间接块 */
 			err = get_block(inode, block, bh, 1);
 			if (err)
 				goto recover;
@@ -1802,13 +2056,15 @@ static int __block_write_full_page(struct inode *inode, struct page *page,
 							bh->b_blocknr);
 			}
 		}
+		/* 处理下一个缓冲区首部 */
 		bh = bh->b_this_page;
 		block++;
 	} while (bh != head);
 
+	/* 锁住缓冲区 */
 	do {
 		get_bh(bh);
-		if (!buffer_mapped(bh))
+		if (!buffer_mapped(bh))/* 超出文件大小的缓冲区，不需要处理 */
 			continue;
 		/*
 		 * If it's a fully non-blocking write attempt and we cannot
@@ -1817,16 +2073,19 @@ static int __block_write_full_page(struct inode *inode, struct page *page,
 		 * activity, but those code paths have their own higher-level
 		 * throttling.
 		 */
-		if (wbc->sync_mode != WB_SYNC_NONE || !wbc->nonblocking) {
+		if (wbc->sync_mode != WB_SYNC_NONE || !wbc->nonblocking) {/* 要求完整的回写文件，或者允许阻塞 */
+			/* 锁定缓冲区 */
 			lock_buffer(bh);
-		} else if (test_set_buffer_locked(bh)) {
-			redirty_page_for_writepage(wbc, page);
+		} else if (test_set_buffer_locked(bh)) {/* 尝试获得锁，如果不能获得则继续处理下一个缓冲区 */
+			redirty_page_for_writepage(wbc, page);/* 重新标记页面为脏 */
 			continue;
 		}
+		/* 运行到此，已经成功获得缓冲区首部的锁 */
 		if (test_clear_buffer_dirty(bh)) {
+			/* 如果页面为脏，这里设置其回调函数，并设置BH_Async_Write标志，稍后将其写入磁盘 */
 			mark_buffer_async_write(bh);
 		} else {
-			unlock_buffer(bh);
+			unlock_buffer(bh);/* 如果不是脏缓冲区，则解锁，不必写到磁盘上 */
 		}
 	} while ((bh = bh->b_this_page) != head);
 
@@ -1834,13 +2093,17 @@ static int __block_write_full_page(struct inode *inode, struct page *page,
 	 * The page and its buffers are protected by PageWriteback(), so we can
 	 * drop the bh refcounts early.
 	 */
+	/* 确保没有设置回写标志,并将回写标志置上，回写标志将保护页面和它的块缓冲区 */
 	BUG_ON(PageWriteback(page));
 	set_page_writeback(page);
 	unlock_page(page);
 
+	/**
+	 * 对每缓冲区调用submit_bh函数来执行写操作。
+	 */
 	do {
 		struct buffer_head *next = bh->b_this_page;
-		if (buffer_async_write(bh)) {
+		if (buffer_async_write(bh)) {/* 缓冲区脏，需要提交 */
 			submit_bh(WRITE, bh);
 			nr_underway++;
 		}
@@ -1914,6 +2177,9 @@ recover:
 	goto done;
 }
 
+/**
+ * 为文件页的缓冲区和缓冲区首部做准备
+ */
 static int __block_prepare_write(struct inode *inode, struct page *page,
 		unsigned from, unsigned to, get_block_t *get_block)
 {
@@ -1929,6 +2195,10 @@ static int __block_prepare_write(struct inode *inode, struct page *page,
 	BUG_ON(from > to);
 
 	blocksize = 1 << inode->i_blkbits;
+	/**
+	 * 检查某页是否是一个缓冲区页（如果是则PG_Private标志置位）。
+	 * 如果没有设置该标志，则调用create_empty_buffers为页中所有的缓冲区分配缓冲区首部
+	 */
 	if (!page_has_buffers(page))
 		create_empty_buffers(page, blocksize, 0);
 	head = page_buffers(page);
@@ -1936,6 +2206,9 @@ static int __block_prepare_write(struct inode *inode, struct page *page,
 	bbits = inode->i_blkbits;
 	block = (sector_t)page->index << (PAGE_CACHE_SHIFT - bbits);
 
+	/**
+	 * 对页中包含的缓冲区对应的每个缓冲区首部，及受写操作影响的每个缓冲区首部。
+	 */
 	for(bh = head, block_start = 0; bh != head || !block_start;
 	    block++, block_start=block_end, bh = bh->b_this_page) {
 		block_end = block_start + blocksize;
@@ -1946,20 +2219,43 @@ static int __block_prepare_write(struct inode *inode, struct page *page,
 			}
 			continue;
 		}
+		/**
+		 * 如果BH_New标志置位，就将它清0。
+		 */
 		if (buffer_new(bh))
 			clear_buffer_new(bh);
+		/**
+		 * 如果BH_New标志已经清0，则
+		 */
 		if (!buffer_mapped(bh)) {
+			/**
+			 * get_block是传递过来的依赖于文件系统的函数。查看这个文件系统磁盘数据结构并查找缓冲区的逻辑块号。
+			 * （相对于分区的起始位置而不是普通文件的起始位置）
+			 * 与文件系统相关的函数把这个数存放在对应缓冲区首部的b_blicknr字段。并设置它的BH_Mapped标志。
+			 * 与文件系统相关的函数可能为文件分配一个新的物理块（如：访问的块掉进文件的“洞”中）。这种情况下，设置BH_New值
+			 */
 			err = get_block(inode, block, bh, 1);
 			if (err)
 				goto out;
+			/**
+			 * 检查BH_New标志的值
+			 */
 			if (buffer_new(bh)) {
 				clear_buffer_new(bh);
+				/**
+				 * 设置了BH_New标志的值，调用unmap_underlying_metadata检查页高速缓存内的某个块设备缓冲区页中是否包含指向磁盘同一块的一个缓冲区
+				 * 尽管可能性不大，但在一个用户直接向块设备文件写数据块时，还是会出现这种情况，从而越过文件系统。
+				 * 该函数实际上调用__find_get_block在页高速缓存内查找一个旧块。如果找到一块，函数将BH_Dirty标志清0并等待直到该缓冲区的IO传输完毕。
+				 */
 				unmap_underlying_metadata(bh->b_bdev,
 							bh->b_blocknr);
 				if (PageUptodate(page)) {
 					set_buffer_uptodate(bh);
 					continue;
 				}
+				/**
+				 * 另外，如果写操作不对整个缓冲区重写，则用0填写未写区域。
+				 */
 				if (block_end > to || block_start < from) {
 					void *kaddr;
 
@@ -1981,6 +2277,11 @@ static int __block_prepare_write(struct inode *inode, struct page *page,
 				set_buffer_uptodate(bh);
 			continue; 
 		}
+		/**
+		 * 不重写整个缓冲区，且它的BH_Delay和BH_Uptodate标志未置位
+		 * （即已经在磁盘文件系统数据结构中分配了块，但是RAM的缓冲区中并没有有效的数据映像）
+		 * 函数对该块调用ll_rw_block从磁盘读取它的内容
+		 */
 		if (!buffer_uptodate(bh) && !buffer_delay(bh) &&
 		     (block_start < from || block_end > to)) {
 			ll_rw_block(READ, 1, &bh);
@@ -1989,6 +2290,9 @@ static int __block_prepare_write(struct inode *inode, struct page *page,
 	}
 	/*
 	 * If we issued read requests - let them complete.
+	 */
+	/**
+	 * 阻塞当前进程，直到ll_rw_block要求的所有读操作都全部完成。
 	 */
 	while(wait_bh > wait) {
 		wait_on_buffer(*--wait_bh);
@@ -2037,6 +2341,9 @@ static int __block_commit_write(struct inode *inode, struct page *page,
 
 	blocksize = 1 << inode->i_blkbits;
 
+	/**
+	 * 考虑页中受写操作影响的所有缓冲区。对于其中的每个缓冲区，将对应缓冲区首部的BH_Uptodate和BH_Dirty标志置位。
+	 */
 	for(bh = head = page_buffers(page), block_start = 0;
 	    bh != head || !block_start;
 	    block_start=block_end, bh = bh->b_this_page) {
@@ -2056,6 +2363,9 @@ static int __block_commit_write(struct inode *inode, struct page *page,
 	 * the next read(). Here we 'discover' whether the page went
 	 * uptodate as a result of this (potentially partial) write.
 	 */
+	/**
+	 * 如果缓冲区页中的所有缓冲区是最新的，则将PG_uptodate标志置位。
+	 */
 	if (!partial)
 		SetPageUptodate(page);
 	return 0;
@@ -2067,6 +2377,13 @@ static int __block_commit_write(struct inode *inode, struct page *page,
  * Reads the page asynchronously --- the unlock_buffer() and
  * set/clear_buffer_uptodate() functions propagate buffer state into the
  * page struct once IO has completed.
+ */
+/**
+ * 块设备文件的readpage方法总是相同的，它是由blkdev_readpage，而blkdev_readpage会调用本方法。
+ * get_block把相对于文件开始处的文件块号转换为相对于块设备开始处的逻辑块号。
+ * 不过对块设备文件来说，这两个数是一致的。
+ * block_read_full_page以一次读一块的方式读一页数据。
+ * 当读块设备文件和磁盘上块不相邻的普通文件时都使用该函数。
  */
 int block_read_full_page(struct page *page, get_block_t *get_block)
 {
@@ -2080,23 +2397,48 @@ int block_read_full_page(struct page *page, get_block_t *get_block)
 	if (!PageLocked(page))
 		PAGE_BUG(page);
 	blocksize = 1 << inode->i_blkbits;
+	/**
+	 * 检查页描述符的标志PG_private，如果置位，则该页与描述组成页的块的缓冲区首部链表相关（把块存放在页高速缓存中）
+	 * 否则，调用create_empty_buffers为该页所含的所有块缓冲区分配缓冲区首部。
+	 */
 	if (!page_has_buffers(page))
 		create_empty_buffers(page, blocksize, 0);
 	head = page_buffers(page);
 
+	/**
+	 * 从相对于页的文件偏移量(page->index)计算出页中第一块的文件块号
+	 */
 	iblock = (sector_t)page->index << (PAGE_CACHE_SHIFT - inode->i_blkbits);
 	lblock = (i_size_read(inode)+blocksize-1) >> inode->i_blkbits;
 	bh = head;
 	nr = 0;
 	i = 0;
 
+	/**
+	 * 对该页中每个缓冲区首部，执行以下操作
+	 */
 	do {
+		/**
+		 * 如果BH_Uptodate置位，则跳过该缓冲区继续处理该页的下一个缓冲区
+		 */
 		if (buffer_uptodate(bh))
 			continue;
 
+		/**
+		 * 如果BH_Mapped未置位
+		 */
 		if (!buffer_mapped(bh)) {
 			fully_mapped = 0;
+			/**
+			 * 并且该块没有超出文件尾
+			 */
 			if (iblock < lblock) {
+				/**
+				 * 调用依赖于文件系统的get_block函数。该函数做为参数传入。
+				 * 对于普通文件，该函数在文件系统的磁盘数据结构中查找，得到相对于磁盘或分区开始处的缓冲区逻辑块号
+				 * 对于块设备文件，不同的是该函数把文件块号当作逻辑块号。
+				 * 对这两种情形，函数都将逻辑块号存放在相应缓冲区首部的b_blocknr字段中，并将标志BH_Mapped标志置位
+				 */
 				if (get_block(inode, iblock, bh, 0))
 					SetPageError(page);
 			}
@@ -2112,15 +2454,29 @@ int block_read_full_page(struct page *page, get_block_t *get_block)
 			 * get_block() might have updated the buffer
 			 * synchronously
 			 */
+			/**
+			 * 再次检查BH_Uptodate标志。因为依赖于文件系统的get_block函数可能已经角发了块IO操作而更新了缓冲区。
+			 * 如果BH_Uptodate置位了，就继续处理下一缓冲区。
+			 */
 			if (buffer_uptodate(bh))
 				continue;
 		}
+		/**
+		 * 将缓冲区首部的地址存放在局部数组att中，继续该页的下一个缓冲区
+		 */
 		arr[nr++] = bh;
 	} while (i++, iblock++, (bh = bh->b_this_page) != head);
 
+	/**
+	 * 如果没有遇到文件洞，则设置PG_mappedtodisk标志
+	 */
 	if (fully_mapped)
 		SetPageMappedToDisk(page);
 
+	/**
+	 * arr中存放了一些缓冲区首部的地址，与其对应的缓冲区的内容不是最新的。
+	 * 如果数组为空，那么页中所有缓冲区都是有效的。因此，设置页的PG_uptodate标志
+	 */
 	if (!nr) {
 		/*
 		 * All buffers are uptodate - we can set the page uptodate
@@ -2128,14 +2484,27 @@ int block_read_full_page(struct page *page, get_block_t *get_block)
 		 */
 		if (!PageError(page))
 			SetPageUptodate(page);
+		/**
+		 * 设置PG_uptodate标志后，调用unlock_page并返回。
+		 */
 		unlock_page(page);
 		return 0;
 	}
 
 	/* Stage two: lock the buffers */
+	/**
+	 * arr非空，对数组中的每个缓冲区首部执行以下操作
+	 */
 	for (i = 0; i < nr; i++) {
 		bh = arr[i];
+		/**
+		 * 将BH_Lock置位。一旦置位，函数将一直等待该缓冲区释放。
+		 */
 		lock_buffer(bh);
+		/**
+		 * 将缓冲区首部的b_end_io字段设为end_buffer_async_read函数的地址。
+		 * 并将缓冲区首部的BH_Async_Read标志置位
+		 */
 		mark_buffer_async_read(bh);
 	}
 
@@ -2143,6 +2512,9 @@ int block_read_full_page(struct page *page, get_block_t *get_block)
 	 * Stage 3: start the IO.  Check for uptodateness
 	 * inside the buffer lock in case another process reading
 	 * the underlying blockdev brought it uptodate (the sct fix).
+	 */
+	/**
+	 * 对arr中的每个缓冲区首部，调用submit_bh，将操作类型设为READ后，它会触发相应块的IO数据传输。
 	 */
 	for (i = 0; i < nr; i++) {
 		bh = arr[i];
@@ -2286,6 +2658,9 @@ out:
 	return status;
 }
 
+/**
+ * 为文件页的缓冲区和缓冲区首部做准备
+ */
 int block_prepare_write(struct page *page, unsigned from, unsigned to,
 			get_block_t *get_block)
 {
@@ -2303,15 +2678,22 @@ int block_commit_write(struct page *page, unsigned from, unsigned to)
 	return 0;
 }
 
+/**
+ * address_space对象的commit_write方法。这个方法几乎适用于所有非日志型磁盘文件系统。
+ */
 int generic_commit_write(struct file *file, struct page *page,
 		unsigned from, unsigned to)
 {
 	struct inode *inode = page->mapping->host;
 	loff_t pos = ((loff_t)page->index << PAGE_CACHE_SHIFT) + to;
+	
 	__block_commit_write(inode,page,from,to);
 	/*
 	 * No need to use i_size_read() here, the i_size
 	 * cannot change under us because we hold i_sem.
+	 */
+	/**
+	 * 检查写操作是否将文件增大，如果增大则更新文件索引结点对象的i_size字段。
 	 */
 	if (pos > inode->i_size) {
 		i_size_write(inode, pos);
@@ -2629,6 +3011,10 @@ out:
 /*
  * The generic ->writepage function for buffer-backed address_spaces
  */
+/**
+ * Ext2文件系统所实现的writepage方法是一个通用的block_write_full_page的封装函数，并会传递一个get_block参数
+ * 对块设备来说，它不会直接调用block_write_full_page，而是调用block_write_full_page的封装函数blkdev_writepage函数实现writepage
+ */
 int block_write_full_page(struct page *page, get_block_t *get_block,
 			struct writeback_control *wbc)
 {
@@ -2639,18 +3025,22 @@ int block_write_full_page(struct page *page, get_block_t *get_block,
 	void *kaddr;
 
 	/* Is the page fully inside i_size? */
+	/* 页面内容完全在文件范围内 */
 	if (page->index < end_index)
+		/* 写整个页面 */
 		return __block_write_full_page(inode, page, get_block, wbc);
 
 	/* Is the page fully outside i_size? (truncate in progress) */
 	offset = i_size & (PAGE_CACHE_SIZE-1);
-	if (page->index >= end_index+1 || !offset) {
+	if (page->index >= end_index+1 || !offset) {/* 页面完全不在文件内 */
 		/*
 		 * The page may have dirty, unmapped buffers.  For example,
 		 * they may have been added in ext3_writepage().  Make them
 		 * freeable here, so the page does not leak.
 		 */
+		/* 使整个页面失效 */
 		block_invalidatepage(page, 0);
+		/* 解锁页面并退出 */
 		unlock_page(page);
 		return 0; /* don't care */
 	}
@@ -2662,10 +3052,13 @@ int block_write_full_page(struct page *page, get_block_t *get_block,
 	 * the  page size, the remaining memory is zeroed when mapped, and
 	 * writes to that region are not written out to the file."
 	 */
+	/* 页面位于文件最后，首先映射页面 */
 	kaddr = kmap_atomic(page, KM_USER0);
+	/* 将超出部分清0，避免向磁盘写入垃圾数据 */
 	memset(kaddr + offset, 0, PAGE_CACHE_SIZE - offset);
 	flush_dcache_page(page);
 	kunmap_atomic(kaddr, KM_USER0);
+	/* 将整个页面写入到磁盘 */
 	return __block_write_full_page(inode, page, get_block, wbc);
 }
 
@@ -2680,8 +3073,15 @@ sector_t generic_block_bmap(struct address_space *mapping, sector_t block,
 	return tmp.b_blocknr;
 }
 
+/**
+ * 当针对BIO上的IO数据传输终止时，内核调用bi_end_io方法
+ * 一般来说，bi_end_io是end_bio_bh_io_sync
+ */
 static int end_bio_bh_io_sync(struct bio *bio, unsigned int bytes_done, int err)
 {
+	/**
+	 * 从bi_private中获得缓冲区首部的地址
+	 */
 	struct buffer_head *bh = bio->bi_private;
 
 	if (bio->bi_size)
@@ -2692,11 +3092,22 @@ static int end_bio_bh_io_sync(struct bio *bio, unsigned int bytes_done, int err)
 		set_bit(BH_Eopnotsupp, &bh->b_state);
 	}
 
+	/**
+	 * 调用缓冲区首部的b_end_io，如end_buffer_async_read
+	 */
 	bh->b_end_io(bh, test_bit(BIO_UPTODATE, &bio->bi_flags));
+	/**
+	 * 释放bio.
+	 */
 	bio_put(bio);
 	return 0;
 }
 
+/**
+ * 向内核通用块层传递一个缓冲区首部。并由此请求传输一个数据块。
+ * rw:		数据传输方向(读或者写)
+ * bh:		要传送数据的块缓冲区首部。
+ */
 int submit_bh(int rw, struct buffer_head * bh)
 {
 	struct bio *bio;
@@ -2713,6 +3124,10 @@ int submit_bh(int rw, struct buffer_head * bh)
 	 * Only clear out a write error when rewriting, should this
 	 * include WRITE_SYNC as well?
 	 */
+	/**
+	 * test_set_buffer_req设置缓冲区首部的BH_Req标志，以表示块至少被访问过一次。
+	 * 如果数据传输方向是WRITE，就将BH_Write_EIO标志清0.
+	 */
 	if (test_set_buffer_req(bh) && (rw == WRITE || rw == WRITE_BARRIER))
 		clear_buffer_write_io_error(bh);
 
@@ -2720,8 +3135,20 @@ int submit_bh(int rw, struct buffer_head * bh)
 	 * from here on down, it's all bio -- do the initial mapping,
 	 * submit_bio -> generic_make_request may further map this bio around
 	 */
+	/**
+	 * 分配一个新的BIO描述符。
+	 */
 	bio = bio_alloc(GFP_NOIO, 1);
 
+	/**
+	 * 根据缓冲区首部的内容初始化bio描述符的字段。
+	 * 把块中的第一个扇区的号赋给bi_sector。
+	 * 把块设备描述符的地址赋给bi_bdev。
+	 * 把块大小赋给bi_size。
+	 * 初始化bi_io_vec的第一个元素，以使该段对应于块缓冲区。
+	 * 把bi_vcnt置为1(只有一个bio的段)，并把bi_idx置为0.
+	 * 把end_bio_bh_io_sync的地址赋给bi_end_io字段，并把缓冲区首部的地址赋给bi_private字段。
+	 */
 	bio->bi_sector = bh->b_blocknr * (bh->b_size >> 9);
 	bio->bi_bdev = bh->b_bdev;
 	bio->bi_io_vec[0].bv_page = bh->b_page;
@@ -2732,15 +3159,25 @@ int submit_bh(int rw, struct buffer_head * bh)
 	bio->bi_idx = 0;
 	bio->bi_size = bh->b_size;
 
-	bio->bi_end_io = end_bio_bh_io_sync;
+	bio->bi_end_io = end_bio_bh_io_sync;/* 在bio完成后再释放它 */
 	bio->bi_private = bh;
 
+	/**
+	 * 递增bio的引用计数。
+	 */
 	bio_get(bio);
+	/**
+	 * submit_bio把bi_rw标志设置为数据传输的方向。更新每CPU变量page_states以表示读和写的扇区数。
+	 * 并对bio描述符调用generic_make_request函数。
+	 */
 	submit_bio(rw, bio);
 
 	if (bio_flagged(bio, BIO_EOPNOTSUPP))
 		ret = -EOPNOTSUPP;
 
+	/**
+	 * 递减bio的使用计数器。因为bio描述符现在已经被插入IO调度程序的队列，所以没有释放bio描述符。
+	 */
 	bio_put(bio);
 	return ret;
 }
@@ -2770,31 +3207,73 @@ int submit_bh(int rw, struct buffer_head * bh)
  * All of the buffers must be for the same device, and must also be a
  * multiple of the current approved size for the device.
  */
+/**
+ * 进行几个数据块的数据传输，这些数据块不一定物理上相邻。
+ * 注意:	在Io完成之前，缓冲区被锁住。
+ * rw:		数据传输的方向。
+ * nr:		要传输的数据块的块数量。
+ * bhs:		指向块缓冲区所对应的缓冲区首部的指针数组。
+ */
 void ll_rw_block(int rw, int nr, struct buffer_head *bhs[])
 {
 	int i;
 
+	/**
+	 * 在所有缓冲区首部上循环。
+	 */
 	for (i = 0; i < nr; i++) {
 		struct buffer_head *bh = bhs[i];
 
+		/**
+		 * 检查并设置缓冲区首部的BH_Lock标志。
+		 * 如果缓冲区已经被锁住，而另外一个内核控制路径已经激活了数据传输，就不处理这个缓冲区。
+		 */
 		if (test_set_buffer_locked(bh))
 			continue;
 
+		/**
+		 * 把缓冲区首部的使用计数器b_count加1.
+		 */
 		get_bh(bh);
 		if (rw == WRITE) {
+			/**
+			 * 如果数据传输的方向是WRITE，就让缓冲区首部的方法b_end_io指向函数end_buffer_write_sync
+			 */
 			bh->b_end_io = end_buffer_write_sync;
+			/**
+			 * 检查并清除缓冲区首部的BH_Dirty标志。
+			 * 如果该标志没有置位，就不必把块写入磁盘。
+			 */
 			if (test_clear_buffer_dirty(bh)) {
+				/**
+				 * 需要读或者写块，调用submit_bh把缓冲区首部传递到通用块块。
+				 */
 				submit_bh(WRITE, bh);
 				continue;
 			}
 		} else {
+			/**
+			 * 如果数据传输的方向不是WRITE，就让缓冲区首部的方法b_end_io指向函数end_buffer_read_sync
+			 */
 			bh->b_end_io = end_buffer_read_sync;
+			/**
+			 * 如果数据传输方向不是WRITE，就判断缓冲区首部的BH_Uptodate标志是否被置位，如果是，就不必从磁盘读块。
+			 */
 			if (!buffer_uptodate(bh)) {
+				/**
+				 * 需要读或者写块，调用submit_bh把缓冲区首部传递到通用块块。
+				 */
 				submit_bh(rw, bh);
 				continue;
 			}
 		}
+		/**
+		 * 通过清除BH_Lock标志为缓冲区首部解锁，然后唤醒所有等待块解锁的进程。
+		 */
 		unlock_buffer(bh);
+		/**
+		 * 递减缓冲区首部的b_count字段。
+		 */
 		put_bh(bh);
 	}
 }
@@ -2889,6 +3368,9 @@ int try_to_free_buffers(struct page *page)
 	int ret = 0;
 
 	BUG_ON(!PageLocked(page));
+	/**
+	 * 检查页中所有缓冲区的首部标志。如果正在写回，说明不能释放这些缓冲区，返回0.
+	 */
 	if (PageWriteback(page))
 		return 0;
 
@@ -2898,6 +3380,9 @@ int try_to_free_buffers(struct page *page)
 	}
 
 	spin_lock(&mapping->private_lock);
+	/**
+	 * 如果缓冲区首部在间接缓冲区的链表中，则从链表中删除它。
+	 */
 	ret = drop_buffers(page, &buffers_to_free);
 	if (ret) {
 		/*
@@ -2908,6 +3393,9 @@ int try_to_free_buffers(struct page *page)
 		 * This only applies in the rare case where try_to_free_buffers
 		 * succeeds but the page is not freed.
 		 */
+		/** 
+		 * 清除页的PG_dirty标志。
+		 */
 		clear_page_dirty(page);
 	}
 	spin_unlock(&mapping->private_lock);
@@ -2915,6 +3403,9 @@ out:
 	if (buffers_to_free) {
 		struct buffer_head *bh = buffers_to_free;
 
+		/**
+		 * 反复调用free_buffer_head，以释放页的所有缓冲区首部。
+		 */
 		do {
 			struct buffer_head *next = bh->b_this_page;
 			free_buffer_head(bh);
@@ -2966,6 +3457,9 @@ asmlinkage long sys_bdflush(int func, long data)
 /*
  * Buffer-head allocation
  */
+/**
+ * 缓冲区首部有它自己的slab分配器高速缓存。其描述符kmem_cache_s存放在变量bh_cachep中
+ */
 static kmem_cache_t *bh_cachep;
 
 /*
@@ -2995,7 +3489,11 @@ static void recalc_bh_state(void)
 		tot += per_cpu(bh_accounting, i).nr;
 	buffer_heads_over_limit = (tot > max_buffer_heads);
 }
-	
+
+/**
+ * 页高速缓冲区首部有自己的slab分配器：bh_cachep
+ * alloc_buffer_head函数用于获取缓冲区首部
+ */
 struct buffer_head *alloc_buffer_head(int gfp_flags)
 {
 	struct buffer_head *ret = kmem_cache_alloc(bh_cachep, gfp_flags);
@@ -3009,6 +3507,9 @@ struct buffer_head *alloc_buffer_head(int gfp_flags)
 }
 EXPORT_SYMBOL(alloc_buffer_head);
 
+/**
+ * 释放缓冲区首部。
+ */
 void free_buffer_head(struct buffer_head *bh)
 {
 	BUG_ON(!list_empty(&bh->b_assoc_buffers));
