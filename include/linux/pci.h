@@ -657,7 +657,7 @@ struct pci_bus {
 	/* 本总线的子总线链表头 */
 	struct list_head children;	/* list of child buses */
 	/* 本总线的PCI设备链表的表头 */
-	struct list_head devices;	?/* list of devices on this bus */
+	struct list_head devices;	/* list of devices on this bus */
 	/**
 	 * 对于非根PCI总线，为指向该总线的桥设备的描述符。
 	 * 对于根总线，其值为NULL

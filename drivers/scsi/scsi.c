@@ -616,7 +616,7 @@ int scsi_dispatch_cmd(struct scsi_cmnd *cmd)
 				printk("queuecommand : command too long.\n"));
 		cmd->result = (DID_ABORT << 16);
 
-		scsi_done(cmd)/* 设置错误码后通知上层 */
+		scsi_done(cmd);/* 设置错误码后通知上层 */
 		goto out;
 	}
 

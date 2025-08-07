@@ -27,15 +27,15 @@
 #define __build_read_lock_ptr(rw, helper)   \
 	/**
 	 * 将lock减1，变相是将读者数加1
-	 */
+	 */ \
 	asm volatile(LOCK "subl $1,(%0)\n\t" \
 			 /**
 			  * 如果减1后，lock值>=0。就说明此时未锁，或者只有读者，申请读锁成功。
-			  */
+			  */ \
 		     "jns 1f\n" \
 		     /**
 		      * 此时有写者，申请不成功，转到__read_lock_failed
-		      */
+		      */ \
 		     "call " helper "\n\t" \
 		     "1:\n" \
 		     ::"a" (rw) : "memory")

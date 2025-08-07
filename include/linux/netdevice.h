@@ -1241,7 +1241,6 @@ static inline void netif_device_detach(struct net_device *dev)
 	/**
 	 * 在这里会清除dev->state的__LINK_STATE_PRESENT标志位，因为设备临时不能够操作。
 	 */
-	 */
 	if (test_and_clear_bit(__LINK_STATE_PRESENT, &dev->state) &&
 	    netif_running(dev)) {
 	    /*

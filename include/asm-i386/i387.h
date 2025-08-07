@@ -61,7 +61,7 @@ static inline void __save_init_fpu( struct task_struct *tsk )
 	/**
 	 * 如果TS_USEDFPU标志被设置，说明在进程的本次执行中，使用了相关的寄存器。
 	 * 调用save_init_fpu保存相关硬件上下文。
-	 */
+	 */ \
 	if ((tsk)->thread_info->status & TS_USEDFPU) \
 		save_init_fpu( tsk ); \
 } while (0)

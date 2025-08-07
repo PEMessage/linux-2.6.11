@@ -25,48 +25,46 @@ extern struct task_struct * FASTCALL(__switch_to(struct task_struct *prev, struc
 	 * 在真正执行汇编代码前，已经将prev存入eax，next存入edx中了。
 	 * 没有搞懂gcc汇编语法，反正结果就是这样。
 	 * 应该是"2" (prev), "d" (next)这句的副作用。
-	 */
-
-				/**
+	 */ /**
 				 * 保存eflags和ebp到内核栈中。必须保存是因为编译器认为在switch_to结束前，
 				 * 它们的值应当保持不变。
-				 */
+				 */ \
 	asm volatile("pushfl\n\t"					\
 		     "pushl %%ebp\n\t"					\
 		     /**
 		      * 把esp的内容保存到prev->thread.esp中
 		      * 这样该字段指向prev内核栈的栈顶。
-		      */
+		      */ \
 		     "movl %%esp,%0\n\t"	/* save ESP */		\
 		     /**
 		      * 将next->thread.esp装入到esp.
 		      * 此时，内核开始在next的栈上进行操作。这条指令实际上完成了从prev到next的切换。
 		      * 由于进程描述符的地址和内核栈的地址紧挨着，所以改变内核栈意味着改变当前进程。
-		      */
+		      */ \
 		     "movl %5,%%esp\n\t"	/* restore ESP */	\
 		     /**
 		      * 将标记为1f的地址存入prev->thread.eip.
 		      * 当被替换的进程重新恢复执行时，进程执行被标记为1f的那条指令。
-		      */
+		      */ \
 		     "movl $1f,%1\n\t"		/* save EIP */		\
 		     /**
 		      * 将next->thread.eip的值保存到next的内核栈中。
 		      * 这样，_switch_to调用ret返回时，就会跳转到next->thread.eip执行。
 		      * 这个地址一般情况下就会是1f.
-		      */
+		      */ \
 		     "pushl %6\n\t"		/* restore EIP */	\
 		     /**
 		      * 注意，这里不是用call，是jmp，这样，上一条语句中压入的eip地址就可以执行了。
-		      */
+		      */ \
 		     "jmp __switch_to\n"				\
 		     /**
 		      * 到这里，进程A再次获得CPU。它从栈中弹出ebp和eflags。
-		      */
+		      */ \
 		     "1:\t"						\
 		     "popl %%ebp\n\t"					\
 		     "popfl"						\
 		     :"=m" (prev->thread.esp),"=m" (prev->thread.eip),	\
-		     /* last被作为输出参数，它的值会由eax赋给它。 */
+		     /* last被作为输出参数，它的值会由eax赋给它。 */ \
 		      "=a" (last),"=S" (esi),"=D" (edi)			\
 		     :"m" (next->thread.esp),"m" (next->thread.eip),	\
 		      "2" (prev), "d" (next));				\
