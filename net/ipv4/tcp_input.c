@@ -514,7 +514,7 @@ void tcp_rcv_space_adjust(struct sock *sk)
 	if (time < (tp->rcv_rtt_est.rtt >> 3) ||/* 距离上次调整时间小于RTT/8，或者还没有计算出RTT，则返回 */
 	    tp->rcv_rtt_est.rtt == 0)
 		return;
-
+	
 	/* 2倍往返时间内接收方应用程序接收的数据量 */
 	space = 2 * (tp->copied_seq - tp->rcvq_space.seq);
 
@@ -2770,7 +2770,7 @@ static int tcp_ack_update_window(struct sock *sk, struct tcp_sock *tp,
 static void tcp_process_frto(struct sock *sk, u32 prior_snd_una)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
-
+	
 	/* 接收到ACK后，刷新没有确认的TCP段数量 */
 	tcp_sync_left_out(tp);
 	
@@ -4336,4 +4336,871 @@ static void tcp_check_urg(struct sock * sk, struct tcphdr * th)
 	 * decline of BSD again. Verdict: it is better to remove to trap
 	 * buggy users.
 	 */
-	if (tp->urg_seq == tp->copied_seq && tp->urg_data &&/* 带外数据的序号正是要复制到用户态的序号
+	if (tp->urg_seq == tp->copied_seq && tp->urg_data && /* 带外数据的序号正是要复制到用户态的序号 */
+	    !sock_flag(sk, SOCK_URGINLINE) &&
+	    tp->copied_seq != tp->rcv_nxt) {
+		struct sk_buff *skb = skb_peek(&sk->sk_receive_queue);
+		tp->copied_seq++;
+		if (skb && !before(tp->copied_seq, TCP_SKB_CB(skb)->end_seq)) {
+			__skb_unlink(skb, skb->list);
+			__kfree_skb(skb);
+		}
+	}
+
+	tp->urg_data   = TCP_URG_NOTYET;
+	tp->urg_seq    = ptr;
+
+	/* Disable header prediction. */
+	tp->pred_flags = 0;
+}
+
+/* This is the 'fast' part of urgent handling. */
+static void tcp_urg(struct sock *sk, struct sk_buff *skb, struct tcphdr *th)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+
+	/* Check if we get a new urgent pointer - normally not. */
+	if (th->urg)
+		tcp_check_urg(sk,th);
+
+	/* Do we wait for any urgent data? - normally not... */
+	if (tp->urg_data == TCP_URG_NOTYET) {
+		u32 ptr = tp->urg_seq - ntohl(th->seq) + (th->doff * 4) -
+			  th->syn;
+
+		/* Is the urgent pointer pointing into this packet? */	 
+		if (ptr < skb->len) {
+			u8 tmp;
+			if (skb_copy_bits(skb, ptr, &tmp, 1))
+				BUG();
+			tp->urg_data = TCP_URG_VALID | tmp;
+			if (!sock_flag(sk, SOCK_DEAD))
+				sk->sk_data_ready(sk, 0);
+		}
+	}
+}
+
+static int tcp_copy_to_iovec(struct sock *sk, struct sk_buff *skb, int hlen)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	int chunk = skb->len - hlen;
+	int err;
+
+	local_bh_enable();
+	if (skb->ip_summed==CHECKSUM_UNNECESSARY)
+		err = skb_copy_datagram_iovec(skb, hlen, tp->ucopy.iov, chunk);
+	else
+		err = skb_copy_and_csum_datagram_iovec(skb, hlen,
+						       tp->ucopy.iov);
+
+	if (!err) {
+		tp->ucopy.len -= chunk;
+		tp->copied_seq += chunk;
+		tcp_rcv_space_adjust(sk);
+	}
+
+	local_bh_disable();
+	return err;
+}
+
+static int __tcp_checksum_complete_user(struct sock *sk, struct sk_buff *skb)
+{
+	int result;
+
+	if (sock_owned_by_user(sk)) {
+		local_bh_enable();
+		result = __tcp_checksum_complete(skb);
+		local_bh_disable();
+	} else {
+		result = __tcp_checksum_complete(skb);
+	}
+	return result;
+}
+
+static __inline__ int
+tcp_checksum_complete_user(struct sock *sk, struct sk_buff *skb)
+{
+	return skb->ip_summed != CHECKSUM_UNNECESSARY &&
+		__tcp_checksum_complete_user(sk, skb);
+}
+
+/*
+ *	TCP receive function for the ESTABLISHED state. 
+ *
+ *	It is split into a fast path and a slow path. The fast path is 
+ * 	disabled when:
+ *	- A zero window was announced from us - zero window probing
+ *        is only handled properly in the slow path. 
+ *	- Out of order segments arrived.
+ *	- Urgent data is expected.
+ *	- There is no buffer space left
+ *	- Unexpected TCP flags/window values/header lengths are received
+ *	  (detected by checking the TCP header against pred_flags) 
+ *	- Data is sent in both directions. Fast path only supports pure senders
+ *	  or pure receivers (this means either the sequence number or the ack
+ *	  value must stay constant)
+ *	- Unexpected TCP option.
+ *
+ *	When these conditions are not satisfied it drops into a standard 
+ *	receive procedure patterned after RFC793 to handle all cases.
+ *	The first three cases are guaranteed by proper pred_flags setting,
+ *	the rest is checked inline. Fast processing is turned on in 
+ *	tcp_data_queue when everything is OK.
+ */
+int tcp_rcv_established(struct sock *sk, struct sk_buff *skb,
+			struct tcphdr *th, unsigned len)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+
+	/*
+	 *	Header prediction.
+	 *	The code loosely follows the one in the famous 
+	 *	"30 instruction TCP receive" Van Jacobson mail.
+	 *	
+	 *	Van's trick is to deposit buffers into socket queue 
+	 *	on a device interrupt, to call tcp_recv function
+	 *	on the receive process context and checksum and copy
+	 *	the buffer to user space. smart...
+	 *
+	 *	Our current scheme is not silly either but we take the 
+	 *	extra cost of the net_bh soft interrupt processing...
+	 *	We do checksum and copy also but from device to kernel.
+	 */
+
+	tp->rx_opt.saw_tstamp = 0;
+
+	/*	pred_flags is 0xS?10 << 16 + snd_wnd
+	 *	if header_predition is to be made
+	 *	'S' will always be tp->tcp_header_len >> 2
+	 *	'?' will be 0 for the fast path, otherwise pred_flags is 0 to
+	 *  turn it off	(when there are holes in the receive 
+	 *	 space for instance)
+	 *	PSH flag is ignored.
+	 */
+
+	if ((tcp_flag_word(th) & TCP_HP_BITS) == tp->pred_flags &&
+		TCP_SKB_CB(skb)->seq == tp->rcv_nxt) {
+		int tcp_header_len = tp->tcp_header_len;
+
+		/* Timestamp header prediction: tcp_header_len
+		 * is automatically equal to th->doff*4 due to pred_flags
+		 * match.
+		 */
+
+		/* Check timestamp */
+		if (tcp_header_len == sizeof(struct tcphdr) + TCPOLEN_TSTAMP_ALIGNED) {
+			__u32 *ptr = (__u32 *)(th + 1);
+
+			/* No? Slow path! */
+			if (*ptr != ntohl((TCPOPT_NOP << 24) | (TCPOPT_NOP << 16)
+					  | (TCPOPT_TIMESTAMP << 8) | TCPOLEN_TIMESTAMP))
+				goto slow_path;
+
+			tp->rx_opt.saw_tstamp = 1;
+			++ptr; 
+			tp->rx_opt.rcv_tsval = ntohl(*ptr);
+			++ptr;
+			tp->rx_opt.rcv_tsecr = ntohl(*ptr);
+
+			/* If PAWS failed, check it more carefully in slow path */
+			if ((s32)(tp->rx_opt.rcv_tsval - tp->rx_opt.ts_recent) < 0)
+				goto slow_path;
+
+			/* DO NOT update ts_recent here, if checksum fails
+			 * and timestamp was corrupted part, it will result
+			 * in a hung connection since we will drop all
+			 * future packets due to the PAWS test.
+			 */
+		}
+
+		if (len <= tcp_header_len) {
+			/* Bulk data transfer: sender */
+			if (len == tcp_header_len) {
+				/* Predicted packet is in window by definition.
+				 * seq == rcv_nxt and rcv_wup <= rcv_nxt.
+				 * Hence, check seq<=rcv_wup reduces to:
+				 */
+				if (tcp_header_len ==
+				    (sizeof(struct tcphdr) + TCPOLEN_TSTAMP_ALIGNED) &&
+				    tp->rcv_nxt == tp->rcv_wup)
+					tcp_store_ts_recent(tp);
+
+				tcp_rcv_rtt_measure_ts(tp, skb);
+
+				/* We know that such packets are checksummed
+				 * on entry.
+				 */
+				tcp_ack(sk, skb, 0);
+				__kfree_skb(skb); 
+				tcp_data_snd_check(sk);
+				return 0;
+			} else { /* Header too small */
+				TCP_INC_STATS_BH(TCP_MIB_INERRS);
+				goto discard;
+			}
+		} else {
+			int eaten = 0;
+
+			if (tp->ucopy.task == current &&
+			    tp->copied_seq == tp->rcv_nxt &&
+			    len - tcp_header_len <= tp->ucopy.len &&
+			    sock_owned_by_user(sk)) {
+				__set_current_state(TASK_RUNNING);
+
+				if (!tcp_copy_to_iovec(sk, skb, tcp_header_len)) {
+					/* Predicted packet is in window by definition.
+					 * seq == rcv_nxt and rcv_wup <= rcv_nxt.
+					 * Hence, check seq<=rcv_wup reduces to:
+					 */
+					if (tcp_header_len ==
+					    (sizeof(struct tcphdr) +
+					     TCPOLEN_TSTAMP_ALIGNED) &&
+					    tp->rcv_nxt == tp->rcv_wup)
+						tcp_store_ts_recent(tp);
+
+					tcp_rcv_rtt_measure_ts(tp, skb);
+
+					__skb_pull(skb, tcp_header_len);
+					tp->rcv_nxt = TCP_SKB_CB(skb)->end_seq;
+					NET_INC_STATS_BH(LINUX_MIB_TCPHPHITSTOUSER);
+					eaten = 1;
+				}
+			}
+			if (!eaten) {
+				if (tcp_checksum_complete_user(sk, skb))
+					goto csum_error;
+
+				/* Predicted packet is in window by definition.
+				 * seq == rcv_nxt and rcv_wup <= rcv_nxt.
+				 * Hence, check seq<=rcv_wup reduces to:
+				 */
+				if (tcp_header_len ==
+				    (sizeof(struct tcphdr) + TCPOLEN_TSTAMP_ALIGNED) &&
+				    tp->rcv_nxt == tp->rcv_wup)
+					tcp_store_ts_recent(tp);
+
+				tcp_rcv_rtt_measure_ts(tp, skb);
+
+				if ((int)skb->truesize > sk->sk_forward_alloc)
+					goto step5;
+
+				NET_INC_STATS_BH(LINUX_MIB_TCPHPHITS);
+
+				/* Bulk data transfer: receiver */
+				__skb_pull(skb,tcp_header_len);
+				__skb_queue_tail(&sk->sk_receive_queue, skb);
+				sk_stream_set_owner_r(skb, sk);
+				tp->rcv_nxt = TCP_SKB_CB(skb)->end_seq;
+			}
+
+			tcp_event_data_recv(sk, tp, skb);
+
+			if (TCP_SKB_CB(skb)->ack_seq != tp->snd_una) {
+				/* Well, only one small jumplet in fast path... */
+				tcp_ack(sk, skb, FLAG_DATA);
+				tcp_data_snd_check(sk);
+				if (!tcp_ack_scheduled(tp))
+					goto no_ack;
+			}
+
+			if (eaten) {
+				if (tcp_in_quickack_mode(tp)) {
+					tcp_send_ack(sk);
+				} else {
+					tcp_send_delayed_ack(sk);
+				}
+			} else {
+				__tcp_ack_snd_check(sk, 0);
+			}
+
+no_ack:
+			if (eaten)
+				__kfree_skb(skb);
+			else
+				sk->sk_data_ready(sk, 0);
+			return 0;
+		}
+	}
+
+slow_path:
+	if (len < (th->doff<<2) || tcp_checksum_complete_user(sk, skb))
+		goto csum_error;
+
+	/*
+	 * RFC1323: H1. Apply PAWS check first.
+	 */
+	if (tcp_fast_parse_options(skb, th, tp) && tp->rx_opt.saw_tstamp &&
+	    tcp_paws_discard(tp, skb)) {
+		if (!th->rst) {
+			NET_INC_STATS_BH(LINUX_MIB_PAWSESTABREJECTED);
+			tcp_send_dupack(sk, skb);
+			goto discard;
+		}
+		/* Resets are accepted even if PAWS failed.
+
+		   ts_recent update must be made after we are sure
+		   that the packet is in window.
+		 */
+	}
+
+	/*
+	 *	Standard slow path.
+	 */
+
+	if (!tcp_sequence(tp, TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq)) {
+		/* RFC793, page 37: "In all states except SYN-SENT, all reset
+		 * (RST) segments are validated by checking their SEQ-fields."
+		 * And page 69: "If an incoming segment is not acceptable,
+		 * an acknowledgment should be sent in reply (unless the RST bit
+		 * is set, if so drop the segment and return)".
+		 */
+		if (!th->rst)
+			tcp_send_dupack(sk, skb);
+		goto discard;
+	}
+
+	if(th->rst) {
+		tcp_reset(sk);
+		goto discard;
+	}
+
+	tcp_replace_ts_recent(tp, TCP_SKB_CB(skb)->seq);
+
+	if (th->syn && !before(TCP_SKB_CB(skb)->seq, tp->rcv_nxt)) {
+		TCP_INC_STATS_BH(TCP_MIB_INERRS);
+		NET_INC_STATS_BH(LINUX_MIB_TCPABORTONSYN);
+		tcp_reset(sk);
+		return 1;
+	}
+
+step5:
+	if(th->ack)
+		tcp_ack(sk, skb, FLAG_SLOWPATH);
+
+	tcp_rcv_rtt_measure_ts(tp, skb);
+
+	/* Process urgent data. */
+	tcp_urg(sk, skb, th);
+
+	/* step 7: process the segment text */
+	tcp_data_queue(sk, skb);
+
+	tcp_data_snd_check(sk);
+	tcp_ack_snd_check(sk);
+	return 0;
+
+csum_error:
+	TCP_INC_STATS_BH(TCP_MIB_INERRS);
+
+discard:
+	__kfree_skb(skb);
+	return 0;
+}
+
+static int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
+					 struct tcphdr *th, unsigned len)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	int saved_clamp = tp->rx_opt.mss_clamp;
+
+	tcp_parse_options(skb, &tp->rx_opt, 0);
+
+	if (th->ack) {
+		/* rfc793:
+		 * "If the state is SYN-SENT then
+		 *    first check the ACK bit
+		 *      If the ACK bit is set
+		 *	  If SEG.ACK =< ISS, or SEG.ACK > SND.NXT, send
+		 *        a reset (unless the RST bit is set, if so drop
+		 *        the segment and return)"
+		 *
+		 *  We do not send data with SYN, so that RFC-correct
+		 *  test reduces to:
+		 */
+		if (TCP_SKB_CB(skb)->ack_seq != tp->snd_nxt)
+			goto reset_and_undo;
+
+		if (tp->rx_opt.saw_tstamp && tp->rx_opt.rcv_tsecr &&
+		    !between(tp->rx_opt.rcv_tsecr, tp->retrans_stamp,
+			     tcp_time_stamp)) {
+			NET_INC_STATS_BH(LINUX_MIB_PAWSACTIVEREJECTED);
+			goto reset_and_undo;
+		}
+
+		/* Now ACK is acceptable.
+		 *
+		 * "If the RST bit is set
+		 *    If the ACK was acceptable then signal the user "error:
+		 *    connection reset", drop the segment, enter CLOSED state,
+		 *    delete TCB, and return."
+		 */
+
+		if (th->rst) {
+			tcp_reset(sk);
+			goto discard;
+		}
+
+		/* rfc793:
+		 *   "fifth, if neither of the SYN or RST bits is set then
+		 *    drop the segment and return."
+		 *
+		 *    See note below!
+		 *                                        --ANK(990513)
+		 */
+		if (!th->syn)
+			goto discard_and_undo;
+
+		/* rfc793:
+		 *   "If the SYN bit is on ...
+		 *    are acceptable then ...
+		 *    (our SYN has been ACKed), change the connection
+		 *    state to ESTABLISHED..."
+		 */
+
+		TCP_ECN_rcv_synack(tp, th);
+		if (tp->ecn_flags&TCP_ECN_OK)
+			sk->sk_no_largesend = 1;
+
+		tp->snd_wl1 = TCP_SKB_CB(skb)->seq;
+		tcp_ack(sk, skb, FLAG_SLOWPATH);
+
+		/* Ok.. it's good. Set up sequence numbers and
+		 * move to established.
+		 */
+		tp->rcv_nxt = TCP_SKB_CB(skb)->seq + 1;
+		tp->rcv_wup = TCP_SKB_CB(skb)->seq + 1;
+
+		/* RFC1323: The window in SYN & SYN/ACK segments is
+		 * never scaled.
+		 */
+		tp->snd_wnd = ntohs(th->window);
+		tcp_init_wl(tp, TCP_SKB_CB(skb)->ack_seq, TCP_SKB_CB(skb)->seq);
+
+		if (!tp->rx_opt.wscale_ok) {
+			tp->rx_opt.snd_wscale = tp->rx_opt.rcv_wscale = 0;
+			tp->window_clamp = min(tp->window_clamp, 65535U);
+		}
+
+		if (tp->rx_opt.saw_tstamp) {
+			tp->rx_opt.tstamp_ok	   = 1;
+			tp->tcp_header_len =
+				sizeof(struct tcphdr) + TCPOLEN_TSTAMP_ALIGNED;
+			tp->advmss	    -= TCPOLEN_TSTAMP_ALIGNED;
+			tcp_store_ts_recent(tp);
+		} else {
+			tp->tcp_header_len = sizeof(struct tcphdr);
+		}
+
+		if (tp->rx_opt.sack_ok && sysctl_tcp_fack)
+			tp->rx_opt.sack_ok |= 2;
+
+		tcp_sync_mss(sk, tp->pmtu_cookie);
+		tcp_initialize_rcv_mss(sk);
+
+		/* Remember, tcp_poll() does not lock socket!
+		 * Change state from SYN-SENT only after copied_seq
+		 * is initialized. */
+		tp->copied_seq = tp->rcv_nxt;
+		mb();
+		tcp_set_state(sk, TCP_ESTABLISHED);
+
+		/* Make sure socket is routed, for correct metrics.  */
+		tp->af_specific->rebuild_header(sk);
+
+		tcp_init_metrics(sk);
+
+		/* Prevent spurious tcp_cwnd_restart() on first data
+		 * packet.
+		 */
+		tp->lsndtime = tcp_time_stamp;
+
+		tcp_init_buffer_space(sk);
+
+		if (sock_flag(sk, SOCK_KEEPOPEN))
+			tcp_reset_keepalive_timer(sk, keepalive_time_when(tp));
+
+		if (!tp->rx_opt.snd_wscale)
+			__tcp_fast_path_on(tp, tp->snd_wnd);
+		else
+			tp->pred_flags = 0;
+
+		if (!sock_flag(sk, SOCK_DEAD)) {
+			sk->sk_state_change(sk);
+			sk_wake_async(sk, 0, POLL_OUT);
+		}
+
+		if (sk->sk_write_pending || tp->defer_accept || tp->ack.pingpong) {
+			/* Save one ACK. Data will be ready after
+			 * several ticks, if write_pending is set.
+			 *
+			 * It may be deleted, but with this feature tcpdumps
+			 * look so _wonderfully_ clever, that I was not able
+			 * to stand against the temptation 8)     --ANK
+			 */
+			tcp_schedule_ack(tp);
+			tp->ack.lrcvtime = tcp_time_stamp;
+			tp->ack.ato	 = TCP_ATO_MIN;
+			tcp_incr_quickack(tp);
+			tcp_enter_quickack_mode(tp);
+			tcp_reset_xmit_timer(sk, TCP_TIME_DACK, TCP_DELACK_MAX);
+
+discard:
+			__kfree_skb(skb);
+			return 0;
+		} else {
+			tcp_send_ack(sk);
+		}
+		return -1;
+	}
+
+	/* No ACK in the segment */
+
+	if (th->rst) {
+		/* rfc793:
+		 * "If the RST bit is set
+		 *
+		 *      Otherwise (no ACK) drop the segment and return."
+		 */
+
+		goto discard_and_undo;
+	}
+
+	/* PAWS check. */
+	if (tp->rx_opt.ts_recent_stamp && tp->rx_opt.saw_tstamp && tcp_paws_check(&tp->rx_opt, 0))
+		goto discard_and_undo;
+
+	if (th->syn) {
+		/* We see SYN without ACK. It is attempt of
+		 * simultaneous connect with crossed SYNs.
+		 * Particularly, it can be connect to self.
+		 */
+		tcp_set_state(sk, TCP_SYN_RECV);
+
+		if (tp->rx_opt.saw_tstamp) {
+			tp->rx_opt.tstamp_ok = 1;
+			tcp_store_ts_recent(tp);
+			tp->tcp_header_len =
+				sizeof(struct tcphdr) + TCPOLEN_TSTAMP_ALIGNED;
+		} else {
+			tp->tcp_header_len = sizeof(struct tcphdr);
+		}
+
+		tp->rcv_nxt = TCP_SKB_CB(skb)->seq + 1;
+		tp->rcv_wup = TCP_SKB_CB(skb)->seq + 1;
+
+		/* RFC1323: The window in SYN & SYN/ACK segments is
+		 * never scaled.
+		 */
+		tp->snd_wnd    = ntohs(th->window);
+		tp->snd_wl1    = TCP_SKB_CB(skb)->seq;
+		tp->max_window = tp->snd_wnd;
+
+		TCP_ECN_rcv_syn(tp, th);
+		if (tp->ecn_flags&TCP_ECN_OK)
+			sk->sk_no_largesend = 1;
+
+		tcp_sync_mss(sk, tp->pmtu_cookie);
+		tcp_initialize_rcv_mss(sk);
+
+
+		tcp_send_synack(sk);
+#if 0
+		/* Note, we could accept data and URG from this segment.
+		 * There are no obstacles to make this.
+		 *
+		 * However, if we ignore data in ACKless segments sometimes,
+		 * we have no reasons to accept it sometimes.
+		 * Also, seems the code doing it in step6 of tcp_rcv_state_process
+		 * is not flawless. So, discard packet for sanity.
+		 * Uncomment this return to process the data.
+		 */
+		return -1;
+#else
+		goto discard;
+#endif
+	}
+	/* "fifth, if neither of the SYN or RST bits is set then
+	 * drop the segment and return."
+	 */
+
+discard_and_undo:
+	tcp_clear_options(&tp->rx_opt);
+	tp->rx_opt.mss_clamp = saved_clamp;
+	goto discard;
+
+reset_and_undo:
+	tcp_clear_options(&tp->rx_opt);
+	tp->rx_opt.mss_clamp = saved_clamp;
+	return 1;
+}
+
+
+/*
+ *	This function implements the receiving procedure of RFC 793 for
+ *	all states except ESTABLISHED and TIME_WAIT. 
+ *	It's called from both tcp_v4_rcv and tcp_v6_rcv and should be
+ *	address independent.
+ */
+	
+int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb,
+			  struct tcphdr *th, unsigned len)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	int queued = 0;
+
+	tp->rx_opt.saw_tstamp = 0;
+
+	switch (sk->sk_state) {
+	case TCP_CLOSE:
+		goto discard;
+
+	case TCP_LISTEN:
+		if(th->ack)
+			return 1;
+
+		if(th->rst)
+			goto discard;
+
+		if(th->syn) {
+			if(tp->af_specific->conn_request(sk, skb) < 0)
+				return 1;
+
+			init_westwood(sk);
+			init_bictcp(tp);
+
+			/* Now we have several options: In theory there is 
+			 * nothing else in the frame. KA9Q has an option to 
+			 * send data with the syn, BSD accepts data with the
+			 * syn up to the [to be] advertised window and 
+			 * Solaris 2.1 gives you a protocol error. For now 
+			 * we just ignore it, that fits the spec precisely 
+			 * and avoids incompatibilities. It would be nice in
+			 * future to drop through and process the data.
+			 *
+			 * Now that TTCP is starting to be used we ought to 
+			 * queue this data.
+			 * But, this leaves one open to an easy denial of
+		 	 * service attack, and SYN cookies can't defend
+			 * against this problem. So, we drop the data
+			 * in the interest of security over speed.
+			 */
+			goto discard;
+		}
+		goto discard;
+
+	case TCP_SYN_SENT:
+		init_westwood(sk);
+		init_bictcp(tp);
+
+		queued = tcp_rcv_synsent_state_process(sk, skb, th, len);
+		if (queued >= 0)
+			return queued;
+
+		/* Do step6 onward by hand. */
+		tcp_urg(sk, skb, th);
+		__kfree_skb(skb);
+		tcp_data_snd_check(sk);
+		return 0;
+	}
+
+	if (tcp_fast_parse_options(skb, th, tp) && tp->rx_opt.saw_tstamp &&
+	    tcp_paws_discard(tp, skb)) {
+		if (!th->rst) {
+			NET_INC_STATS_BH(LINUX_MIB_PAWSESTABREJECTED);
+			tcp_send_dupack(sk, skb);
+			goto discard;
+		}
+		/* Reset is accepted even if it did not pass PAWS. */
+	}
+
+	/* step 1: check sequence number */
+	if (!tcp_sequence(tp, TCP_SKB_CB(skb)->seq, TCP_SKB_CB(skb)->end_seq)) {
+		if (!th->rst)
+			tcp_send_dupack(sk, skb);
+		goto discard;
+	}
+
+	/* step 2: check RST bit */
+	if(th->rst) {
+		tcp_reset(sk);
+		goto discard;
+	}
+
+	tcp_replace_ts_recent(tp, TCP_SKB_CB(skb)->seq);
+
+	/* step 3: check security and precedence [ignored] */
+
+	/*	step 4:
+	 *
+	 *	Check for a SYN in window.
+	 */
+	if (th->syn && !before(TCP_SKB_CB(skb)->seq, tp->rcv_nxt)) {
+		NET_INC_STATS_BH(LINUX_MIB_TCPABORTONSYN);
+		tcp_reset(sk);
+		return 1;
+	}
+
+	/* step 5: check the ACK field */
+	if (th->ack) {
+		int acceptable = tcp_ack(sk, skb, FLAG_SLOWPATH);
+
+		switch(sk->sk_state) {
+		case TCP_SYN_RECV:
+			if (acceptable) {
+				tp->copied_seq = tp->rcv_nxt;
+				mb();
+				tcp_set_state(sk, TCP_ESTABLISHED);
+				sk->sk_state_change(sk);
+
+				/* Note, that this wakeup is only for marginal
+				 * crossed SYN case. Passively open sockets
+				 * are not waked up, because sk->sk_sleep ==
+				 * NULL and sk->sk_socket == NULL.
+				 */
+				if (sk->sk_socket) {
+					sk_wake_async(sk,0,POLL_OUT);
+				}
+
+				tp->snd_una = TCP_SKB_CB(skb)->ack_seq;
+				tp->snd_wnd = ntohs(th->window) <<
+					      tp->rx_opt.snd_wscale;
+				tcp_init_wl(tp, TCP_SKB_CB(skb)->ack_seq,
+					    TCP_SKB_CB(skb)->seq);
+
+				/* tcp_ack considers this ACK as duplicate
+				 * and does not calculate rtt.
+				 * Fix it at least with timestamps.
+				 */
+				if (tp->rx_opt.saw_tstamp && tp->rx_opt.rcv_tsecr &&
+				    !tp->srtt)
+					tcp_ack_saw_tstamp(tp, 0);
+
+				if (tp->rx_opt.tstamp_ok)
+					tp->advmss -= TCPOLEN_TSTAMP_ALIGNED;
+
+				/* Make sure socket is routed, for
+				 * correct metrics.
+				 */
+				tp->af_specific->rebuild_header(sk);
+
+				tcp_init_metrics(sk);
+
+				/* Prevent spurious tcp_cwnd_restart() on
+				 * first data packet.
+				 */
+				tp->lsndtime = tcp_time_stamp;
+
+				tcp_initialize_rcv_mss(sk);
+				tcp_init_buffer_space(sk);
+				tcp_fast_path_on(tp);
+			} else {
+				return 1;
+			}
+			break;
+
+		case TCP_FIN_WAIT1:
+			if (tp->snd_una == tp->write_seq) {
+				tcp_set_state(sk, TCP_FIN_WAIT2);
+				sk->sk_shutdown |= SEND_SHUTDOWN;
+				dst_confirm(sk->sk_dst_cache);
+
+				if (!sock_flag(sk, SOCK_DEAD))
+					/* Wake up lingering close() */
+					sk->sk_state_change(sk);
+				else {
+					int tmo;
+
+					if (tp->linger2 < 0 ||
+					    (TCP_SKB_CB(skb)->end_seq != TCP_SKB_CB(skb)->seq &&
+					     after(TCP_SKB_CB(skb)->end_seq - th->fin, tp->rcv_nxt))) {
+						tcp_done(sk);
+						NET_INC_STATS_BH(LINUX_MIB_TCPABORTONDATA);
+						return 1;
+					}
+
+					tmo = tcp_fin_time(tp);
+					if (tmo > TCP_TIMEWAIT_LEN) {
+						tcp_reset_keepalive_timer(sk, tmo - TCP_TIMEWAIT_LEN);
+					} else if (th->fin || sock_owned_by_user(sk)) {
+						/* Bad case. We could lose such FIN otherwise.
+						 * It is not a big problem, but it looks confusing
+						 * and not so rare event. We still can lose it now,
+						 * if it spins in bh_lock_sock(), but it is really
+						 * marginal case.
+						 */
+						tcp_reset_keepalive_timer(sk, tmo);
+					} else {
+						tcp_time_wait(sk, TCP_FIN_WAIT2, tmo);
+						goto discard;
+					}
+				}
+			}
+			break;
+
+		case TCP_CLOSING:
+			if (tp->snd_una == tp->write_seq) {
+				tcp_time_wait(sk, TCP_TIME_WAIT, 0);
+				goto discard;
+			}
+			break;
+
+		case TCP_LAST_ACK:
+			if (tp->snd_una == tp->write_seq) {
+				tcp_update_metrics(sk);
+				tcp_done(sk);
+				goto discard;
+			}
+			break;
+		}
+	} else
+		goto discard;
+
+	/* step 6: check the URG bit */
+	tcp_urg(sk, skb, th);
+
+	/* step 7: process the segment text */
+	switch (sk->sk_state) {
+	case TCP_CLOSE_WAIT:
+	case TCP_CLOSING:
+	case TCP_LAST_ACK:
+		if (!before(TCP_SKB_CB(skb)->seq, tp->rcv_nxt))
+			break;
+	case TCP_FIN_WAIT1:
+	case TCP_FIN_WAIT2:
+		/* RFC 793 says to queue data in these states,
+		 * RFC 1122 says we MUST send a reset. 
+		 * BSD 4.4 also does reset.
+		 */
+		if (sk->sk_shutdown & RCV_SHUTDOWN) {
+			if (TCP_SKB_CB(skb)->end_seq != TCP_SKB_CB(skb)->seq &&
+			    after(TCP_SKB_CB(skb)->end_seq - th->fin, tp->rcv_nxt)) {
+				NET_INC_STATS_BH(LINUX_MIB_TCPABORTONDATA);
+				tcp_reset(sk);
+				return 1;
+			}
+		}
+		/* Fall through */
+	case TCP_ESTABLISHED: 
+		tcp_data_queue(sk, skb);
+		queued = 1;
+		break;
+	}
+
+	/* tcp_data could move socket to TIME-WAIT */
+	if (sk->sk_state != TCP_CLOSE) {
+		tcp_data_snd_check(sk);
+		tcp_ack_snd_check(sk);
+	}
+
+	if (!queued) { 
+discard:
+		__kfree_skb(skb);
+	}
+	return 0;
+}
+
+EXPORT_SYMBOL(sysctl_tcp_ecn);
+EXPORT_SYMBOL(sysctl_tcp_reordering);
+EXPORT_SYMBOL(tcp_parse_options);
+EXPORT_SYMBOL(tcp_rcv_established);
+EXPORT_SYMBOL(tcp_rcv_state_process);
