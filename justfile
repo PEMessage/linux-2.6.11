@@ -18,15 +18,9 @@ build:
 
     # Enable required config options
     echo "=== Enabling required configs ==="
-    sed -i 's/# CONFIG_SERIAL_8250_CONSOLE is not set/CONFIG_SERIAL_8250_CONSOLE=y/' build/.config
-    sed -i 's/# CONFIG_BLK_DEV_RAM is not set/CONFIG_BLK_DEV_RAM=y/' build/.config
-    sed -i 's/# CONFIG_DEBUG_KERNEL is not set/CONFIG_DEBUG_KERNEL=y/' build/.config
-    if ! grep -q "^CONFIG_BLK_DEV_INITRD=y" build/.config; then
-        echo "CONFIG_BLK_DEV_INITRD=y" >> build/.config
-    fi
-    if ! grep -q "^CONFIG_DEBUG_INFO=y" build/.config; then
-        echo "CONFIG_DEBUG_INFO=y" >> build/.config
-    fi
+    misc/kconfig-enable build/.config \
+        CONFIG_SERIAL_8250_CONSOLE CONFIG_BLK_DEV_RAM CONFIG_DEBUG_KERNEL \
+        CONFIG_BLK_DEV_INITRD CONFIG_DEBUG_INFO
 
     # oldconfig to resolve new dependencies
     echo "=== Running oldconfig ==="
@@ -49,11 +43,11 @@ cpio:
 
     # Compile init with docker gcc-3.3.5 (for 2.6 kernel ABI compat)
     echo "=== Compiling init ==="
-    docker run {{docker_flags}} {{docker_image}} bash -c 'gcc -static -o scripts/initramfs/init scripts/initramfs/init.c -Os'
+    docker run {{docker_flags}} {{docker_image}} bash -c 'gcc -static -o misc/initramfs/init misc/initramfs/init.c -Os'
 
     # Create cpio archive
     echo "=== Creating initramfs ==="
-    build/gen_init_cpio scripts/initramfs/initramfs.txt | gzip > build/initramfs.cpio.gz
+    build/gen_init_cpio misc/initramfs/initramfs.txt | gzip > build/initramfs.cpio.gz
 
 # Run kernel in QEMU
 run: build cpio

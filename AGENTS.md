@@ -2,7 +2,7 @@
 
 ## Build
 
-All builds run inside a Docker container (Debian Sarge, gcc-3.3.5) via `debian-sarge-builder-i386.sh`.
+All builds run inside a Docker container (Debian Sarge, gcc-3.3.5) via `misc/debian-sarge-builder-i386.sh`.
 
 ```bash
 just build   # defconfig + required Kconfig + make
@@ -15,7 +15,7 @@ Output: `build/arch/i386/boot/bzImage`
 ## compile_commands.json
 
 ```bash
-python3 gen_compile_commands.py -d build -o compile_commands.json
+python3 misc/gen_compile_commands.py -d build -o compile_commands.json
 ```
 
 Uses official kernel script. `.clangd` strips incompatible GCC flags.
@@ -27,7 +27,7 @@ just run      # boot in QEMU, serial console
 just debug    # QEMU with gdbserver :1234, breaks at start_kernel
 ```
 
-Initramfs is built from `scripts/initramfs/init.c` (minimal static init, compiled in Docker for 2.6 ABI compat).
+Initramfs is built from `misc/initramfs/init.c` (minimal static init, compiled in Docker for 2.6 ABI compat).
 
 ## Key constraints
 

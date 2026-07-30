@@ -1,0 +1,20 @@
+#!/bin/bash
+# Enable Kconfig options in an existing .config file.
+# Handles three states: already set (=y/m), commented out (is not set), missing.
+#
+# Usage: misc/kconfig-enable build/.config CONFIG_SERIAL_8250_CONSOLE CONFIG_BLK_DEV_RAM ...
+
+set -e
+
+cfg="$1"
+shift
+
+for opt in "$@"; do
+    if grep -q "^${opt}=" "$cfg" 2>/dev/null; then
+        sed -i "s/^${opt}=.*/${opt}=y/" "$cfg"
+    elif grep -q "^# ${opt} is not set" "$cfg" 2>/dev/null; then
+        sed -i "s/^# ${opt} is not set/${opt}=y/" "$cfg"
+    else
+        echo "${opt}=y" >> "$cfg"
+    fi
+done
