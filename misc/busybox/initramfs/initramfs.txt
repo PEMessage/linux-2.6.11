@@ -1,0 +1,31 @@
+dir /bin 755 0 0
+dir /dev 755 0 0
+dir /proc 755 0 0
+dir /sys 755 0 0
+dir /etc 755 0 0
+nod /dev/console 644 0 0 c 5 1
+nod /dev/ttyS0 644 0 0 c 4 64
+nod /dev/null 644 0 0 c 1 3
+file /bin/busybox ./misc/busybox/src/busybox 755 0 0
+slink /bin/sh /bin/busybox 777 0 0
+slink /bin/ls /bin/busybox 777 0 0
+slink /bin/cat /bin/busybox 777 0 0
+slink /bin/echo /bin/busybox 777 0 0
+slink /bin/mount /bin/busybox 777 0 0
+slink /bin/umount /bin/busybox 777 0 0
+slink /bin/ps /bin/busybox 777 0 0
+slink /bin/kill /bin/busybox 777 0 0
+slink /bin/grep /bin/busybox 777 0 0
+slink /bin/sed /bin/busybox 777 0 0
+slink /bin/mkdir /bin/busybox 777 0 0
+slink /bin/rm /bin/busybox 777 0 0
+slink /bin/cp /bin/busybox 777 0 0
+slink /bin/mv /bin/busybox 777 0 0
+slink /bin/dmesg /bin/busybox 777 0 0
+slink /bin/free /bin/busybox 777 0 0
+slink /bin/df /bin/busybox 777 0 0
+slink /bin/uname /bin/busybox 777 0 0
+slink /bin/clear /bin/busybox 777 0 0
+slink /bin/id /bin/busybox 777 0 0
+slink /bin/whoami /bin/busybox 777 0 0
+file /init ./misc/busybox/initramfs/init 755 0 0
