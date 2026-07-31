@@ -1,0 +1,5 @@
+CompileFlags:
+  Remove:
+    - -mpreferred-stack-boundary=2
+    - -march=i686
+    - -isystem
