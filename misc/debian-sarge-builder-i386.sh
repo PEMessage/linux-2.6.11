@@ -47,4 +47,5 @@ set -x
 docker run --rm -it \
     -v "$PWD":"$PWD" \
     -w "$PWD" \
+    --hostname builder \
     debian-sarge-builder-i386 /bin/bash "$@"

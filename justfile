@@ -7,6 +7,7 @@ docker_flags := "--rm -i -v " + srcdir + ":" + srcdir + " -w " + srcdir
 build:
     #!/bin/bash
     set -eu
+    set -x
     cd "{{srcdir}}"
 
     # defconfig (only if .config doesn't exist)
@@ -28,7 +29,7 @@ build:
 
     # Build
     echo "=== Building kernel ==="
-    docker run {{docker_flags}} {{docker_image}} bash -c 'make ARCH=i386 O=build -j$(nproc)'
+    docker run  --hostname builder {{docker_flags}} {{docker_image}} bash -c 'make ARCH=i386 O=build -j12'
 
 # Build minimal initramfs (single C init, prints message and reboots)
 cpio-minimal:
